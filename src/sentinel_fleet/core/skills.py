@@ -18,13 +18,15 @@ class SkillVersionRecord(BaseModel):
 class AgentSkill(BaseModel):
     skill_id: str
     name: str
-    pillar: str  # control, memory, uas, domain
+    pillar: str  # control, memory, uas, domain, dev, assist, infrastructure, production, utilities
     version: str = "1.0.0"
     description: str
     required_tools: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     schema_version: str = "component-v1"
     status: str = "active"  # active, draft, deprecated
+    fork_of: Optional[str] = None
+    language: str = "en"
     # Permissions & Governance
     visibility: str = "organization"  # public | organization | restricted
     execution_gate: str = "auto"  # auto | ask_permission | locked
@@ -46,6 +48,7 @@ class SkillRegistry:
 
     def _seed_default_skills(self):
         seeds = [
+            # 1. Domain: Tax & Vision
             AgentSkill(
                 skill_id="skill:tax-compliance-v1",
                 name="§ 14 UStG Tax Compliance Auditor",
@@ -88,6 +91,7 @@ class SkillRegistry:
                 visibility="restricted",
                 execution_gate="ask_permission"
             ),
+            # 2. Control & Security
             AgentSkill(
                 skill_id="skill:model-armor-sentry",
                 name="Zero-Trust Model Armor Guardrail",
@@ -99,6 +103,7 @@ class SkillRegistry:
                 visibility="organization",
                 execution_gate="auto"
             ),
+            # 3. Memory & UAS
             AgentSkill(
                 skill_id="skill:memory-bank-connector",
                 name="USMC Memory Bank & Context Injector",
@@ -120,6 +125,84 @@ class SkillRegistry:
                 tags=["taskmaster", "lifecycle", "state", "triage"],
                 visibility="organization",
                 execution_gate="auto"
+            ),
+            # 4. English Branded Fleet Forks (.SKILLS Package)
+            AgentSkill(
+                skill_id="skill:google-web-reading",
+                name="Google Web Reading & Multimodal DOM Digester",
+                pillar="web",
+                version="1.0.0",
+                fork_of="skills/web/web-reading",
+                language="en",
+                description="Autonomous web extraction, DOM tree sanitization, and multimodal visual document digestion powered by Gemini 3.5 Flash.",
+                required_tools=["extract_invoice_multimodal", "query_memory_bank"],
+                tags=["web", "dom", "multimodal", "scraping"]
+            ),
+            AgentSkill(
+                skill_id="skill:fleet-dossier-briefing",
+                name="Fleet Dossier & Executive Briefing",
+                pillar="assist",
+                version="1.0.0",
+                fork_of="skills/assist/dossier-briefing",
+                language="en",
+                description="Synthesizes multi-source financial, operational, and compliance telemetry into concise, decision-ready executive briefings.",
+                required_tools=["query_memory_bank", "audit_telemetry"],
+                tags=["briefing", "executive", "synthesis", "assist"]
+            ),
+            AgentSkill(
+                skill_id="skill:canva-ui-stylist",
+                name="Canva UI Stylist & Enterprise Design Token Engine",
+                pillar="dev",
+                version="1.0.0",
+                fork_of="skills/dev/figma",
+                language="en",
+                description="Designs ultra-crisp, Canva/Stripe-inspired enterprise user interfaces, design tokens, light/dark themes, and accessible component libraries.",
+                required_tools=["execute_calculation"],
+                tags=["design", "ui", "ux", "css", "canva", "styling"]
+            ),
+            AgentSkill(
+                skill_id="skill:cloudrun-swarm-conductor",
+                name="Google Cloud Run Multi-Agent Swarm Conductor",
+                pillar="dev",
+                version="1.0.0",
+                fork_of="skills/dev/swarm-operations",
+                language="en",
+                description="Orchestrates serverless multi-agent swarms, parallel map-reduce pipelines, and consensus rounds across Google Cloud Run workers.",
+                required_tools=["dispatch_swarm", "assign_task"],
+                tags=["swarm", "orchestration", "cloudrun", "parallel"]
+            ),
+            AgentSkill(
+                skill_id="skill:sentinel-persona-router",
+                name="Sentinel Persona Router & Intent Dispatcher",
+                pillar="infrastructure",
+                version="1.0.0",
+                fork_of="skills/infrastructure/semantic-persona-routing",
+                language="en",
+                description="Dynamic agent persona matching, tool scoping, and intent classification using the clutch routing algorithm.",
+                required_tools=["query_memory_bank"],
+                tags=["routing", "persona", "clutch", "infrastructure"]
+            ),
+            AgentSkill(
+                skill_id="skill:google-cloud-hackathon-operator",
+                name="Google Cloud Hackathon Submission Operator",
+                pillar="production",
+                version="1.0.0",
+                fork_of="skills/production/hackathon-operator",
+                language="en",
+                description="Drives the 10-phase hackathon submission lifecycle, DevPost compliance checks, architecture blueprints, and GCP demonstration proof.",
+                required_tools=["verify_receipts"],
+                tags=["hackathon", "devpost", "production", "lifecycle"]
+            ),
+            AgentSkill(
+                skill_id="skill:ustg-law-compliance-checker",
+                name="§ 14 UStG Tax Compliance Auditor & Legal Sentry",
+                pillar="utilities",
+                version="1.0.0",
+                fork_of="skills/utilities/law-checker",
+                language="en",
+                description="Deterministic auditor for German § 14 UStG tax regulations, VAT ID format checks, and mathematical invoice consistency.",
+                required_tools=["validate_tax_compliance"],
+                tags=["tax", "ustg", "legal", "compliance", "utilities"]
             )
         ]
         for s in seeds:
