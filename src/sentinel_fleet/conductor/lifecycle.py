@@ -15,35 +15,63 @@ class LifecycleManager:
                 agent_id="agent:orchestrator",
                 name="Fleet Conductor",
                 role=AgentRole.ORCHESTRATOR,
-                description="Central coordinator that decomposes tasks and delegates to sub-agents.",
+                description="Zentraler Koordinator für Task-Dekomposition und Schwarm-Delegation.",
                 allowed_tools={"query_memory_bank", "create_task", "assign_task", "dispatch_swarm"}
+            ),
+            AgentIdentity(
+                agent_id="agent:task-writer",
+                name="TaskWriter",
+                role=AgentRole.ORCHESTRATOR,
+                description="Spezifiziert und strukturiert unklare Aufträge in atomare, idempotente Tasks.",
+                allowed_tools={"query_memory_bank", "create_task"}
+            ),
+            AgentIdentity(
+                agent_id="agent:task-maintainer",
+                name="TaskMaintainer",
+                role=AgentRole.ORCHESTRATOR,
+                description="Überwacht den Lebenszyklus, beseitigt Blockaden und bereinigt verwaiste Tasks.",
+                allowed_tools={"query_memory_bank", "update_task_state", "audit_task_health"}
+            ),
+            AgentIdentity(
+                agent_id="agent:task-solver",
+                name="TaskSolver",
+                role=AgentRole.ORCHESTRATOR,
+                description="Führt komplexe Berechnungen, RAG-Recherchen und Code-Synthesen autonom aus.",
+                allowed_tools={"query_memory_bank", "execute_calculation", "solve_task"}
+            ),
+            AgentIdentity(
+                agent_id="agent:system-auditor",
+                name="SystemAuditor",
+                role=AgentRole.SECURITY_SENTRY,
+                description="Prüft Richtlinien, validiert Audit-Receipts und überwacht OpenTelemetry Spans.",
+                allowed_tools={"query_memory_bank", "verify_receipts", "audit_telemetry"}
             ),
             AgentIdentity(
                 agent_id="agent:invoice-extractor",
                 name="Vision Extractor",
                 role=AgentRole.FINANCE_TASKMASTER,
-                description="Multimodal vision agent that extracts structured line items from PDFs/images.",
+                description="Multimodaler Gemini 3.5 Flash Vision Agent für Beleg- und Tabellenextraktion.",
                 allowed_tools={"extract_invoice_multimodal", "query_memory_bank"}
             ),
             AgentIdentity(
                 agent_id="agent:compliance-auditor",
                 name="Tax Compliance Sentinel",
                 role=AgentRole.COMPLIANCE_AUDITOR,
-                description="Audits invoice data against § 14 UStG and accounting standards.",
+                description="Auditiert Belege gegen § 14 UStG Pflichtfelder und GoBD-Richtlinien.",
                 allowed_tools={"validate_tax_compliance", "query_memory_bank", "flag_compliance_error"}
             ),
             AgentIdentity(
                 agent_id="agent:ledger-reconciler",
                 name="Ledger Reconciler",
                 role=AgentRole.LEDGER_RECONCILER,
-                description="Books verified records into Firestore and generates exports.",
+                description="Verbucht validierte Rechnungen in Firestore und generiert Buchungssätze.",
                 allowed_tools={"store_memory_bank", "create_reconciliation_draft", "execute_bank_transfer"}
             ),
             AgentIdentity(
                 agent_id="agent:vendor-dispute",
                 name="Dispute Communicator",
                 role=AgentRole.VENDOR_COMMUNICATOR,
-                description="Self-healing communication agent that drafts resolution emails to vendors.",
+                description="Generiert autonome, rechtssichere Korrektur-Mails an Lieferanten bei Fehlern.",
                 allowed_tools={"draft_vendor_dispute_email", "send_external_email", "query_memory_bank"}
             )
         ]
@@ -60,8 +88,9 @@ class LifecycleManager:
         agent = self.get_agent(agent_id)
         if agent:
             agent.status = status
-            if reason:
-                agent.quarantine_reason = reason
+            agent.quarantine_reason = reason if status == AgentStatus.QUARANTINED else ""
+            if status == AgentStatus.ACTIVE or status == AgentStatus.IDLE:
+                agent.consecutive_steps = 0
 
 
 lifecycle_manager = LifecycleManager()

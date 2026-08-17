@@ -154,6 +154,40 @@ header {
   box-shadow: 0 0 12px var(--accent-glow);
 }
 
+/* Sub-Navigation Tabs Bar */
+.subnav-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--zone-edge);
+  padding-bottom: 12px;
+}
+
+.subnav-btn {
+  background: var(--chip);
+  border: 1px solid var(--zone-edge);
+  color: var(--ink-dim);
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.subnav-btn:hover {
+  color: var(--ink);
+  border-color: var(--panel-edge);
+}
+
+.subnav-btn.active {
+  background: var(--zone);
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
 /* Container */
 .container {
   max-width: 1440px;
@@ -320,7 +354,7 @@ header {
 }
 
 /* List Items */
-.agent-item, .ticket-item, .invoice-item, .span-item {
+.agent-item, .ticket-item, .invoice-item, .span-item, .memory-item, .prompt-item, .skill-item {
   background: var(--zone);
   border: 1px solid var(--zone-edge);
   border-radius: var(--radius-sm);
@@ -329,7 +363,7 @@ header {
   transition: all 0.15s ease;
 }
 
-.agent-item:hover, .ticket-item:hover, .invoice-item:hover {
+.agent-item:hover, .ticket-item:hover, .invoice-item:hover, .memory-item:hover, .skill-item:hover {
   border-color: var(--panel-edge);
 }
 
@@ -371,17 +405,42 @@ header {
   line-height: 1.4;
 }
 
+/* Data Table */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.data-table th, .data-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--zone-edge);
+  font-size: 12.5px;
+}
+
+.data-table th {
+  color: var(--ink-faint);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  background: var(--chip);
+}
+
 /* Buttons */
 .btn {
   background: var(--chip);
   border: 1px solid var(--zone-edge);
   color: var(--ink);
-  padding: 6px 14px;
+  padding: 7px 14px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 12.5px;
   font-weight: 600;
   transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .btn:hover {
@@ -389,8 +448,81 @@ header {
   color: var(--accent);
 }
 
+.btn-primary {
+  background: var(--google-blue);
+  color: #fff;
+  border-color: var(--google-blue);
+}
+
+.btn-primary:hover {
+  background: var(--accent);
+  color: #090d16;
+  border-color: var(--accent);
+}
+
 .btn-sm { padding: 4px 10px; font-size: 11px; }
 .btn-approve { background: var(--ok); color: #090d16; border-color: var(--ok); font-weight: 700; }
 .btn-approve:hover { filter: brightness(1.1); color: #090d16; }
 .btn-reject { background: rgba(239, 68, 68, 0.2); color: var(--danger); border-color: var(--danger); }
 .btn-reject:hover { background: var(--danger); color: #fff; }
+
+/* Modals */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.modal-card {
+  background: var(--board);
+  border: 1px solid var(--zone-edge);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 520px;
+  padding: 24px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--zone-edge);
+  padding-bottom: 10px;
+}
+
+.modal-header h3 {
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.form-group {
+  margin-bottom: 14px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-dim);
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+
+.text-input, .select-input, .textarea-input {
+  width: 100%;
+  background: var(--chip);
+  border: 1px solid var(--zone-edge);
+  color: var(--ink);
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.textarea-input { min-height: 80px; resize: vertical; }

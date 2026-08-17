@@ -16,7 +16,7 @@
       </div>
     </div>
     <div class="nav-links">
-      <a href="/" class="nav-link active">🎛️ Operator Dashboard</a>
+      <a href="/" class="nav-link active">🎛️ Operator Control Center</a>
       <a href="/schaltplan" class="nav-link">⌁ Architecture &amp; Circuit Blueprint</a>
       <button class="btn btn-sm" onclick="toggleTheme()">🌓 Theme</button>
     </div>
@@ -26,8 +26,8 @@
     <!-- Hero Status Banner -->
     <div class="hero-banner">
       <div class="hero-text">
-        <h2>Enterprise Agent Governance &amp; Autonomous Taskmaster</h2>
-        <p>Zero-Trust Model Armor · Multi-Agent Swarm Conductor · USMC Memory Bank · § 14 UStG Self-Healing Taskmaster</p>
+        <h2>Enterprise Fleet Control Center &amp; OmniLedger Taskmaster</h2>
+        <p>Zero-Trust Model Armor · Multi-Agent Swarm · USMC Memory Bank · § 14 UStG Self-Healing Taskmaster</p>
       </div>
       <div class="hero-status">
         <div class="stat-chip">
@@ -39,162 +39,529 @@
           <div class="lbl">Pending Approvals</div>
         </div>
         <div class="stat-chip">
+          <div class="val">{{ tasks|length }}</div>
+          <div class="lbl">Active Tasks</div>
+        </div>
+        <div class="stat-chip">
           <div class="val">{{ booked_invoices|length }}</div>
           <div class="lbl">Booked Invoices</div>
         </div>
       </div>
     </div>
 
-    <!-- Interactive Live Showcase Trigger Panel -->
-    <div class="showcase-box">
-      <div class="showcase-header">
-        <h3>⚡ OmniLedger Live Demo Trigger (Taskmaster &amp; Model Armor)</h3>
-        <div id="process-status"></div>
+    <!-- Sub-Navigation Tabs Bar -->
+    <div class="subnav-bar">
+      <button id="btn-tab-overview" class="subnav-btn active" onclick="switchTab('tab-overview')">🎛️ 4-Pillars Overview</button>
+      <button id="btn-tab-fleet" class="subnav-btn" onclick="switchTab('tab-fleet')">👥 Fleet &amp; Tasks ({{ agents|length }})</button>
+      <button id="btn-tab-tickets" class="subnav-btn" onclick="switchTab('tab-tickets')">📥 Tickets &amp; Approvals ({{ pending_tickets|length }})</button>
+      <button id="btn-tab-memory" class="subnav-btn" onclick="switchTab('tab-memory')">🧠 Memory Bank ({{ memories|length }})</button>
+      <button id="btn-tab-prompts" class="subnav-btn" onclick="switchTab('tab-prompts')">📝 Prompts &amp; Skills ({{ skills|length }})</button>
+      <button id="btn-tab-telemetry" class="subnav-btn" onclick="switchTab('tab-telemetry')">📊 OpenTelemetry Spans ({{ spans|length }})</button>
+    </div>
+
+    <!-- TAB 1: 4-PILLARS OVERVIEW -->
+    <div id="tab-overview" class="tab-pane">
+      <!-- Interactive Live Showcase Trigger Panel -->
+      <div class="showcase-box">
+        <div class="showcase-header">
+          <h3>⚡ OmniLedger Live Demo Trigger (Taskmaster &amp; Model Armor)</h3>
+          <div id="process-status"></div>
+        </div>
+        <p class="item-desc">
+          Wähle einen Testfall, um die synchrone und asynchrone Multi-Agenten-Pipeline auf Google Cloud Run auszuführen:
+        </p>
+        <div class="trigger-grid">
+          <div class="trigger-btn btn-valid" onclick="processInvoicePreset('valid')">
+            <b>📄 1. Saubere Rechnung</b>
+            <span>Auto-Booking im Firestore Ledger &amp; Memory Bank</span>
+          </div>
+          <div class="trigger-btn btn-vat" onclick="processInvoicePreset('missing_vat')">
+            <b>⚠️ 2. Fehlende USt-IdNr</b>
+            <span>§ 14 UStG Dispute Loop &amp; Human-in-the-Loop Ticket</span>
+          </div>
+          <div class="trigger-btn btn-math" onclick="processInvoicePreset('math_error')">
+            <b>🧮 3. Rechenfehler Netto/Brutto</b>
+            <span>Inkonsistenz-Block &amp; Korrekturschreiben</span>
+          </div>
+          <div class="trigger-btn btn-attack" onclick="processInvoicePreset('injection_attack')">
+            <b>🛡️ 4. Prompt Injection Attack</b>
+            <span>Model Armor Interception &amp; Agenten-Quarantäne</span>
+          </div>
+        </div>
       </div>
-      <p class="item-desc">
-        Wähle einen Testfall, um die synchrone und asynchrone Multi-Agenten-Pipeline auf Google Cloud Run auszuführen:
-      </p>
-      <div class="trigger-grid">
-        <div class="trigger-btn btn-valid" onclick="processInvoicePreset('valid')">
-          <b>📄 1. Saubere Rechnung</b>
-          <span>Auto-Booking im Firestore Ledger &amp; Memory Bank</span>
+
+      <!-- 4 Pillars Architecture Layout -->
+      <div class="pillars-grid">
+        
+        <!-- PILLAR 1: CONTROL -->
+        <div class="card">
+          <div class="card-header">
+            <h3>🏛️ Pillar Control: Fleet &amp; Armor</h3>
+            <span class="badge-status badge-info">{{ agents|length }} Active</span>
+          </div>
+          <div class="card-body">
+            {% for agent in agents[:4] %}
+            <div class="agent-item {% if agent.status.value == 'quarantined' %}quarantined{% endif %}">
+              <div class="item-top">
+                <span class="item-title">{{ agent.name }}</span>
+                <span class="badge-status {% if agent.status.value == 'quarantined' %}badge-danger{% elif agent.status.value == 'active' %}badge-ok{% elif agent.status.value == 'waiting_approval' %}badge-warn{% else %}badge-info{% endif %}">
+                  {{ agent.status.value|upper }}
+                </span>
+              </div>
+              <div class="item-desc">{{ agent.description }}</div>
+              {% if agent.status.value == 'quarantined' %}
+              <div style="margin-top: 8px;">
+                <button class="btn btn-sm btn-approve" onclick="releaseQuarantine('{{ agent.agent_id }}')">🔓 Quarantäne aufheben</button>
+              </div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
         </div>
-        <div class="trigger-btn btn-vat" onclick="processInvoicePreset('missing_vat')">
-          <b>⚠️ 2. Fehlende USt-IdNr</b>
-          <span>§ 14 UStG Dispute Loop &amp; Human-in-the-Loop Ticket</span>
+
+        <!-- PILLAR 2: UAS -->
+        <div class="card">
+          <div class="card-header">
+            <h3>📥 Pillar UAS: Ticket-Master (HITL)</h3>
+            <span class="badge-status {% if pending_tickets %}badge-warn{% else %}badge-ok{% endif %}">
+              {{ pending_tickets|length }} Pending
+            </span>
+          </div>
+          <div class="card-body">
+            {% if not tickets %}
+            <p class="item-desc">Keine Tickets in der Warteschlange. Alle Aktionen genehmigt.</p>
+            {% endif %}
+            {% for ticket in tickets[:3] %}
+            <div class="ticket-item">
+              <div class="item-top">
+                <span class="item-title">{{ ticket.title }}</span>
+                <span class="badge-status {% if ticket.status.value == 'approved' %}badge-ok{% elif ticket.status.value == 'rejected' %}badge-danger{% else %}badge-warn{% endif %}">
+                  {{ ticket.status.value|upper }}
+                </span>
+              </div>
+              <div class="item-desc" style="margin-bottom: 8px;">{{ ticket.description }}</div>
+              {% if ticket.status.value == 'pending_approval' %}
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-sm btn-approve" onclick="approveTicket('{{ ticket.ticket_id }}')">✓ Freigeben</button>
+                <button class="btn btn-sm btn-reject" onclick="rejectTicket('{{ ticket.ticket_id }}')">✕ Ablehnen</button>
+              </div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
         </div>
-        <div class="trigger-btn btn-math" onclick="processInvoicePreset('math_error')">
-          <b>🧮 3. Rechenfehler Netto/Brutto</b>
-          <span>Inkonsistenz-Block &amp; Korrekturschreiben</span>
+
+        <!-- PILLAR 3: DOMAIN -->
+        <div class="card">
+          <div class="card-header">
+            <h3>⚡ Pillar Domain: OmniLedger Taskmaster</h3>
+            <span class="badge-status badge-ok">{{ invoices|length }} Processed</span>
+          </div>
+          <div class="card-body">
+            {% if not invoices %}
+            <p class="item-desc">Noch keine Belege verarbeitet. Klicke oben auf einen Showcase-Button.</p>
+            {% endif %}
+            {% for inv in invoices[:3] %}
+            <div class="invoice-item">
+              <div class="item-top">
+                <span class="item-title">{{ inv.vendor_name }} ({{ inv.invoice_number }})</span>
+                <span class="badge-status {% if inv.status.value == 'booked' %}badge-ok{% elif inv.status.value == 'disputed' %}badge-warn{% else %}badge-info{% endif %}">
+                  {{ inv.status.value|upper }}
+                </span>
+              </div>
+              <div class="item-desc">
+                Betrag: <b>{{ "%.2f"|format(inv.gross_amount) }} {{ inv.currency }}</b> (Netto {{ "%.2f"|format(inv.net_amount) }} + {{ "%.1f"|format(inv.tax_rate) }}% MwSt)
+              </div>
+              {% if inv.compliance_violations %}
+              <div style="color: var(--warn); font-size: 11px; margin-top: 6px; font-weight: 500;">
+                Abweichung: {{ inv.compliance_violations|join(', ') }}
+              </div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
         </div>
-        <div class="trigger-btn btn-attack" onclick="processInvoicePreset('injection_attack')">
-          <b>🛡️ 4. Prompt Injection Attack</b>
-          <span>Model Armor Interception &amp; Agenten-Quarantäne</span>
+
+        <!-- PILLAR 4: MEMORY -->
+        <div class="card">
+          <div class="card-header">
+            <h3>🧠 Pillar Memory: State &amp; OpenTelemetry</h3>
+            <span class="badge-status badge-info">{{ spans|length }} Spans</span>
+          </div>
+          <div class="card-body">
+            <div style="margin-bottom: 14px;">
+              <b style="font-size: 12px; color: var(--accent);">USMC Memory Bank Records:</b>
+              {% for m in memories[:3] %}
+              <div style="font-size: 11px; color: var(--ink-dim); padding: 5px 0; border-bottom: 1px dashed var(--zone-edge);">
+                • <b>[{{ m.key }}]</b>: {{ m.content }}
+              </div>
+              {% endfor %}
+            </div>
+            <div>
+              <b style="font-size: 12px; color: var(--accent);">Live OpenTelemetry Spans (Cloud Trace):</b>
+              {% for s in spans[:3] %}
+              <div class="span-item" style="padding: 6px 8px; margin-top: 6px;">
+                <div class="item-top" style="font-size: 11px;">
+                  <span><b>{{ s.name }}</b> ({{ s.agent_id }})</span>
+                  <span class="badge-status {% if s.status == 'OK' %}badge-ok{% else %}badge-danger{% endif %}">{{ s.status }}</span>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
         </div>
+
       </div>
     </div>
 
-    <!-- 4 Pillars Architecture Layout -->
-    <div class="pillars-grid">
+    <!-- TAB 2: FLEET & TASKS -->
+    <div id="tab-fleet" class="tab-pane" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3>👥 Fleet Directory &amp; Task Master Engine</h3>
+        <button class="btn btn-primary" onclick="toggleModal('modal-task')">+ Neuen Task beauftragen</button>
+      </div>
       
-      <!-- PILLAR 1: CONTROL (Fleet & Model Armor) -->
-      <div class="card">
-        <div class="card-header">
-          <h3>🏛️ Pillar Control: Fleet &amp; Model Armor</h3>
-          <span class="badge-status badge-info">{{ agents|length }} Active</span>
-        </div>
-        <div class="card-body">
-          {% for agent in agents %}
-          <div class="agent-item {% if agent.status.value == 'quarantined' %}quarantined{% endif %}">
-            <div class="item-top">
-              <span class="item-title">{{ agent.name }}</span>
-              <span class="badge-status {% if agent.status.value == 'quarantined' %}badge-danger{% elif agent.status.value == 'active' %}badge-ok{% elif agent.status.value == 'waiting_approval' %}badge-warn{% else %}badge-info{% endif %}">
-                {{ agent.status.value|upper }}
-              </span>
-            </div>
-            <div class="item-desc">{{ agent.description }}</div>
-            {% if agent.quarantine_reason %}
-            <div style="color: var(--danger); font-size: 11px; margin-top: 6px; font-weight: 600;">
-              ⚠️ {{ agent.quarantine_reason }}
-            </div>
-            {% endif %}
+      <div class="pillars-grid" style="margin-bottom: 24px;">
+        {% for agent in agents %}
+        <div class="agent-item {% if agent.status.value == 'quarantined' %}quarantined{% endif %}">
+          <div class="item-top">
+            <span class="item-title">{{ agent.name }} (<code>{{ agent.agent_id }}</code>)</span>
+            <span class="badge-status {% if agent.status.value == 'quarantined' %}badge-danger{% elif agent.status.value == 'active' %}badge-ok{% elif agent.status.value == 'waiting_approval' %}badge-warn{% else %}badge-info{% endif %}">
+              {{ agent.status.value|upper }}
+            </span>
           </div>
-          {% endfor %}
+          <div class="item-desc" style="margin-bottom: 8px;">{{ agent.description }}</div>
+          <div style="font-size: 11px; color: var(--ink-faint);">
+            <b>Erlaubte Tools:</b> {{ agent.allowed_tools|join(', ') }}
+          </div>
+          {% if agent.status.value == 'quarantined' %}
+          <div style="margin-top: 8px;">
+            <button class="btn btn-sm btn-approve" onclick="releaseQuarantine('{{ agent.agent_id }}')">🔓 Quarantäne aufheben</button>
+          </div>
+          {% endif %}
         </div>
+        {% endfor %}
       </div>
 
-      <!-- PILLAR 2: UAS (Human-in-the-Loop Tickets) -->
       <div class="card">
         <div class="card-header">
-          <h3>📥 Pillar UAS: Ticket-Master (HITL)</h3>
+          <h3>📋 TaskMaster State Table (Asynchrone Hintergrund-Ausführung)</h3>
+          <span class="badge-status badge-info">{{ tasks|length }} Tasks</span>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Task ID</th>
+              <th>Aufgabe</th>
+              <th>Zugewiesener Agent</th>
+              <th>Status</th>
+              <th>Output / Evidenz</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in tasks %}
+            <tr>
+              <td><code>{{ t.task_id }}</code></td>
+              <td><b>{{ t.name }}</b></td>
+              <td>{{ t.assigned_agent }}</td>
+              <td>
+                <span class="badge-status {% if t.state.value == 'completed' %}badge-ok{% elif t.state.value == 'failed' %}badge-danger{% else %}badge-warn{% endif %}">
+                  {{ t.state.value|upper }}
+                </span>
+              </td>
+              <td>
+                {% if t.output_data %}
+                  <span style="font-size: 11px; color: var(--ink-dim);">{{ t.output_data }}</span>
+                {% elif t.error_message %}
+                  <span style="font-size: 11px; color: var(--danger);">{{ t.error_message }}</span>
+                {% else %}
+                  <span style="font-size: 11px; color: var(--ink-faint);">-</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TAB 3: TICKETS & APPROVALS -->
+    <div id="tab-tickets" class="tab-pane" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3>📥 TicketMaster — Human-in-the-Loop Triage &amp; Gating</h3>
+        <button class="btn btn-primary" onclick="toggleModal('modal-ticket')">+ Neues Ticket anlegen</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Warteschlange für verbindliche Nutzer-Freigaben (ask-Gates)</h3>
           <span class="badge-status {% if pending_tickets %}badge-warn{% else %}badge-ok{% endif %}">
-            {{ pending_tickets|length }} Pending
+            {{ pending_tickets|length }} Wartend
           </span>
         </div>
         <div class="card-body">
           {% if not tickets %}
-          <p class="item-desc">Keine Tickets in der Warteschlange. Alle Aktionen genehmigt.</p>
+          <p class="item-desc">Keine offenen Tickets vorhanden.</p>
           {% endif %}
           {% for ticket in tickets %}
-          <div class="ticket-item">
+          <div class="ticket-item" style="margin-bottom: 14px;">
             <div class="item-top">
-              <span class="item-title">{{ ticket.title }}</span>
+              <span class="item-title" style="font-size: 14px;">
+                <b>{{ ticket.title }}</b> (<code>{{ ticket.ticket_id }}</code>)
+              </span>
               <span class="badge-status {% if ticket.status.value == 'approved' %}badge-ok{% elif ticket.status.value == 'rejected' %}badge-danger{% else %}badge-warn{% endif %}">
                 {{ ticket.status.value|upper }}
               </span>
             </div>
-            <div class="item-desc" style="margin-bottom: 8px;">{{ ticket.description }}</div>
+            <p class="item-desc" style="margin-bottom: 8px;">{{ ticket.description }}</p>
+            <div style="font-size: 11.5px; color: var(--ink-faint); margin-bottom: 10px;">
+              Agent: <code>{{ ticket.agent_id }}</code> | Tool: <code>{{ ticket.tool_name }}</code> | Priorität: <b>{{ ticket.priority.value|upper }}</b>
+            </div>
             {% if ticket.status.value == 'pending_approval' %}
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-sm btn-approve" onclick="approveTicket('{{ ticket.ticket_id }}')">✓ Freigeben</button>
-              <button class="btn btn-sm btn-reject" onclick="rejectTicket('{{ ticket.ticket_id }}')">✕ Ablehnen</button>
+              <button class="btn btn-approve" onclick="approveTicket('{{ ticket.ticket_id }}')">✓ Aktion Freigeben &amp; Ausführen</button>
+              <button class="btn btn-reject" onclick="rejectTicket('{{ ticket.ticket_id }}')">✕ Ablehnen &amp; Blockieren</button>
+            </div>
+            {% elif ticket.resolution_comment %}
+            <div style="font-size: 11.5px; color: var(--accent);">
+              <b>Beschluss:</b> {{ ticket.resolution_comment }}
             </div>
             {% endif %}
           </div>
           {% endfor %}
         </div>
       </div>
+    </div>
 
-      <!-- PILLAR 3: DOMAIN (OmniLedger Document Pipeline) -->
+    <!-- TAB 4: MEMORY BANK -->
+    <div id="tab-memory" class="tab-pane" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3>🧠 USMC Memory Bank &amp; GARDENER RAG Corpus</h3>
+        <button class="btn btn-primary" onclick="toggleModal('modal-memory')">+ Memory-Eintrag speichern</button>
+      </div>
+
       <div class="card">
         <div class="card-header">
-          <h3>⚡ Pillar Domain: OmniLedger Taskmaster</h3>
-          <span class="badge-status badge-ok">{{ invoices|length }} Processed</span>
+          <h3>Kuratierte Fakten, Lessons, Richtlinien &amp; Firestore-State</h3>
+          <span class="badge-status badge-info">{{ memories|length }} Einträge</span>
         </div>
-        <div class="card-body">
-          {% if not invoices %}
-          <p class="item-desc">Noch keine Belege verarbeitet. Klicke oben auf einen Showcase-Button.</p>
-          {% endif %}
-          {% for inv in invoices %}
-          <div class="invoice-item">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Kategorie</th>
+              <th>Schlüssel (Key)</th>
+              <th>Inhalt &amp; Richtlinie</th>
+              <th>Metadaten</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in memories %}
+            <tr>
+              <td><span class="badge-status badge-info">{{ m.category|upper }}</span></td>
+              <td><code>{{ m.key }}</code></td>
+              <td>{{ m.content }}</td>
+              <td><span style="font-size: 11px; color: var(--ink-faint);">{{ m.metadata }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TAB 5: PROMPTS & SKILLS -->
+    <div id="tab-prompts" class="tab-pane" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3>📝 Prompt- &amp; Skill-Verwaltung (ProfiPrompt &amp; Enterprise Skills)</h3>
+      </div>
+
+      <div class="pillars-grid" style="margin-bottom: 24px;">
+        <div class="card">
+          <div class="card-header">
+            <h3>Versionierte System-Prompts</h3>
+            <span class="badge-status badge-info">{{ prompts|length }} Prompts</span>
+          </div>
+          {% for p in prompts %}
+          <div class="prompt-item">
             <div class="item-top">
-              <span class="item-title">{{ inv.vendor_name }} ({{ inv.invoice_number }})</span>
-              <span class="badge-status {% if inv.status.value == 'booked' %}badge-ok{% elif inv.status.value == 'disputed' %}badge-warn{% else %}badge-info{% endif %}">
-                {{ inv.status.value|upper }}
-              </span>
+              <span class="item-title">{{ p.name }} (v{{ p.version }})</span>
+              <span class="badge-status badge-info">{{ p.category|upper }}</span>
             </div>
-            <div class="item-desc">
-              Betrag: <b>{{ "%.2f"|format(inv.gross_amount) }} {{ inv.currency }}</b> (Netto {{ "%.2f"|format(inv.net_amount) }} + {{ "%.1f"|format(inv.tax_rate) }}% MwSt)
+            <div class="item-desc" style="font-family: var(--font-mono); font-size: 11.5px; background: var(--chip); padding: 8px; border-radius: 4px; margin-top: 6px;">
+              {{ p.template_text }}
             </div>
-            {% if inv.compliance_violations %}
-            <div style="color: var(--warn); font-size: 11px; margin-top: 6px; font-weight: 500;">
-              Abweichung: {{ inv.compliance_violations|join(', ') }}
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3>Enterprise Agent Skills Registry</h3>
+            <span class="badge-status badge-ok">{{ skills|length }} Skills</span>
+          </div>
+          {% for s in skills %}
+          <div class="skill-item">
+            <div class="item-top">
+              <span class="item-title">{{ s.name }} (v{{ s.version }})</span>
+              <span class="badge-status badge-info">Säule: {{ s.pillar|upper }}</span>
             </div>
-            {% endif %}
+            <div class="item-desc" style="margin-bottom: 6px;">{{ s.description }}</div>
+            <div style="font-size: 11px; color: var(--accent);">
+              <b>Tools:</b> <code>{{ s.required_tools|join(', ') }}</code>
+            </div>
           </div>
           {% endfor %}
         </div>
       </div>
+    </div>
 
-      <!-- PILLAR 4: MEMORY (USMC & OpenTelemetry Telemetry) -->
+    <!-- TAB 6: TELEMETRY -->
+    <div id="tab-telemetry" class="tab-pane" style="display: none;">
       <div class="card">
         <div class="card-header">
-          <h3>🧠 Pillar Memory: State &amp; OpenTelemetry</h3>
+          <h3>📊 OpenTelemetry Traces (Google Cloud Trace Integration)</h3>
           <span class="badge-status badge-info">{{ spans|length }} Spans</span>
         </div>
-        <div class="card-body">
-          <div style="margin-bottom: 14px;">
-            <b style="font-size: 12px; color: var(--accent);">USMC Memory Bank Records:</b>
-            {% for m in memories[:3] %}
-            <div style="font-size: 11px; color: var(--ink-dim); padding: 5px 0; border-bottom: 1px dashed var(--zone-edge);">
-              • <b>[{{ m.key }}]</b>: {{ m.content }}
-            </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Span ID</th>
+              <th>Operation / Event</th>
+              <th>Agent Identity</th>
+              <th>Status</th>
+              <th>Dauer</th>
+              <th>Fehler / Audit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in spans %}
+            <tr>
+              <td><code>{{ s.span_id }}</code></td>
+              <td><b>{{ s.name }}</b></td>
+              <td><code>{{ s.agent_id }}</code></td>
+              <td>
+                <span class="badge-status {% if s.status == 'OK' %}badge-ok{% else %}badge-danger{% endif %}">
+                  {{ s.status }}
+                </span>
+              </td>
+              <td>{{ "%.3f"|format((s.end_time or s.start_time) - s.start_time) }}s</td>
+              <td>
+                {% if s.error_message %}
+                <span style="color: var(--danger); font-size: 11px;">{{ s.error_message }}</span>
+                {% else %}
+                <span style="color: var(--ok); font-size: 11px;">Audited ✓</span>
+                {% endif %}
+              </td>
+            </tr>
             {% endfor %}
-          </div>
-          <div>
-            <b style="font-size: 12px; color: var(--accent);">Live OpenTelemetry Spans (Cloud Trace):</b>
-            {% for s in spans[:4] %}
-            <div class="span-item" style="padding: 6px 8px; margin-top: 6px;">
-              <div class="item-top" style="font-size: 11px;">
-                <span><b>{{ s.name }}</b> ({{ s.agent_id }})</span>
-                <span class="badge-status {% if s.status == 'OK' %}badge-ok{% else %}badge-danger{% endif %}">{{ s.status }}</span>
-              </div>
-            </div>
-            {% endfor %}
-          </div>
-        </div>
+          </tbody>
+        </table>
       </div>
+    </div>
 
+  </div>
+
+  <!-- MODAL: NEUER TASK -->
+  <div id="modal-task" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>+ Neuen Task beauftragen</h3>
+        <button class="btn btn-sm" onclick="toggleModal('modal-task')">✕</button>
+      </div>
+      <form onsubmit="submitNewTask(event)">
+        <div class="form-group">
+          <label>Task Bezeichnung:</label>
+          <input type="text" name="name" class="text-input" placeholder="z. B. Beleg-Audit oder RAG-Recherche" required>
+        </div>
+        <div class="form-group">
+          <label>Zugewiesener Agent:</label>
+          <select name="assigned_agent" class="select-input">
+            {% for a in agents %}
+            <option value="{{ a.agent_id }}">{{ a.name }} ({{ a.role.value }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Eingabe-Daten (JSON oder Text):</label>
+          <textarea name="input_payload" class="textarea-input" placeholder='{"query": "§ 14 UStG Fristen", "priority": "high"}'></textarea>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+          <button type="button" class="btn" onclick="toggleModal('modal-task')">Abbrechen</button>
+          <button type="submit" class="btn btn-primary">Task Starten</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: NEUES TICKET -->
+  <div id="modal-ticket" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>+ Neues Human-in-the-Loop Ticket</h3>
+        <button class="btn btn-sm" onclick="toggleModal('modal-ticket')">✕</button>
+      </div>
+      <form onsubmit="submitNewTicket(event)">
+        <div class="form-group">
+          <label>Titel des Tickets:</label>
+          <input type="text" name="title" class="text-input" placeholder="z. B. Manuelle Freigabe für Lieferanten-Zahlung" required>
+        </div>
+        <div class="form-group">
+          <label>Beschreibung &amp; Sachverhalt:</label>
+          <textarea name="description" class="textarea-input" placeholder="Begründung für die Prüfung durch den Operator..." required></textarea>
+        </div>
+        <div class="form-group">
+          <label>Zuständiger Agent:</label>
+          <select name="agent_id" class="select-input">
+            {% for a in agents %}
+            <option value="{{ a.agent_id }}">{{ a.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Priorität:</label>
+          <select name="priority" class="select-input">
+            <option value="normal">Normal</option>
+            <option value="high">Hoch (High)</option>
+            <option value="critical">Kritisch (Critical)</option>
+          </select>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+          <button type="button" class="btn" onclick="toggleModal('modal-ticket')">Abbrechen</button>
+          <button type="submit" class="btn btn-primary">Ticket Erstellen</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: NEUES MEMORY -->
+  <div id="modal-memory" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>+ Neuen Memory-Eintrag speichern</h3>
+        <button class="btn btn-sm" onclick="toggleModal('modal-memory')">✕</button>
+      </div>
+      <form onsubmit="submitNewMemory(event)">
+        <div class="form-group">
+          <label>Kategorie:</label>
+          <select name="category" class="select-input">
+            <option value="fact">Fact (Kuratierter Fakt)</option>
+            <option value="lesson">Lesson (Erkenntnis / Erfahrung)</option>
+            <option value="entity">Entity (Stammdaten / Partner)</option>
+            <option value="policy">Policy (Betriebsregel)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Schlüssel (Key):</label>
+          <input type="text" name="key" class="text-input" placeholder="z. B. vendor:partner_ag:tax_rule" required>
+        </div>
+        <div class="form-group">
+          <label>Inhalt (Content):</label>
+          <textarea name="content" class="textarea-input" placeholder="Wissensinhalt, der dauerhaft persistent im Gedächtnis gehalten werden soll..." required></textarea>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+          <button type="button" class="btn" onclick="toggleModal('modal-memory')">Abbrechen</button>
+          <button type="submit" class="btn btn-primary">Im Gedächtnis Speichern</button>
+        </div>
+      </form>
     </div>
   </div>
 

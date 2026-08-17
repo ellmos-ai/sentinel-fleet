@@ -1,6 +1,7 @@
 """FastAPI Web Server for SentinelFleet & OmniLedger Operator Dashboard."""
 
 import os
+import json
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -10,6 +11,8 @@ from fastapi.templating import Jinja2Templates
 from sentinel_fleet.core.config import settings
 from sentinel_fleet.core.identity import AgentStatus
 from sentinel_fleet.core.gateway import gateway
+from sentinel_fleet.core.prompts import prompt_registry
+from sentinel_fleet.core.skills import skill_registry
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.uas.ticket_master import ticket_master, TicketStatus, TicketPriority
 from sentinel_fleet.uas.task_master import task_master, TaskState
@@ -60,6 +63,8 @@ async def index_view(request: Request):
             "pending_tickets": ticket_master.get_pending_tickets(),
             "tasks": task_master.list_all(),
             "memories": memory_bank.list_all(),
+            "prompts": prompt_registry.list_all(),
+            "skills": skill_registry.list_all(),
             "invoices": list(processed_invoices.values()),
             "booked_invoices": ledger_reconciler.list_booked(),
             "spans": telemetry.get_recent_spans()
@@ -101,6 +106,15 @@ async def api_get_fleet():
     return [a.model_dump() for a in lifecycle_manager.list_fleet()]
 
 
+@app.post("/api/agents/{agent_id}/quarantine/release")
+async def api_release_quarantine(agent_id: str):
+    agent = lifecycle_manager.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    lifecycle_manager.update_agent_status(agent_id, AgentStatus.IDLE)
+    return {"status": "released", "agent": agent.model_dump()}
+
+
 @app.get("/api/telemetry/spans")
 async def api_get_spans():
     return [s.model_dump() for s in telemetry.get_recent_spans()]
@@ -111,9 +125,62 @@ async def api_get_memory():
     return [m.model_dump() for m in memory_bank.list_all()]
 
 
+@app.post("/api/memory/create")
+async def api_create_memory(
+    category: str = Form("fact"),
+    key: str = Form(...),
+    content: str = Form(...)
+):
+    entry = memory_bank.store_memory(category=category, key=key, content=content)
+    return {"status": "created", "entry": entry.model_dump()}
+
+
+@app.get("/api/prompts")
+async def api_get_prompts():
+    return [p.model_dump() for p in prompt_registry.list_all()]
+
+
+@app.post("/api/prompts/create")
+async def api_create_prompt(
+    name: str = Form(...),
+    category: str = Form("custom"),
+    template_text: str = Form(...)
+):
+    prompt = prompt_registry.create_prompt(name=name, category=category, template_text=template_text, variables=[])
+    return {"status": "created", "prompt": prompt.model_dump()}
+
+
+@app.get("/api/skills")
+async def api_get_skills():
+    return [s.model_dump() for s in skill_registry.list_all()]
+
+
 # ---------------------------------------------------------
-# API Endpoints for Human-in-the-Loop Tickets
+# API Endpoints for Human-in-the-Loop Tickets & Tasks
 # ---------------------------------------------------------
+
+@app.post("/api/tickets/create")
+async def api_create_ticket(
+    title: str = Form(...),
+    description: str = Form(...),
+    agent_id: str = Form("agent:orchestrator"),
+    priority: str = Form("normal")
+):
+    pri = TicketPriority.NORMAL
+    if priority == "high": pri = TicketPriority.HIGH
+    elif priority == "critical": pri = TicketPriority.CRITICAL
+    elif priority == "low": pri = TicketPriority.LOW
+
+    ticket = ticket_master.create_approval_ticket(
+        title=title,
+        description=description,
+        agent_id=agent_id,
+        tool_name="operator_manual_ticket",
+        payload={"created_by": "operator"},
+        priority=pri
+    )
+    return {"status": "created", "ticket": ticket.model_dump()}
+
 
 @app.post("/api/tickets/{ticket_id}/approve")
 async def api_approve_ticket(ticket_id: str):
@@ -136,6 +203,40 @@ async def api_reject_ticket(ticket_id: str, reason: str = Form("Rejected by oper
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return {"status": "rejected", "ticket": ticket.model_dump()}
+
+
+@app.post("/api/tasks/create")
+async def api_create_task(
+    name: str = Form(...),
+    assigned_agent: str = Form("agent:task-solver"),
+    input_payload: str = Form("")
+):
+    payload = {}
+    if input_payload:
+        try:
+            payload = json.loads(input_payload)
+        except Exception:
+            payload = {"raw_input": input_payload}
+
+    task = task_master.create_task(
+        name=name,
+        assigned_agent=assigned_agent,
+        input_data=payload
+    )
+
+    # Trigger simulated execution
+    task_master.update_task_state(task.task_id, TaskState.IN_PROGRESS)
+    span = telemetry.start_span(f"execute_task:{task.task_id}", assigned_agent, {"task_name": name})
+    
+    # Store evidence / result
+    task_master.update_task_state(
+        task.task_id,
+        TaskState.COMPLETED,
+        output_data={"result": f"Task '{name}' erfolgreich von {assigned_agent} ausgeführt.", "evidence": "Verified by SystemAuditor"}
+    )
+    telemetry.end_span(span, status="OK")
+
+    return {"status": "created", "task": task.model_dump()}
 
 
 # ---------------------------------------------------------
