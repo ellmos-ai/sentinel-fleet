@@ -371,23 +371,27 @@
     <!-- TAB 5: PROMPTS & SKILLS -->
     <div id="tab-prompts" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <h3>📝 Prompt- &amp; Skill-Verwaltung (ProfiPrompt &amp; Enterprise Skills)</h3>
+        <h3>📝 Prompt- &amp; Skill-Verwaltung (ProfiPrompt v1 &amp; ControlCenter Skills)</h3>
       </div>
 
       <div class="pillars-grid" style="margin-bottom: 24px;">
         <div class="card">
           <div class="card-header">
-            <h3>Versionierte System-Prompts</h3>
+            <h3>ProfiPrompt v1 Library (mit Versionshistorie)</h3>
             <span class="badge-status badge-info">{{ prompts|length }} Prompts</span>
           </div>
           {% for p in prompts %}
           <div class="prompt-item">
             <div class="item-top">
-              <span class="item-title">{{ p.name }} (v{{ p.version }})</span>
-              <span class="badge-status badge-info">{{ p.category|upper }}</span>
+              <span class="item-title">{{ p.title }}</span>
+              <span class="badge-status badge-ok">v{{ p.active_version }} ({{ p.versions|length }} Vers.)</span>
             </div>
-            <div class="item-desc" style="font-family: var(--font-mono); font-size: 11.5px; background: var(--chip); padding: 8px; border-radius: 4px; margin-top: 6px;">
-              {{ p.template_text }}
+            <div class="item-desc" style="margin-bottom: 6px;"><b>Zweck:</b> {{ p.purpose }}</div>
+            <div class="item-desc" style="font-family: var(--font-mono); font-size: 11.5px; background: var(--chip); padding: 8px; border-radius: 4px;">
+              {{ p.current_text }}
+            </div>
+            <div style="margin-top: 8px; font-size: 11px; color: var(--ink-faint);">
+              <b>Tags:</b> {{ p.tags|join(', ') }} | <b>Variablen:</b> <code>{{ p.variables|join(', ') }}</code>
             </div>
           </div>
           {% endfor %}
@@ -395,7 +399,7 @@
 
         <div class="card">
           <div class="card-header">
-            <h3>Enterprise Agent Skills Registry</h3>
+            <h3>ControlCenter Skill Registry (.SKILLS Component-v1)</h3>
             <span class="badge-status badge-ok">{{ skills|length }} Skills</span>
           </div>
           {% for s in skills %}
@@ -405,8 +409,11 @@
               <span class="badge-status badge-info">Säule: {{ s.pillar|upper }}</span>
             </div>
             <div class="item-desc" style="margin-bottom: 6px;">{{ s.description }}</div>
-            <div style="font-size: 11px; color: var(--accent);">
+            <div style="font-size: 11px; color: var(--accent); margin-bottom: 4px;">
               <b>Tools:</b> <code>{{ s.required_tools|join(', ') }}</code>
+            </div>
+            <div style="font-size: 10.5px; color: var(--ink-faint);">
+              <b>Kompatibilität:</b> Google ADK ✓ | Gemini 3.5 ✓ | Cloud Run ✓ | MCP Stdio ✓
             </div>
           </div>
           {% endfor %}
