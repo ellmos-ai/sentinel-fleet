@@ -1,4 +1,4 @@
-"""Prompt Registry & Versioning Engine based on profiprompt-library-v1 and PromptBoard."""
+"""Prompt Registry, Versioning & RBAC Permissions Engine based on profiprompt-library-v1."""
 
 import time
 from typing import Dict, List, Optional
@@ -15,6 +15,7 @@ class PromptVersionRecord(BaseModel):
     tags: List[str] = Field(default_factory=list)
     change_summary: str = "Initial release"
     created_at: float = Field(default_factory=time.time)
+    created_by: str = "operator"
 
 
 class PromptItem(BaseModel):
@@ -27,6 +28,10 @@ class PromptItem(BaseModel):
     variables: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     versions: List[PromptVersionRecord] = Field(default_factory=list)
+    # Permissions & Sharing
+    visibility: str = "organization"  # public | organization | restricted
+    requires_approval: bool = False
+    allowed_roles: List[str] = Field(default_factory=lambda: ["orchestrator", "task_solver", "operator"])
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
 
@@ -47,6 +52,9 @@ class PromptRegistry:
                 current_text="Extrahiere alle steuerlichen Pflichtangaben gemäß § 14 UStG aus dem Dokument: {{filename}}. Achte auf Steuernummer, Leistungsdatum und Steuersatz-Aufschlüsselung.",
                 variables=["filename"],
                 tags=["ustg", "vision", "gemini-3.5", "invoice"],
+                visibility="organization",
+                requires_approval=False,
+                allowed_roles=["finance_taskmaster", "compliance_auditor"],
                 versions=[
                     PromptVersionRecord(
                         version_id="ver-inv-100",
@@ -75,6 +83,9 @@ class PromptRegistry:
                 current_text="Verfasse ein formelles, rechtssicheres Korrekturschreiben an {{vendor_name}} bezüglich Rechnung {{invoice_number}}. Begründe die Zahlungsunterbrechung mit folgenden Mängeln: {{violations}}.",
                 variables=["vendor_name", "invoice_number", "violations"],
                 tags=["compliance", "dispute", "vendor", "healing"],
+                visibility="restricted",
+                requires_approval=True,
+                allowed_roles=["vendor_communicator", "operator"],
                 versions=[
                     PromptVersionRecord(
                         version_id="ver-disp-201",
@@ -95,6 +106,9 @@ class PromptRegistry:
                 current_text="Analysiere die Aufgabenstellung '{{task_title}}' unter Berücksichtigung von Gedächtniskontext {{memory_context}}. Führe die Lösung schrittweise mit überprüfbaren Belegen aus.",
                 variables=["task_title", "memory_context"],
                 tags=["taskmaster", "evidence", "reasoning"],
+                visibility="organization",
+                requires_approval=False,
+                allowed_roles=["orchestrator", "task_solver"],
                 versions=[
                     PromptVersionRecord(
                         version_id="ver-solve-100",
@@ -116,7 +130,17 @@ class PromptRegistry:
     def get_prompt(self, prompt_id: str) -> Optional[PromptItem]:
         return self._prompts.get(prompt_id)
 
-    def create_prompt(self, title: str, purpose: str, category: str, text: str, variables: List[str], tags: List[str]) -> PromptItem:
+    def create_prompt(
+        self,
+        title: str,
+        purpose: str,
+        category: str,
+        text: str,
+        variables: List[str],
+        tags: List[str],
+        visibility: str = "organization",
+        requires_approval: bool = False
+    ) -> PromptItem:
         prompt_id = f"prompt:{title.lower().replace(' ', '-')}"
         version_rec = PromptVersionRecord(
             version_id=f"ver-{int(time.time()*1000)}",
@@ -137,9 +161,55 @@ class PromptRegistry:
             current_text=text,
             variables=variables,
             tags=tags,
+            visibility=visibility,
+            requires_approval=requires_approval,
             versions=[version_rec]
         )
         self._prompts[prompt_id] = prompt
+        return prompt
+
+    def add_prompt_version(
+        self,
+        prompt_id: str,
+        new_version_number: str,
+        new_text: str,
+        change_summary: str,
+        title_override: Optional[str] = None
+    ) -> Optional[PromptItem]:
+        prompt = self.get_prompt(prompt_id)
+        if not prompt:
+            return None
+        
+        version_rec = PromptVersionRecord(
+            version_id=f"ver-{int(time.time()*1000)}",
+            prompt_id=prompt_id,
+            version_number=new_version_number,
+            title=title_override or prompt.title,
+            text=new_text,
+            variables=prompt.variables,
+            tags=prompt.tags,
+            change_summary=change_summary
+        )
+        prompt.versions.append(version_rec)
+        prompt.active_version = new_version_number
+        prompt.current_text = new_text
+        prompt.updated_at = time.time()
+        return prompt
+
+    def update_permissions(
+        self,
+        prompt_id: str,
+        visibility: str,
+        requires_approval: bool,
+        allowed_roles: List[str]
+    ) -> Optional[PromptItem]:
+        prompt = self.get_prompt(prompt_id)
+        if not prompt:
+            return None
+        prompt.visibility = visibility
+        prompt.requires_approval = requires_approval
+        prompt.allowed_roles = allowed_roles
+        prompt.updated_at = time.time()
         return prompt
 
 

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de" data-theme="dark">
+<html lang="de" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,12 +12,12 @@
       <div class="brand-icon">G</div>
       <div>
         <h1>SentinelFleet <span class="badge">Google Cloud Engine</span></h1>
-        <div class="subtag">Fortified Enterprise Agent Platform &amp; OmniLedger Taskmaster</div>
+        <div class="subtag">Fortified Enterprise Agent Platform &amp; Multi-Domain Taskmaster</div>
       </div>
     </div>
     <div class="nav-links">
       <a href="/" class="nav-link active">🎛️ Operator Control Center</a>
-      <a href="/schaltplan" class="nav-link">⌁ Architecture &amp; Circuit Blueprint</a>
+      <a href="/schaltplan" class="nav-link">⌁ Architecture &amp; Blueprint</a>
       <button class="btn btn-sm" onclick="toggleTheme()">🌓 Theme</button>
     </div>
   </header>
@@ -39,8 +39,8 @@
           <div class="lbl">Pending Approvals</div>
         </div>
         <div class="stat-chip">
-          <div class="val">{{ tasks|length }}</div>
-          <div class="lbl">Active Tasks</div>
+          <div class="val">{{ domains|length }}</div>
+          <div class="lbl">Active Domains</div>
         </div>
         <div class="stat-chip">
           <div class="val">{{ booked_invoices|length }}</div>
@@ -49,9 +49,10 @@
       </div>
     </div>
 
-    <!-- Sub-Navigation Tabs Bar -->
+    <!-- Sub-Navigation Segmented Tabs Bar -->
     <div class="subnav-bar">
       <button id="btn-tab-overview" class="subnav-btn active" onclick="switchTab('tab-overview')">🎛️ 4-Pillars Overview</button>
+      <button id="btn-tab-domains" class="subnav-btn" onclick="switchTab('tab-domains')">🏢 Enterprise Domains ({{ domains|length }})</button>
       <button id="btn-tab-fleet" class="subnav-btn" onclick="switchTab('tab-fleet')">👥 Fleet &amp; Tasks ({{ agents|length }})</button>
       <button id="btn-tab-tickets" class="subnav-btn" onclick="switchTab('tab-tickets')">📥 Tickets &amp; Approvals ({{ pending_tickets|length }})</button>
       <button id="btn-tab-memory" class="subnav-btn" onclick="switchTab('tab-memory')">🧠 Memory Bank ({{ memories|length }})</button>
@@ -214,7 +215,50 @@
       </div>
     </div>
 
-    <!-- TAB 2: FLEET & TASKS -->
+    <!-- TAB 2: ENTERPRISE DOMAINS HUB -->
+    <div id="tab-domains" class="tab-pane" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3>🏢 Enterprise Multi-Tenant Domain Hub</h3>
+        <span class="badge-status badge-ok">{{ domains|length }} Active Domains</span>
+      </div>
+
+      <div class="pillars-grid">
+        {% for d in domains %}
+        <div class="card domain-item">
+          <div class="card-header">
+            <h3>{{ d.icon }} {{ d.name }}</h3>
+            <span class="badge-status badge-info">{{ d.code }}</span>
+          </div>
+          <div class="item-desc" style="margin-bottom: 12px;">{{ d.description }}</div>
+          
+          <div style="margin-bottom: 10px;">
+            <b style="font-size: 11.5px; color: var(--google-blue);">Aktive Policies:</b>
+            <div style="margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap;">
+              {% for p in d.active_policies %}
+              <span style="font-family: var(--font-mono); font-size: 10.5px; background: var(--panel); border: 1px solid var(--zone-edge); padding: 2px 6px; border-radius: 4px;">{{ p }}</span>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div style="margin-bottom: 10px;">
+            <b style="font-size: 11.5px; color: var(--google-purple);">Zugeordnete Agenten:</b>
+            <div style="font-size: 11.5px; color: var(--ink-dim); margin-top: 2px;">
+              {{ d.bound_agents|join(', ') }}
+            </div>
+          </div>
+
+          <div>
+            <b style="font-size: 11.5px; color: var(--google-green);">Integrierte Skills:</b>
+            <div style="font-size: 11.5px; color: var(--ink-dim); margin-top: 2px;">
+              {{ d.bound_skills|join(', ') }}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- TAB 3: FLEET & TASKS -->
     <div id="tab-fleet" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3>👥 Fleet Directory &amp; Task Master Engine</h3>
@@ -285,7 +329,7 @@
       </div>
     </div>
 
-    <!-- TAB 3: TICKETS & APPROVALS -->
+    <!-- TAB 4: TICKETS & APPROVALS -->
     <div id="tab-tickets" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3>📥 TicketMaster — Human-in-the-Loop Triage &amp; Gating</h3>
@@ -319,7 +363,7 @@
             </div>
             {% if ticket.status.value == 'pending_approval' %}
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-approve" onclick="approveTicket('{{ ticket.ticket_id }}')">✓ Aktion Freigeben &amp; Ausführen</button>
+              <button class="btn btn-approve" onclick="approveTicket('{{ ticket.ticket_id }}')">✓ Freigeben &amp; Ausführen</button>
               <button class="btn btn-reject" onclick="rejectTicket('{{ ticket.ticket_id }}')">✕ Ablehnen &amp; Blockieren</button>
             </div>
             {% elif ticket.resolution_comment %}
@@ -333,7 +377,7 @@
       </div>
     </div>
 
-    <!-- TAB 4: MEMORY BANK -->
+    <!-- TAB 5: MEMORY BANK -->
     <div id="tab-memory" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3>🧠 USMC Memory Bank &amp; GARDENER RAG Corpus</h3>
@@ -368,16 +412,18 @@
       </div>
     </div>
 
-    <!-- TAB 5: PROMPTS & SKILLS -->
+    <!-- TAB 6: PROMPTS & SKILLS -->
     <div id="tab-prompts" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <h3>📝 Prompt- &amp; Skill-Verwaltung (ProfiPrompt v1 &amp; ControlCenter Skills)</h3>
+        <h3>📝 Prompt- &amp; Skill-Verwaltung (ProfiPrompt v1 &amp; ControlCenter Governance)</h3>
       </div>
 
       <div class="pillars-grid" style="margin-bottom: 24px;">
+        
+        <!-- PROMPTS COLUMN -->
         <div class="card">
           <div class="card-header">
-            <h3>ProfiPrompt v1 Library (mit Versionshistorie)</h3>
+            <h3>ProfiPrompt v1 Library</h3>
             <span class="badge-status badge-info">{{ prompts|length }} Prompts</span>
           </div>
           {% for p in prompts %}
@@ -387,16 +433,21 @@
               <span class="badge-status badge-ok">v{{ p.active_version }} ({{ p.versions|length }} Vers.)</span>
             </div>
             <div class="item-desc" style="margin-bottom: 6px;"><b>Zweck:</b> {{ p.purpose }}</div>
-            <div class="item-desc" style="font-family: var(--font-mono); font-size: 11.5px; background: var(--chip); padding: 8px; border-radius: 4px;">
+            <div class="item-desc" style="font-family: var(--font-mono); font-size: 11.5px; background: var(--panel); padding: 8px; border-radius: 4px; margin-bottom: 8px;">
               {{ p.current_text }}
             </div>
-            <div style="margin-top: 8px; font-size: 11px; color: var(--ink-faint);">
-              <b>Tags:</b> {{ p.tags|join(', ') }} | <b>Variablen:</b> <code>{{ p.variables|join(', ') }}</code>
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--ink-faint);">
+              <span>Sichtbarkeit: <b>{{ p.visibility|upper }}</b></span>
+              <div style="display: flex; gap: 6px;">
+                <button class="btn btn-sm" onclick="openPromptVersionModal('{{ p.id }}', '{{ p.title }}', '{{ p.current_text }}')">+ Version</button>
+                <button class="btn btn-sm" onclick="openPromptPermsModal('{{ p.id }}', '{{ p.title }}', '{{ p.visibility }}', '{{ p.requires_approval }}')">🔒 Rechte</button>
+              </div>
             </div>
           </div>
           {% endfor %}
         </div>
 
+        <!-- SKILLS COLUMN -->
         <div class="card">
           <div class="card-header">
             <h3>ControlCenter Skill Registry (.SKILLS Component-v1)</h3>
@@ -406,22 +457,24 @@
           <div class="skill-item">
             <div class="item-top">
               <span class="item-title">{{ s.name }} (v{{ s.version }})</span>
-              <span class="badge-status badge-info">Säule: {{ s.pillar|upper }}</span>
+              <span class="badge-status badge-purple">Säule: {{ s.pillar|upper }}</span>
             </div>
             <div class="item-desc" style="margin-bottom: 6px;">{{ s.description }}</div>
-            <div style="font-size: 11px; color: var(--accent); margin-bottom: 4px;">
+            <div style="font-size: 11px; color: var(--google-blue); margin-bottom: 6px;">
               <b>Tools:</b> <code>{{ s.required_tools|join(', ') }}</code>
             </div>
-            <div style="font-size: 10.5px; color: var(--ink-faint);">
-              <b>Kompatibilität:</b> Google ADK ✓ | Gemini 3.5 ✓ | Cloud Run ✓ | MCP Stdio ✓
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; color: var(--ink-faint);">
+              <span>Gate: <b>{{ s.execution_gate|upper }}</b></span>
+              <button class="btn btn-sm" onclick="openSkillVersionModal('{{ s.skill_id }}', '{{ s.name }}', '{{ s.required_tools|join(\", \") }}')">+ Version</button>
             </div>
           </div>
           {% endfor %}
         </div>
+
       </div>
     </div>
 
-    <!-- TAB 6: TELEMETRY -->
+    <!-- TAB 7: TELEMETRY -->
     <div id="tab-telemetry" class="tab-pane" style="display: none;">
       <div class="card">
         <div class="card-header">
@@ -567,6 +620,93 @@
         <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
           <button type="button" class="btn" onclick="toggleModal('modal-memory')">Abbrechen</button>
           <button type="submit" class="btn btn-primary">Im Gedächtnis Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: PROMPT VERSION BUMP -->
+  <div id="modal-prompt-version" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>+ Neue Version: <span id="pv-title"></span></h3>
+        <button class="btn btn-sm" onclick="toggleModal('modal-prompt-version')">✕</button>
+      </div>
+      <form onsubmit="submitPromptVersion(event)">
+        <input type="hidden" id="pv-prompt-id">
+        <div class="form-group">
+          <label>Neue Versionsnummer (SemVer):</label>
+          <input type="text" name="new_version_number" class="text-input" placeholder="z. B. 1.3.0" required>
+        </div>
+        <div class="form-group">
+          <label>Änderungs-Zusammenfassung:</label>
+          <input type="text" name="change_summary" class="text-input" placeholder="Kurzbeschreibung der Anpassungen..." required>
+        </div>
+        <div class="form-group">
+          <label>Aktualisierter Prompt-Text:</label>
+          <textarea id="pv-text" name="new_text" class="textarea-input" required></textarea>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+          <button type="button" class="btn" onclick="toggleModal('modal-prompt-version')">Abbrechen</button>
+          <button type="submit" class="btn btn-primary">Version Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: PROMPT PERMISSIONS -->
+  <div id="modal-prompt-perms" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>🔒 Rechte &amp; Freigaben: <span id="pp-title"></span></h3>
+        <button class="btn btn-sm" onclick="toggleModal('modal-prompt-perms')">✕</button>
+      </div>
+      <form onsubmit="submitPromptPerms(event)">
+        <input type="hidden" id="pp-prompt-id">
+        <div class="form-group">
+          <label>Sichtbarkeit &amp; Sharing:</label>
+          <select id="pp-visibility" name="visibility" class="select-input">
+            <option value="organization">Organization (Gesamtes Team &amp; Flotte)</option>
+            <option value="public">Public (Exportierbar &amp; Öffentlich)</option>
+            <option value="restricted">Restricted (Nur berechtigte Rollen)</option>
+          </select>
+        </div>
+        <div class="form-group" style="display: flex; align-items: center; gap: 10px; margin-top: 12px;">
+          <input type="checkbox" id="pp-approval" name="requires_approval" value="true">
+          <label for="pp-approval" style="margin-bottom: 0;">Erfordert verbindliche Operator-Freigabe (HITL Gate)</label>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px;">
+          <button type="button" class="btn" onclick="toggleModal('modal-prompt-perms')">Abbrechen</button>
+          <button type="submit" class="btn btn-primary">Rechte Aktualisieren</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: SKILL VERSION BUMP -->
+  <div id="modal-skill-version" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>+ Neue Skill-Version: <span id="sv-name"></span></h3>
+        <button class="btn btn-sm" onclick="toggleModal('modal-skill-version')">✕</button>
+      </div>
+      <form onsubmit="submitSkillVersion(event)">
+        <input type="hidden" id="sv-skill-id">
+        <div class="form-group">
+          <label>Neue Versionsnummer (SemVer):</label>
+          <input type="text" name="new_version_number" class="text-input" placeholder="z. B. 2.2.0" required>
+        </div>
+        <div class="form-group">
+          <label>Änderungs-Zusammenfassung:</label>
+          <input type="text" name="change_summary" class="text-input" placeholder="Was wurde am Skill geändert..." required>
+        </div>
+        <div class="form-group">
+          <label>Erforderliche Tools (Kommagetrennt):</label>
+          <input type="text" id="sv-tools" name="required_tools" class="text-input">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+          <button type="button" class="btn" onclick="toggleModal('modal-skill-version')">Abbrechen</button>
+          <button type="submit" class="btn btn-primary">Skill Versionieren</button>
         </div>
       </form>
     </div>
