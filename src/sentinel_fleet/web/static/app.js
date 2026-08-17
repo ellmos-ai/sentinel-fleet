@@ -100,7 +100,7 @@ async function releaseQuarantine(agentId) {
   }
 }
 
-// Form Submissions for Tasks, Tickets & Memory
+// Form Submissions for Tasks, Tickets, Memory & Contacts
 async function submitNewTicket(event) {
   event.preventDefault();
   const formData = new FormData(event.target);
@@ -131,6 +131,27 @@ async function submitNewMemory(event) {
     if (res.ok) location.reload();
   } catch (err) {
     alert("Error storing memory: " + err.message);
+  }
+}
+
+async function submitNewContact(event) {
+  event.preventDefault();
+  const formData = new FormData(event.target);
+  try {
+    const res = await fetch("/api/contacts/create", { method: "POST", body: formData });
+    if (res.ok) location.reload();
+  } catch (err) {
+    alert("Error saving contact: " + err.message);
+  }
+}
+
+async function optOutContact(contactId) {
+  if (!confirm("Kontakt wirklich abmelden und Tombstone-Sperre aktivieren?")) return;
+  try {
+    const res = await fetch(`/api/contacts/${contactId}/opt-out`, { method: "POST" });
+    if (res.ok) location.reload();
+  } catch (err) {
+    alert("Error setting opt-out: " + err.message);
   }
 }
 

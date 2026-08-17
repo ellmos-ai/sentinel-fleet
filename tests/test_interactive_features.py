@@ -1,4 +1,4 @@
-"""Unit tests for interactive Control Center features (Tickets, Tasks, Memory, Prompts, Skills, Domains)."""
+"""Unit tests for interactive Control Center features (Tickets, Tasks, Memory, Prompts, Skills, Domains, Contacts)."""
 
 import pytest
 from httpx import AsyncClient, ASGITransport
@@ -84,3 +84,31 @@ async def test_get_domains():
         assert res.status_code == 200
         domains = res.json()
         assert len(domains) >= 4
+
+
+@pytest.mark.asyncio
+async def test_privacy_contacts_crud_and_opt_out():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        # 1. Create contact
+        res_create = await ac.post("/api/contacts/create", data={
+            "name": "Datenschutz Testkontakt",
+            "email": "privacy-test@partner.eu",
+            "organization": "Test Partner Org",
+            "category": "vendor",
+            "protection_level": "S3"
+        })
+        assert res_create.status_code == 200
+        contact = res_create.json()["contact"]
+        contact_id = contact["contact_id"]
+        assert contact["protection_level"] == "S3"
+
+        # 2. Opt-out
+        res_optout = await ac.post(f"/api/contacts/{contact_id}/opt-out", data={"reason": "User revoked consent"})
+        assert res_optout.status_code == 200
+        assert res_optout.json()["contact"]["is_tombstone"] is True
+
+        # 3. DSGVO Audit
+        res_audit = await ac.get("/api/contacts/dsgvo-audit")
+        assert res_audit.status_code == 200
+        assert res_audit.json()["status"] == "COMPLIANT"

@@ -14,6 +14,7 @@ from sentinel_fleet.core.gateway import gateway
 from sentinel_fleet.core.prompts import prompt_registry
 from sentinel_fleet.core.skills import skill_registry
 from sentinel_fleet.core.domains import domain_registry
+from sentinel_fleet.core.privacy_contacts import privacy_contact_hub
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.uas.ticket_master import ticket_master, TicketStatus, TicketPriority
 from sentinel_fleet.uas.task_master import task_master, TaskState
@@ -67,6 +68,8 @@ async def index_view(request: Request):
             "prompts": prompt_registry.list_all(),
             "skills": skill_registry.list_all(),
             "domains": domain_registry.list_all(),
+            "contacts": privacy_contact_hub.list_all(),
+            "dsgvo_audit": privacy_contact_hub.run_dsgvo_retention_audit(),
             "invoices": list(processed_invoices.values()),
             "booked_invoices": ledger_reconciler.list_booked(),
             "spans": telemetry.get_recent_spans()
@@ -136,6 +139,46 @@ async def api_create_memory(
 ):
     entry = memory_bank.store_memory(category=category, key=key, content=content)
     return {"status": "created", "entry": entry.model_dump()}
+
+
+# ---------------------------------------------------------
+# API Endpoints for Privacy Contacts (GDPR / DSGVO Hub)
+# ---------------------------------------------------------
+
+@app.get("/api/contacts")
+async def api_get_contacts():
+    return [c.model_dump() for c in privacy_contact_hub.list_all()]
+
+
+@app.post("/api/contacts/create")
+async def api_create_contact(
+    name: str = Form(...),
+    email: str = Form(...),
+    organization: str = Form(""),
+    category: str = Form("vendor"),
+    protection_level: str = Form("S3")
+):
+    contact = privacy_contact_hub.add_contact(
+        name=name,
+        email=email,
+        organization=organization,
+        category=category,
+        protection_level=protection_level
+    )
+    return {"status": "created", "contact": contact.model_dump()}
+
+
+@app.post("/api/contacts/{contact_id}/opt-out")
+async def api_contact_opt_out(contact_id: str, reason: str = Form("Operator manual opt-out")):
+    contact = privacy_contact_hub.mark_opt_out(contact_id, reason)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    return {"status": "opt_out_recorded", "contact": contact.model_dump()}
+
+
+@app.get("/api/contacts/dsgvo-audit")
+async def api_get_dsgvo_audit():
+    return privacy_contact_hub.run_dsgvo_retention_audit()
 
 
 # ---------------------------------------------------------

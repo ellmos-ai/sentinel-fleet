@@ -183,17 +183,6 @@ class SkillRegistry:
                 tags=["routing", "persona", "clutch", "infrastructure"]
             ),
             AgentSkill(
-                skill_id="skill:google-cloud-hackathon-operator",
-                name="Google Cloud Hackathon Submission Operator",
-                pillar="production",
-                version="1.0.0",
-                fork_of="skills/production/hackathon-operator",
-                language="en",
-                description="Drives the 10-phase hackathon submission lifecycle, DevPost compliance checks, architecture blueprints, and GCP demonstration proof.",
-                required_tools=["verify_receipts"],
-                tags=["hackathon", "devpost", "production", "lifecycle"]
-            ),
-            AgentSkill(
                 skill_id="skill:ustg-law-compliance-checker",
                 name="§ 14 UStG Tax Compliance Auditor & Legal Sentry",
                 pillar="utilities",

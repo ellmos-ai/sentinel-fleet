@@ -27,7 +27,7 @@
     <div class="hero-banner">
       <div class="hero-text">
         <h2>Enterprise Fleet Control Center &amp; OmniLedger Taskmaster</h2>
-        <p>Zero-Trust Model Armor · Multi-Agent Swarm · USMC Memory Bank · § 14 UStG Self-Healing Taskmaster</p>
+        <p>Zero-Trust Model Armor · Multi-Agent Swarm · USMC Memory Bank · § 14 UStG Self-Healing Taskmaster · DSGVO Privacy Hub</p>
       </div>
       <div class="hero-status">
         <div class="stat-chip">
@@ -39,8 +39,8 @@
           <div class="lbl">Pending Approvals</div>
         </div>
         <div class="stat-chip">
-          <div class="val">{{ domains|length }}</div>
-          <div class="lbl">Active Domains</div>
+          <div class="val">{{ contacts|length }}</div>
+          <div class="lbl">DSGVO Contacts</div>
         </div>
         <div class="stat-chip">
           <div class="val">{{ booked_invoices|length }}</div>
@@ -53,6 +53,7 @@
     <div class="subnav-bar">
       <button id="btn-tab-overview" class="subnav-btn active" onclick="switchTab('tab-overview')">🎛️ 4-Pillars Overview</button>
       <button id="btn-tab-domains" class="subnav-btn" onclick="switchTab('tab-domains')">🏢 Enterprise Domains ({{ domains|length }})</button>
+      <button id="btn-tab-contacts" class="subnav-btn" onclick="switchTab('tab-contacts')">📇 Privacy Contacts ({{ contacts|length }})</button>
       <button id="btn-tab-fleet" class="subnav-btn" onclick="switchTab('tab-fleet')">👥 Fleet &amp; Tasks ({{ agents|length }})</button>
       <button id="btn-tab-tickets" class="subnav-btn" onclick="switchTab('tab-tickets')">📥 Tickets &amp; Approvals ({{ pending_tickets|length }})</button>
       <button id="btn-tab-memory" class="subnav-btn" onclick="switchTab('tab-memory')">🧠 Memory Bank ({{ memories|length }})</button>
@@ -258,7 +259,64 @@
       </div>
     </div>
 
-    <!-- TAB 3: FLEET & TASKS -->
+    <!-- TAB 3: PRIVACY CONTACTS (DSGVO HUB) -->
+    <div id="tab-contacts" class="tab-pane" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div>
+          <h3>📇 DSGVO Privacy Contact Hub &amp; Address Book (PrivacyMailDesk / Umbruch)</h3>
+          <span style="font-size: 12px; color: var(--ink-dim);">Schutzstufen S1 (6m), S2 (12m), S3 (36m § 147 AO), S4 (Permanent) · Tombstone Opt-Out Guard</span>
+        </div>
+        <button class="btn btn-primary" onclick="toggleModal('modal-contact')">+ Neuen Kontakt anlegen</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Lieferanten-, Partner- &amp; Institutionen-Kontaktdatenbank</h3>
+          <span class="badge-status badge-ok">{{ dsgvo_audit.status }} ({{ contacts|length }} Kontakte)</span>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Name &amp; Organisation</th>
+              <th>E-Mail-Adresse</th>
+              <th>Kategorie</th>
+              <th>Schutzstufe</th>
+              <th>DSGVO-Status</th>
+              <th>Aufbewahrungs-Grund</th>
+              <th>Aktion</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in contacts %}
+            <tr>
+              <td>
+                <b>{{ c.name }}</b><br>
+                <span style="font-size: 11px; color: var(--ink-faint);">{{ c.organization or '-' }}</span>
+              </td>
+              <td><code>{{ c.email }}</code></td>
+              <td><span class="badge-status badge-info">{{ c.category|upper }}</span></td>
+              <td><span class="badge-status badge-purple">{{ c.protection_level }}</span></td>
+              <td>
+                <span class="badge-status {% if c.opt_in_status == 'confirmed' %}badge-ok{% else %}badge-danger{% endif %}">
+                  {{ c.opt_in_status|upper }}
+                </span>
+              </td>
+              <td><span style="font-size: 11.5px; color: var(--ink-dim);">{{ c.dsgvo_notes }}</span></td>
+              <td>
+                {% if c.opt_in_status == 'confirmed' %}
+                <button class="btn btn-sm btn-reject" onclick="optOutContact('{{ c.contact_id }}')">🚫 Opt-Out</button>
+                {% else %}
+                <span style="font-size: 11px; color: var(--danger);">Tombstone Aktiv</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TAB 4: FLEET & TASKS -->
     <div id="tab-fleet" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3>👥 Fleet Directory &amp; Task Master Engine</h3>
@@ -329,7 +387,7 @@
       </div>
     </div>
 
-    <!-- TAB 4: TICKETS & APPROVALS -->
+    <!-- TAB 5: TICKETS & APPROVALS -->
     <div id="tab-tickets" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3>📥 TicketMaster — Human-in-the-Loop Triage &amp; Gating</h3>
@@ -377,7 +435,7 @@
       </div>
     </div>
 
-    <!-- TAB 5: MEMORY BANK -->
+    <!-- TAB 6: MEMORY BANK -->
     <div id="tab-memory" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3>🧠 USMC Memory Bank &amp; GARDENER RAG Corpus</h3>
@@ -412,7 +470,7 @@
       </div>
     </div>
 
-    <!-- TAB 6: PROMPTS & SKILLS -->
+    <!-- TAB 7: PROMPTS & SKILLS -->
     <div id="tab-prompts" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3>📝 Prompt- &amp; Skill-Verwaltung (ProfiPrompt v1 &amp; ControlCenter Governance)</h3>
@@ -474,7 +532,7 @@
       </div>
     </div>
 
-    <!-- TAB 7: TELEMETRY -->
+    <!-- TAB 8: TELEMETRY -->
     <div id="tab-telemetry" class="tab-pane" style="display: none;">
       <div class="card">
         <div class="card-header">
@@ -518,6 +576,51 @@
       </div>
     </div>
 
+  </div>
+
+  <!-- MODAL: NEUER KONTAKT (DSGVO) -->
+  <div id="modal-contact" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>+ Neuen DSGVO-Kontakt anlegen</h3>
+        <button class="btn btn-sm" onclick="toggleModal('modal-contact')">✕</button>
+      </div>
+      <form onsubmit="submitNewContact(event)">
+        <div class="form-group">
+          <label>Name / Ansprechpartner:</label>
+          <input type="text" name="name" class="text-input" placeholder="z. B. Rechnungsstelle Acme Corp" required>
+        </div>
+        <div class="form-group">
+          <label>E-Mail-Adresse:</label>
+          <input type="email" name="email" class="text-input" placeholder="billing@acme.de" required>
+        </div>
+        <div class="form-group">
+          <label>Organisation / Firma:</label>
+          <input type="text" name="organization" class="text-input" placeholder="Acme International GmbH">
+        </div>
+        <div class="form-group">
+          <label>Kategorie:</label>
+          <select name="category" class="select-input">
+            <option value="vendor">Vendor (Lieferant)</option>
+            <option value="institution">Institution / Behörde</option>
+            <option value="partner">Geschäftspartner</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>DSGVO Schutzstufe &amp; Aufbewahrungsfrist:</label>
+          <select name="protection_level" class="select-input">
+            <option value="S3">S3: 36 Monate (Steuerrelevanter Belegverkehr gem. § 147 AO)</option>
+            <option value="S1">S1: 6 Monate (Kurzzeitige Projektanfragen)</option>
+            <option value="S2">S2: 12 Monate (Geschäftsanbahnung)</option>
+            <option value="S4">S4: Permanent bis Widerruf (Vertragspartner)</option>
+          </select>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+          <button type="button" class="btn" onclick="toggleModal('modal-contact')">Abbrechen</button>
+          <button type="submit" class="btn btn-primary">Kontakt Speichern</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <!-- MODAL: NEUER TASK -->
