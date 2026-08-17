@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ app_name }} — Google Cloud Architecture &amp; Circuit Blueprint</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .schaltplan-board {
+      background: var(--board);
+      border: 1px solid var(--zone-edge);
+      border-radius: var(--radius);
+      padding: 28px;
+      margin-bottom: 24px;
+    }
+    .flow-step {
+      background: var(--zone);
+      border: 1px solid var(--zone-edge);
+      border-radius: var(--radius-sm);
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      position: relative;
+    }
+    .flow-step::after {
+      content: "↓";
+      display: block;
+      text-align: center;
+      color: var(--accent);
+      font-size: 20px;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    .flow-step:last-child::after {
+      content: "";
+    }
+    .flow-title {
+      font-weight: 700;
+      color: var(--google-blue);
+      font-size: 14.5px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .flow-meta {
+      font-size: 13px;
+      color: var(--ink-dim);
+      line-height: 1.5;
+    }
+    .flow-chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .chip-item {
+      background: var(--chip);
+      border: 1px solid var(--zone-edge);
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 11.5px;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-icon">G</div>
+      <div>
+        <h1>SentinelFleet <span class="badge">Google Cloud Engine</span></h1>
+        <div class="subtag">Interactive Architecture &amp; Circuit Blueprint</div>
+      </div>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="nav-link">🎛️ Operator Dashboard</a>
+      <a href="/schaltplan" class="nav-link active">⌁ Architecture &amp; Circuit Blueprint</a>
+      <button class="btn btn-sm" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="hero-banner">
+      <div class="hero-text">
+        <h2>Interaktiver Architektur-Schaltplan (Google Cloud Hackathon Blueprint)</h2>
+        <p>End-to-End Datenfluss: Event Ingestion → Model Armor → Multi-Agent Conductor → Gemini 3.5 Flash → Memory Bank → Firestore → Cloud Trace</p>
+      </div>
+    </div>
+
+    <div class="schaltplan-board">
+      
+      <!-- STEP 1: Ingestion -->
+      <div class="flow-step">
+        <div class="flow-title">1. Event Ingestion &amp; Input Channels (Pillar UAS &amp; Google Cloud Pub/Sub)</div>
+        <div class="flow-meta">
+          Eingehende Dokumente (PDF-Rechnungen, E-Mail-Anhänge, Scans, API-Payloads) triggern asynchrone Jobs via Google Cloud Pub/Sub oder REST-Endpunkte.
+        </div>
+        <div class="flow-chips">
+          <span class="chip-item">Google Cloud Pub/Sub</span>
+          <span class="chip-item">connectors (mail-connector)</span>
+          <span class="chip-item">ticket-master</span>
+        </div>
+      </div>
+
+      <!-- STEP 2: Zero-Trust Gateway & Model Armor -->
+      <div class="flow-step">
+        <div class="flow-title">2. Zero-Trust Gateway &amp; Model Armor (Pillar Control)</div>
+        <div class="flow-meta">
+          Jeder Request durchläuft die Model Armor: Prompt Injection Defense, PII-Maskierung (IBAN, API-Keys) und Zero-Trust Permission Check (LOCK.permissions.json).
+        </div>
+        <div class="flow-chips">
+          <span class="chip-item">lock-master</span>
+          <span class="chip-item">anonymizer</span>
+          <span class="chip-item">Model Armor Guard</span>
+          <span class="chip-item">Principle of Least Privilege (PoLP)</span>
+        </div>
+      </div>
+
+      <!-- STEP 3: Multi-Agent Conductor & Gemini 3.5 Flash -->
+      <div class="flow-step">
+        <div class="flow-title">3. Multi-Agent Conductor &amp; Gemini 3.5 Flash Vision (Pillar Control &amp; Conductor)</div>
+        <div class="flow-meta">
+          Der Roshambo Swarm Conductor und Clutch Router delegieren Subtasks an isolierte Agenten (Extractor, Auditor, Reconciler, Dispute Communicator).
+        </div>
+        <div class="flow-chips">
+          <span class="chip-item">Gemini 3.5 Flash Vision</span>
+          <span class="chip-item">clutch Router</span>
+          <span class="chip-item">roshambo Swarm</span>
+          <span class="chip-item">coma Lifecycle</span>
+        </div>
+      </div>
+
+      <!-- STEP 4: Memory Bank & Context Injection -->
+      <div class="flow-step">
+        <div class="flow-title">4. Memory Bank &amp; Context Injection (Pillar Memory)</div>
+        <div class="flow-meta">
+          MemoryHooker injiziert relevante Firmenrichtlinien (USMC Fakten &amp; GARDENER RAG Chunks) dynamisch in die Prompts der Sub-Agenten.
+        </div>
+        <div class="flow-chips">
+          <span class="chip-item">USMC Memory Bank</span>
+          <span class="chip-item">GARDENER FTS5 / Vector RAG</span>
+          <span class="chip-item">memory-hooker</span>
+        </div>
+      </div>
+
+      <!-- STEP 5: Compliance Audit & Self-Healing Dispute -->
+      <div class="flow-step">
+        <div class="flow-title">5. § 14 UStG Compliance Audit &amp; Self-Healing Loop (Pillar Domain: OmniLedger)</div>
+        <div class="flow-meta">
+          Gültige Belege werden direkt im Firestore Ledger verbucht. Bei Mängeln (fehlende USt-IdNr, Rechenfehler) generiert der Agent autonom ein Korrekturschreiben und übergibt es an das Human-in-the-Loop Ticket-Gate.
+        </div>
+        <div class="flow-chips">
+          <span class="chip-item">law-checker (§14 UStG)</span>
+          <span class="chip-item">Self-Healing Vendor Dispute</span>
+          <span class="chip-item">RechnungsSteller</span>
+          <span class="chip-item">Google Cloud Firestore</span>
+        </div>
+      </div>
+
+      <!-- STEP 6: OpenTelemetry Telemetry -->
+      <div class="flow-step">
+        <div class="flow-title">6. Observability Mesh &amp; OpenTelemetry Tracing</div>
+        <div class="flow-meta">
+          Jeder Gedankenschritt und Tool-Aufruf wird als standardisierter Span in Google Cloud Trace aufgezeichnet. Loop-Detektoren greifen bei Anomalien ein.
+        </div>
+        <div class="flow-chips">
+          <span class="chip-item">Google Cloud Trace</span>
+          <span class="chip-item">system-auditor</span>
+          <span class="chip-item">Circuit Breaker</span>
+          <span class="chip-item">Audit Receipts</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

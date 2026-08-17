@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ app_name }} — Google Gemini Enterprise Agent Platform &amp; Taskmaster</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-icon">G</div>
+      <div>
+        <h1>SentinelFleet <span class="badge">Google Cloud Engine</span></h1>
+        <div class="subtag">Fortified Enterprise Agent Platform &amp; OmniLedger Taskmaster</div>
+      </div>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="nav-link active">🎛️ Operator Dashboard</a>
+      <a href="/schaltplan" class="nav-link">⌁ Architecture &amp; Circuit Blueprint</a>
+      <button class="btn btn-sm" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- Hero Status Banner -->
+    <div class="hero-banner">
+      <div class="hero-text">
+        <h2>Enterprise Agent Governance &amp; Autonomous Taskmaster</h2>
+        <p>Zero-Trust Model Armor · Multi-Agent Swarm Conductor · USMC Memory Bank · § 14 UStG Self-Healing Taskmaster</p>
+      </div>
+      <div class="hero-status">
+        <div class="stat-chip">
+          <div class="val">{{ agents|length }}</div>
+          <div class="lbl">Fleet Agents</div>
+        </div>
+        <div class="stat-chip">
+          <div class="val">{{ pending_tickets|length }}</div>
+          <div class="lbl">Pending Approvals</div>
+        </div>
+        <div class="stat-chip">
+          <div class="val">{{ booked_invoices|length }}</div>
+          <div class="lbl">Booked Invoices</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Interactive Live Showcase Trigger Panel -->
+    <div class="showcase-box">
+      <div class="showcase-header">
+        <h3>⚡ OmniLedger Live Demo Trigger (Taskmaster &amp; Model Armor)</h3>
+        <div id="process-status"></div>
+      </div>
+      <p class="item-desc">
+        Wähle einen Testfall, um die synchrone und asynchrone Multi-Agenten-Pipeline auf Google Cloud Run auszuführen:
+      </p>
+      <div class="trigger-grid">
+        <div class="trigger-btn btn-valid" onclick="processInvoicePreset('valid')">
+          <b>📄 1. Saubere Rechnung</b>
+          <span>Auto-Booking im Firestore Ledger &amp; Memory Bank</span>
+        </div>
+        <div class="trigger-btn btn-vat" onclick="processInvoicePreset('missing_vat')">
+          <b>⚠️ 2. Fehlende USt-IdNr</b>
+          <span>§ 14 UStG Dispute Loop &amp; Human-in-the-Loop Ticket</span>
+        </div>
+        <div class="trigger-btn btn-math" onclick="processInvoicePreset('math_error')">
+          <b>🧮 3. Rechenfehler Netto/Brutto</b>
+          <span>Inkonsistenz-Block &amp; Korrekturschreiben</span>
+        </div>
+        <div class="trigger-btn btn-attack" onclick="processInvoicePreset('injection_attack')">
+          <b>🛡️ 4. Prompt Injection Attack</b>
+          <span>Model Armor Interception &amp; Agenten-Quarantäne</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4 Pillars Architecture Layout -->
+    <div class="pillars-grid">
+      
+      <!-- PILLAR 1: CONTROL (Fleet & Model Armor) -->
+      <div class="card">
+        <div class="card-header">
+          <h3>🏛️ Pillar Control: Fleet &amp; Model Armor</h3>
+          <span class="badge-status badge-info">{{ agents|length }} Active</span>
+        </div>
+        <div class="card-body">
+          {% for agent in agents %}
+          <div class="agent-item {% if agent.status.value == 'quarantined' %}quarantined{% endif %}">
+            <div class="item-top">
+              <span class="item-title">{{ agent.name }}</span>
+              <span class="badge-status {% if agent.status.value == 'quarantined' %}badge-danger{% elif agent.status.value == 'active' %}badge-ok{% elif agent.status.value == 'waiting_approval' %}badge-warn{% else %}badge-info{% endif %}">
+                {{ agent.status.value|upper }}
+              </span>
+            </div>
+            <div class="item-desc">{{ agent.description }}</div>
+            {% if agent.quarantine_reason %}
+            <div style="color: var(--danger); font-size: 11px; margin-top: 6px; font-weight: 600;">
+              ⚠️ {{ agent.quarantine_reason }}
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- PILLAR 2: UAS (Human-in-the-Loop Tickets) -->
+      <div class="card">
+        <div class="card-header">
+          <h3>📥 Pillar UAS: Ticket-Master (HITL)</h3>
+          <span class="badge-status {% if pending_tickets %}badge-warn{% else %}badge-ok{% endif %}">
+            {{ pending_tickets|length }} Pending
+          </span>
+        </div>
+        <div class="card-body">
+          {% if not tickets %}
+          <p class="item-desc">Keine Tickets in der Warteschlange. Alle Aktionen genehmigt.</p>
+          {% endif %}
+          {% for ticket in tickets %}
+          <div class="ticket-item">
+            <div class="item-top">
+              <span class="item-title">{{ ticket.title }}</span>
+              <span class="badge-status {% if ticket.status.value == 'approved' %}badge-ok{% elif ticket.status.value == 'rejected' %}badge-danger{% else %}badge-warn{% endif %}">
+                {{ ticket.status.value|upper }}
+              </span>
+            </div>
+            <div class="item-desc" style="margin-bottom: 8px;">{{ ticket.description }}</div>
+            {% if ticket.status.value == 'pending_approval' %}
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-sm btn-approve" onclick="approveTicket('{{ ticket.ticket_id }}')">✓ Freigeben</button>
+              <button class="btn btn-sm btn-reject" onclick="rejectTicket('{{ ticket.ticket_id }}')">✕ Ablehnen</button>
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- PILLAR 3: DOMAIN (OmniLedger Document Pipeline) -->
+      <div class="card">
+        <div class="card-header">
+          <h3>⚡ Pillar Domain: OmniLedger Taskmaster</h3>
+          <span class="badge-status badge-ok">{{ invoices|length }} Processed</span>
+        </div>
+        <div class="card-body">
+          {% if not invoices %}
+          <p class="item-desc">Noch keine Belege verarbeitet. Klicke oben auf einen Showcase-Button.</p>
+          {% endif %}
+          {% for inv in invoices %}
+          <div class="invoice-item">
+            <div class="item-top">
+              <span class="item-title">{{ inv.vendor_name }} ({{ inv.invoice_number }})</span>
+              <span class="badge-status {% if inv.status.value == 'booked' %}badge-ok{% elif inv.status.value == 'disputed' %}badge-warn{% else %}badge-info{% endif %}">
+                {{ inv.status.value|upper }}
+              </span>
+            </div>
+            <div class="item-desc">
+              Betrag: <b>{{ "%.2f"|format(inv.gross_amount) }} {{ inv.currency }}</b> (Netto {{ "%.2f"|format(inv.net_amount) }} + {{ "%.1f"|format(inv.tax_rate) }}% MwSt)
+            </div>
+            {% if inv.compliance_violations %}
+            <div style="color: var(--warn); font-size: 11px; margin-top: 6px; font-weight: 500;">
+              Abweichung: {{ inv.compliance_violations|join(', ') }}
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- PILLAR 4: MEMORY (USMC & OpenTelemetry Telemetry) -->
+      <div class="card">
+        <div class="card-header">
+          <h3>🧠 Pillar Memory: State &amp; OpenTelemetry</h3>
+          <span class="badge-status badge-info">{{ spans|length }} Spans</span>
+        </div>
+        <div class="card-body">
+          <div style="margin-bottom: 14px;">
+            <b style="font-size: 12px; color: var(--accent);">USMC Memory Bank Records:</b>
+            {% for m in memories[:3] %}
+            <div style="font-size: 11px; color: var(--ink-dim); padding: 5px 0; border-bottom: 1px dashed var(--zone-edge);">
+              • <b>[{{ m.key }}]</b>: {{ m.content }}
+            </div>
+            {% endfor %}
+          </div>
+          <div>
+            <b style="font-size: 12px; color: var(--accent);">Live OpenTelemetry Spans (Cloud Trace):</b>
+            {% for s in spans[:4] %}
+            <div class="span-item" style="padding: 6px 8px; margin-top: 6px;">
+              <div class="item-top" style="font-size: 11px;">
+                <span><b>{{ s.name }}</b> ({{ s.agent_id }})</span>
+                <span class="badge-status {% if s.status == 'OK' %}badge-ok{% else %}badge-danger{% endif %}">{{ s.status }}</span>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

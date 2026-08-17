@@ -1,0 +1,86 @@
+{
+  "schema": "ellmos.stack.v2",
+  "id": "sentinel-fleet-stack",
+  "name": "SentinelFleet — Fortified Enterprise Agent Platform",
+  "version": "1.0.0",
+  "kind": "enterprise-platform-stack",
+  "stack_class": "full-stack",
+  "target_cloud": "google-cloud",
+  "runtimes": [
+    "google-cloud-run",
+    "google-cloud-firestore",
+    "google-cloud-pubsub",
+    "gemini-3.5-flash"
+  ],
+  "pillars": {
+    "control": {
+      "name": "Enterprise Governance & Swarm Conductor",
+      "modules": [
+        "lock-master",
+        "clutch",
+        "roshambo",
+        "coma",
+        "flowhooker",
+        "system-auditor",
+        "anonymizer"
+      ],
+      "roles": [
+        "coordination.locking",
+        "routing.default",
+        "swarm.patterns",
+        "agents.lifecycle",
+        "security.model_armor",
+        "telemetry.opentelemetry"
+      ]
+    },
+    "memory": {
+      "name": "Persistent State & Memory Bank",
+      "modules": [
+        "USMC",
+        "GARDENER",
+        "memory-hooker",
+        "prompt-evidence-collector"
+      ],
+      "roles": [
+        "memory.curated",
+        "memory.organic",
+        "memory.injection",
+        "evidence.collector"
+      ]
+    },
+    "uas": {
+      "name": "Human-in-the-Loop & Triage",
+      "modules": [
+        "ticket-master",
+        "task-master",
+        "ellmos-unified-gui"
+      ],
+      "roles": [
+        "tickets.capture",
+        "tasks.default",
+        "operator.ui"
+      ]
+    },
+    "domain": {
+      "name": "OmniLedger Autonomous Invoice Taskmaster",
+      "modules": [
+        "UniversalDocsGrabber",
+        "MailProcessor",
+        "law-checker",
+        "RechnungsSteller",
+        "marblerun"
+      ],
+      "roles": [
+        "domain.invoice_extractor",
+        "domain.tax_compliance_ustg14",
+        "domain.ledger_reconciliation",
+        "domain.vendor_dispute_loop"
+      ]
+    }
+  },
+  "contracts": {
+    "permission_model": "lock-permissions-v1",
+    "memory_protocol": "usmc.session.v1",
+    "telemetry_standard": "opentelemetry.traces.v1"
+  }
+}
