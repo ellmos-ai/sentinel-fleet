@@ -37,7 +37,9 @@ async def test_index_renders_html(client):
 
     body = response.text
     assert '<html lang="en"' in body
-    assert "Enterprise Fleet Control Center" in body
+    # The gate ledger is the console's lead panel; the headline copy moved there when the
+    # four-stat banner was replaced, so this asserts the panel rather than the old wording.
+    assert "Gate ledger" in body
     # Loop bodies really ran: agents, prompts and skills each render their controls
     assert "agent:invoice-extractor" in body
     assert "openPromptVersionModal(" in body

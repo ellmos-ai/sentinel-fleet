@@ -1,0 +1,23 @@
+{# Shared masthead. `current_view` is set by the including template: "console" or "blueprint". #}
+<header class="masthead">
+  <div class="masthead-row">
+    <a class="wordmark" href="/">
+      <span class="wordmark-glyph"><svg class="icon"><use href="#i-shield"/></svg></span>
+      <span>
+        <span class="wordmark-name">Sentinel<span style="color: var(--accent)">Fleet</span></span>
+        <span class="wordmark-role">{{ masthead_role }}</span>
+      </span>
+    </a>
+    <nav class="masthead-tools">
+      <a class="masthead-link {% if current_view == 'console' %}current{% endif %}" href="/">
+        <svg class="icon"><use href="#i-grid"/></svg> Console
+      </a>
+      <a class="masthead-link {% if current_view == 'blueprint' %}current{% endif %}" href="/blueprint">
+        <svg class="icon"><use href="#i-circuit"/></svg> Blueprint
+      </a>
+      <button class="btn btn-sm btn-icon" onclick="toggleTheme()" title="Switch between light and dark" aria-label="Switch theme">
+        <svg class="icon"><use href="#i-theme"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>

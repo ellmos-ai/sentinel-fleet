@@ -6,97 +6,60 @@
   <title>{{ app_name }} — Google Cloud Architecture &amp; Circuit Blueprint</title>
   <link rel="stylesheet" href="/static/style.css">
   <style>
-    .blueprint-board {
-      background: var(--board);
-      border: 1px solid var(--zone-edge);
-      border-radius: var(--radius);
-      padding: 28px;
-      margin-bottom: 24px;
-      box-shadow: var(--shadow-sm);
-    }
+    /* The pipeline really is a sequence, so the steps carry ordinals. */
     .flow-step {
-      background: var(--chip);
-      border: 1px solid var(--zone-edge);
-      border-radius: var(--radius-sm);
-      padding: 18px 22px;
-      margin-bottom: 16px;
-      position: relative;
-      box-shadow: var(--shadow-sm);
+      background: var(--surface);
+      border: 1px solid var(--rule);
+      border-left: 2px solid var(--accent);
+      border-radius: var(--r-1);
+      padding: var(--s-4);
+      margin-bottom: var(--s-3);
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: var(--s-3);
     }
-    .flow-step::after {
-      content: "↓";
-      display: block;
-      text-align: center;
-      color: var(--google-blue);
-      font-size: 22px;
-      font-weight: bold;
-      margin-top: 10px;
-    }
-    .flow-step:last-child::after {
-      content: "";
-    }
-    .flow-title {
-      font-weight: 700;
-      color: var(--google-blue);
-      font-size: 15px;
-      margin-bottom: 6px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .flow-meta {
-      font-size: 13px;
-      color: var(--ink-dim);
-      line-height: 1.5;
-    }
-    .flow-chips {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 12px;
-    }
-    .chip-item {
-      background: var(--board);
-      border: 1px solid var(--zone-edge);
-      padding: 4px 10px;
-      border-radius: 6px;
-      font-size: 11.5px;
-      color: var(--google-blue);
+    .flow-ordinal {
       font-family: var(--font-mono);
+      font-size: 15px;
       font-weight: 600;
-      box-shadow: var(--shadow-sm);
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+    }
+    .flow-title { font-family: var(--font-display); font-weight: 600; font-size: 14.5px; margin-bottom: var(--s-1); }
+    .flow-meta { font-size: 12.5px; color: var(--ink-2); }
+    .flow-chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: var(--s-2); }
+    .chip-item {
+      background: var(--surface-inset);
+      border: 1px solid var(--rule);
+      padding: 1px 6px;
+      border-radius: var(--r-1);
+      font-size: 10.5px;
+      color: var(--ink-2);
+      font-family: var(--font-mono);
     }
   </style>
 </head>
 <body>
-  <header>
-    <div class="brand">
-      <div class="brand-icon">G</div>
-      <div>
-        <h1>SentinelFleet <span class="badge">Google Cloud Engine</span></h1>
-        <div class="subtag">Interactive Architecture &amp; Circuit Blueprint</div>
-      </div>
-    </div>
-    <div class="nav-links">
-      <a href="/" class="nav-link">🎛️ Operator Dashboard</a>
-      <a href="/blueprint" class="nav-link active">⌁ Architecture &amp; Blueprint</a>
-      <button class="btn btn-sm" onclick="toggleTheme()">🌓 Theme</button>
-    </div>
-  </header>
+  {% include "_icons.html" %}
+  {% set current_view = "blueprint" %}
+  {% set masthead_role = "architecture blueprint" %}
+  {% include "_masthead.html" %}
 
   <div class="container">
-    <div class="hero-banner">
-      <div class="hero-text">
-        <h2>Interactive Architecture &amp; Circuit Blueprint (Google Cloud Hackathon)</h2>
-        <p>End-to-end data flow: event ingestion → Model Armor → multi-agent conductor → Gemini 3.5 Flash → memory bank → ledger store → OpenTelemetry</p>
+    <div class="section-head">
+      <div>
+        <h2>Architecture blueprint</h2>
+        <p>How a document travels the platform: ingestion, guardrail, gateway, conductor, memory, ledger, trace.</p>
       </div>
     </div>
 
-    <div class="blueprint-board">
+    <div class="card">
       
       <!-- STEP 1: Ingestion -->
       <div class="flow-step">
-        <div class="flow-title">1. Event Ingestion &amp; Input Channels (Pillar UAS)</div>
+        <div class="flow-ordinal">1</div>
+        <div>
+        <div class="flow-title">Event Ingestion &amp; Input Channels (Pillar UAS)</div>
         <div class="flow-meta">
           Incoming documents (PDF invoices, email attachments, scans, API payloads) are accepted over REST endpoints and distributed through an in-process event bus (Pub/Sub-compatible adapter for the Cloud Run deployment).
         </div>
@@ -105,11 +68,14 @@
           <span class="chip-item">connectors (mail-connector)</span>
           <span class="chip-item">ticket-master</span>
         </div>
+        </div>
       </div>
 
       <!-- STEP 2: Zero-Trust Gateway & Model Armor -->
       <div class="flow-step">
-        <div class="flow-title">2. Zero-Trust Gateway &amp; Model Armor (Pillar Control)</div>
+        <div class="flow-ordinal">2</div>
+        <div>
+        <div class="flow-title">Zero-Trust Gateway &amp; Model Armor (Pillar Control)</div>
         <div class="flow-meta">
           Every request passes through Model Armor: prompt injection defence, PII masking (IBAN, API keys, credit card numbers) and a Zero-Trust permission check against the permission registry.
         </div>
@@ -119,11 +85,14 @@
           <span class="chip-item">Model Armor Guard</span>
           <span class="chip-item">Principle of Least Privilege (PoLP)</span>
         </div>
+        </div>
       </div>
 
       <!-- STEP 3: Multi-Agent Conductor & Gemini 3.5 Flash -->
       <div class="flow-step">
-        <div class="flow-title">3. Multi-Agent Conductor &amp; Gemini 3.5 Flash Vision (Pillar Control &amp; Conductor)</div>
+        <div class="flow-ordinal">3</div>
+        <div>
+        <div class="flow-title">Multi-Agent Conductor &amp; Gemini 3.5 Flash Vision (Pillar Control &amp; Conductor)</div>
         <div class="flow-meta">
           The Roshambo swarm conductor and the Clutch router delegate subtasks to isolated agents (extractor, auditor, reconciler, dispute communicator), each call passing the Sovereign Gateway.
         </div>
@@ -133,11 +102,14 @@
           <span class="chip-item">roshambo Swarm</span>
           <span class="chip-item">coma Lifecycle</span>
         </div>
+        </div>
       </div>
 
       <!-- STEP 4: Memory Bank & Context Injection -->
       <div class="flow-step">
-        <div class="flow-title">4. Memory Bank &amp; Context Injection (Pillar Memory)</div>
+        <div class="flow-ordinal">4</div>
+        <div>
+        <div class="flow-title">Memory Bank &amp; Context Injection (Pillar Memory)</div>
         <div class="flow-meta">
           MemoryHooker injects the relevant corporate policies (USMC facts &amp; GARDENER retrieval chunks) into the prompts of the sub-agents, and the retrieved context is quoted in the generated dispute letter.
         </div>
@@ -146,11 +118,14 @@
           <span class="chip-item">GARDENER keyword-overlap retrieval</span>
           <span class="chip-item">memory-hooker</span>
         </div>
+        </div>
       </div>
 
       <!-- STEP 5: Compliance Audit & Self-Healing Dispute -->
       <div class="flow-step">
-        <div class="flow-title">5. § 14 UStG Compliance Audit &amp; Self-Healing Loop (Pillar Domain: OmniLedger)</div>
+        <div class="flow-ordinal">5</div>
+        <div>
+        <div class="flow-title">§ 14 UStG Compliance Audit &amp; Self-Healing Loop (Pillar Domain: OmniLedger)</div>
         <div class="flow-meta">
           Valid documents are booked straight into the ledger store (Firestore in production, local JSON store in the demo). On defects (missing VAT ID, arithmetic errors) the agent drafts a correction letter autonomously and hands it to the human-in-the-loop ticket gate.
         </div>
@@ -160,11 +135,14 @@
           <span class="chip-item">RechnungsSteller</span>
           <span class="chip-item">Firestore (production) / local JSON store (demo)</span>
         </div>
+        </div>
       </div>
 
       <!-- STEP 6: OpenTelemetry Telemetry -->
       <div class="flow-step">
-        <div class="flow-title">6. Observability Mesh &amp; OpenTelemetry Tracing</div>
+        <div class="flow-ordinal">6</div>
+        <div>
+        <div class="flow-title">Observability Mesh &amp; OpenTelemetry Tracing</div>
         <div class="flow-meta">
           Every tool call is recorded as an OpenTelemetry span (in-memory exporter; Cloud Trace export can be enabled via ENABLE_CLOUD_TRACE). Loop detectors step in on anomalies.
         </div>
@@ -173,6 +151,7 @@
           <span class="chip-item">system-auditor</span>
           <span class="chip-item">Circuit Breaker</span>
           <span class="chip-item">Audit Receipts</span>
+        </div>
         </div>
       </div>
 

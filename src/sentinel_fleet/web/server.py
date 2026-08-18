@@ -176,6 +176,37 @@ async def execute_via_gateway(
     )
 
 
+# The dashboard renders the tail of each register, never the whole history. The span buffer
+# was already bounded for this reason; the task, ticket and contact tables grew unbounded and
+# turned a long-running deployment's entry page into a multi-megabyte document.
+DASHBOARD_ROW_LIMIT = 50
+
+
+def _tail(records: List[Any]) -> List[Any]:
+    return records[-DASHBOARD_ROW_LIMIT:]
+
+
+def _prompt_catalog() -> List[Dict[str, Any]]:
+    """Version list for the chat composer: enough to pin a version, without the full bodies."""
+    return [
+        {
+            "id": p.id,
+            "title": p.title,
+            "active_version": p.active_version,
+            "versions": [{"version_number": v.version_number, "title": v.title} for v in p.versions]
+        }
+        for p in prompt_registry.list_all()
+    ]
+
+
+def _skill_catalog() -> List[Dict[str, Any]]:
+    """Skill picker index. Bodies stay server-side; the picker only needs identity."""
+    return [
+        {"skill_id": s.skill_id, "name": s.name, "pillar": s.pillar, "version": s.version}
+        for s in skill_registry.list_all()
+    ]
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index_view(request: Request):
     """Render the Main Operator Control Dashboard."""
@@ -183,20 +214,27 @@ async def index_view(request: Request):
         request=request,
         name="index.html",
         context={
+            "chat_models": SUPPORTED_MODELS,
+            "prompt_catalog": _prompt_catalog(),
+            "skill_catalog": _skill_catalog(),
             "app_name": settings.app_name,
             "environment": settings.environment,
             "project": settings.google_cloud_project,
             "gemini_live": bool(settings.gemini_api_key),
             "gemini_model": settings.gemini_default_model,
             "agents": lifecycle_manager.list_fleet(),
-            "tickets": ticket_master.list_all(),
+            "tickets": _tail(ticket_master.list_all()),
+            "ticket_total": len(ticket_master.list_all()),
             "pending_tickets": ticket_master.get_pending_tickets(),
-            "tasks": task_master.list_all(),
-            "memories": memory_bank.list_all(),
+            "tasks": _tail(task_master.list_all()),
+            "task_total": len(task_master.list_all()),
+            "memories": _tail(memory_bank.list_all()),
             "prompts": prompt_registry.list_all(),
             "skills": skill_registry.list_all(),
             "domains": domain_registry.list_all(),
-            "contacts": privacy_contact_hub.list_all(),
+            "contacts": _tail(privacy_contact_hub.list_all()),
+            "contact_total": len(privacy_contact_hub.list_all()),
+            "row_limit": DASHBOARD_ROW_LIMIT,
             "dsgvo_audit": privacy_contact_hub.run_dsgvo_retention_audit(),
             "invoices": list(processed_invoices.values()),
             "booked_invoices": ledger_reconciler.list_booked(),
@@ -404,6 +442,35 @@ async def api_update_prompt_permissions(
 @app.get("/api/skills")
 async def api_get_skills():
     return [s.model_dump() for s in skill_registry.list_all()]
+
+
+@app.get("/api/skills/{skill_id}")
+async def api_get_skill(skill_id: str):
+    """One skill including its body, so the console can copy it without inlining 32 bodies."""
+    skill = skill_registry.get_skill(skill_id)
+    if not skill:
+        raise SkillNotFoundError(skill_id)
+    return skill.model_dump()
+
+
+@app.post("/api/skills/create")
+async def api_create_skill(
+    name: str = Form(...),
+    pillar: str = Form("domain"),
+    description: str = Form(...),
+    required_tools: str = Form(""),
+    body: str = Form("")
+):
+    """Register an operator-authored skill so it is selectable in the chat console."""
+    tools = [t.strip() for t in required_tools.split(",") if t.strip()]
+    skill = skill_registry.create_skill(
+        name=name,
+        pillar=pillar,
+        description=description,
+        body=body,
+        required_tools=tools
+    )
+    return {"status": "created", "skill": skill.model_dump()}
 
 
 @app.post("/api/skills/{skill_id}/version")
