@@ -210,3 +210,19 @@ async def test_telemetry_status_reports_real_exporter(client):
     # Mi2: both the dashboard buffer and the exporter retention are bounded
     assert status["retained_span_records"] <= status["retention_limit"] == 500
     assert status["retained_exported_spans"] <= status["retention_limit"]
+
+
+async def test_gate_ledger_shows_newest_span(client):
+    """Regression: the overview gate ledger must include the NEWEST span.
+
+    get_recent_spans() returns newest-first; slicing [-7:] on that list used to
+    surface the seven OLDEST spans and hide every fresh verdict (found while
+    filming the demo video).
+    """
+    from sentinel_fleet.core.telemetry import telemetry
+
+    for i in range(12):
+        span = telemetry.start_span(f"tool_call:ledger_probe_{i}", "agent:test-ledger")
+        telemetry.end_span(span, status="OK")
+    response = await client.get("/")
+    assert "ledger_probe_11" in response.text, "newest span missing from gate ledger"
