@@ -6,11 +6,9 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=8080 \
     HOST=0.0.0.0
 
-COPY pyproject.toml .
+COPY . .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
-
-COPY . .
 
 EXPOSE 8080
 

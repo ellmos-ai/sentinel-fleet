@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "Fortified Enterprise Agent Platform, Zero-Trust Governance & Autonomous Taskmaster on Gemini 3.5 and Google Cloud"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = "AGPL-3.0-only"
 authors = [
     { name = "SentinelFleet Team", email = "info@ellmos.ai" },
 ]

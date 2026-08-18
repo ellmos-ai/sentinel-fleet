@@ -7,7 +7,7 @@
 [![Zero-Trust Model Armor](https://img.shields.io/badge/Security-Model%20Armor%20%26%20Zero--Trust-green.svg)](#security--governance)
 [![Google GenAI SDK](https://img.shields.io/badge/SDK-google--genai-4285F4.svg)](https://googleapis.github.io/python-genai/)
 [![Pytest](https://img.shields.io/badge/pytest-121%2F121%20passed-brightgreen.svg)](tests/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
 > Built for the **Google Cloud All Things Agentic Hackathon** (Track 3: The Fortified Enterprise Fleet & Track 1: The Taskmaster).
 
@@ -128,3 +128,11 @@ python -m pytest tests/ -v
 * **Zero-Trust Tool Scoping:** Agents only have access to their assigned tools via `gateway.py`.
 * **Adversarial Injection Detection:** Regex and semantic boundary matching in `model_armor.py`.
 * **Quarantine Protocol:** Malicious inputs immediately quarantine the executing agent and notify the operator via high-priority TicketMaster tickets.
+
+---
+
+## License
+
+Copyright (C) 2026 Lukas Geiger.
+
+SentinelFleet is licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0-only) — see [LICENSE](LICENSE). If you run a modified version of this software as a network service, the AGPL requires you to offer its source to your users. For commercial licensing outside the AGPL terms, contact the author.
