@@ -19,16 +19,15 @@ from pydantic import BaseModel, Field
 
 from sentinel_fleet.chat.service import chat_service
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
+from sentinel_fleet.core import chain_runner
 from sentinel_fleet.core.config import settings
 from sentinel_fleet.core.errors import TemplateHasBindingsError, TemplateNotFoundError
 from sentinel_fleet.core.gateway import gateway
 from sentinel_fleet.core.schedule_math import next_after
 from sentinel_fleet.core.storage import get_store
 from sentinel_fleet.uas.task_master import TaskRecord, TaskState, task_master
-from sentinel_fleet.uas.task_templates import TaskTemplate, task_template_registry
+from sentinel_fleet.uas.task_templates import EXECUTE_TEMPLATE_TOOL, TaskTemplate, task_template_registry
 from sentinel_fleet.uas.ticket_master import TicketPriority, ticket_master
-
-EXECUTE_TEMPLATE_TOOL = "execute_template"
 
 # How far past a one-off ScheduleBinding's due_at counts as "missed" rather than "fired a
 # little late" - the grace window a responsive Cloud Scheduler tick normally lands inside.
@@ -291,6 +290,11 @@ async def enqueue_template(
 
     `triggered_by` is "manual" for the console's "Enqueue now" button, "routine"/"schedule"
     for a binding fired by `fire_due()`, and "external" reserved for a future direct caller.
+
+    A single-step template keeps running the exact path below, unchanged since before chains
+    existed. A multi-step template (concept doc, section E.4 "Minimaler Ketten-Schnitt") is
+    handed to `core/chain_runner.py` instead, once past the template-level approval gate and
+    IN_PROGRESS transition both paths share.
     """
     template = task_template_registry.get_template(template_id)
     if not template:
@@ -310,7 +314,8 @@ async def enqueue_template(
         # Same shape as the gateway's own ASK gate for `send_external_email`: the ticket is
         # created BECAUSE approval is required, not instead of it (concept doc, section A.4).
         # `requires_approval` lives on the template instance, unlike the gateway's tool-name
-        # keyed permission registry, so it is honoured here before any model call is made.
+        # keyed permission registry, so it is honoured here before any model call is made -
+        # for a chain, that means before its first step runs, not just its first model call.
         ticket = ticket_master.create_approval_ticket(
             title=f"Approval required: template run '{template.name}'",
             description=(
@@ -327,6 +332,9 @@ async def enqueue_template(
         )
 
     task_master.update_task_state(task.task_id, TaskState.IN_PROGRESS)
+
+    if len(template.steps) > 1:
+        return await chain_runner.run_chain(template, task)
 
     agent = lifecycle_manager.get_agent(template.assigned_agent)
     if agent is None:
