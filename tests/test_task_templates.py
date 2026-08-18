@@ -441,6 +441,34 @@ async def test_update_steps_endpoint_rejects_gappy_positions(client):
 
 
 @pytest.mark.asyncio
+async def test_list_endpoint_carries_steps_and_step_count_for_the_editor(client):
+    template = task_template_registry.create_template(
+        name="Two-step for the dashboard", owner="vik",
+        steps=[Step(step_id="b", position=1), Step(step_id="a", position=0)]
+    )
+
+    response = await client.get("/api/task-templates")
+    assert response.status_code == 200
+    row = next(r for r in response.json() if r["template_id"] == template.template_id)
+
+    assert row["step_count"] == 2
+    # Sorted by position for the editor, regardless of storage order.
+    assert [s["step_id"] for s in row["steps"]] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_shows_a_step_count_chip_for_a_multi_step_template():
+    task_template_registry.create_template(
+        name="Chip visibility probe", owner="wren",
+        steps=[Step(step_id="a", position=0), Step(step_id="b", position=1)]
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        body = (await ac.get("/")).text
+    assert "2 steps" in body
+
+
+@pytest.mark.asyncio
 async def test_update_steps_endpoint_rejects_an_unsupported_race_model(client):
     template = task_template_registry.create_template(name="Bad race model target", owner="uma")
     response = await client.put(f"/api/task-templates/{template.template_id}/steps", data={

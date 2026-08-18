@@ -251,6 +251,15 @@ def _skill_catalog() -> List[Dict[str, Any]]:
     ]
 
 
+def _agent_catalog() -> List[Dict[str, Any]]:
+    """Agent picker index for the JS-rendered step editor (concept doc, section E.4) - the
+    other per-agent selects on this page are rendered server-side with Jinja because their
+    surrounding form is static; a step row is added/removed/reordered client-side, so its
+    agent select needs this list in JS instead.
+    """
+    return [{"agent_id": a.agent_id, "name": a.name} for a in lifecycle_manager.list_fleet()]
+
+
 def _routine_catalog(viewer: Optional[str] = None) -> List[Dict[str, Any]]:
     """Template rows for the Task queue card: every derived field (badges, colour, next due),
     pre-sorted status-first-then-group, so the template renders it without deriving anything.
@@ -294,6 +303,8 @@ async def index_view(request: Request):
             "chat_models": SUPPORTED_MODELS,
             "prompt_catalog": _prompt_catalog(),
             "skill_catalog": _skill_catalog(),
+            "agent_catalog": _agent_catalog(),
+            "model_catalog": SUPPORTED_MODELS,
             "app_name": settings.app_name,
             "environment": settings.environment,
             "project": settings.google_cloud_project,

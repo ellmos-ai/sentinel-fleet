@@ -53,6 +53,22 @@ def test_stylesheet_and_script_carry_no_emoji():
         assert not found, f"{path.name} still contains emoji: {sorted(set(found))}"
 
 
+@pytest.mark.asyncio
+async def test_task_card_renders_the_step_editor_modal():
+    """The step editor (concept doc, section E.4 "Minimaler Ketten-Schnitt") is JS-rendered
+    from the agent/model catalogs and the per-template step list - all three must ship with
+    the page for openStepsModal() to have anything to work with."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert 'id="modal-steps"' in body
+    assert 'id="steps-editor-list"' in body
+    assert "openStepsModal(" in body
+    assert 'id="agent-catalog"' in body
+    assert 'id="model-catalog"' in body
+
+
 def test_light_theme_stays_the_default():
     """The operator's anchor: dark is available, light is what loads."""
     for name in ("index.html", "blueprint.html"):

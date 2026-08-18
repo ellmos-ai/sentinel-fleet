@@ -7,7 +7,12 @@ const state = {
   chatMode: "chat",
   selectedSkills: new Set(),
   skills: [],
-  prompts: []
+  prompts: [],
+  agents: [],
+  models: [],
+  // Working copy of the template currently open in the step editor (concept doc, section
+  // E.4): { templateId, steps: [...] }. Null while the modal is closed.
+  stepsEditor: null
 };
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -19,6 +24,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   state.prompts = readCatalog("prompt-catalog");
   state.skills = readCatalog("skill-catalog");
+  state.agents = readCatalog("agent-catalog");
+  state.models = readCatalog("model-catalog");
   if (document.getElementById("skill-picker")) {
     renderSkillPicker();
     loadSessions();
@@ -809,6 +816,171 @@ function submitScheduleBinding(event) {
 
 function removeScheduleBinding(templateId) {
   postAndReload(`/api/task-templates/${templateId}/schedule`, { method: "DELETE" }, "Could not remove the schedule");
+}
+
+// ---------------------------------------------------------------------------
+// Step editor: add/change/remove/reorder a template's steps (concept doc, section E.4
+// "Minimaler Ketten-Schnitt"). One step is an ordinary task; more than one runs as a chain.
+// Every field not exposed here (skill_ids, prompt library refs, ...) is kept from the loaded
+// step and carried through unmodified on save - this editor only ever touches agent, prompt
+// text and execution pattern.
+// ---------------------------------------------------------------------------
+
+function openStepsModal(templateId, name, steps) {
+  state.stepsEditor = {
+    templateId,
+    // Deep copy: editing must not mutate the row data still on screen behind the modal.
+    steps: steps.map(step => JSON.parse(JSON.stringify(step)))
+  };
+  document.getElementById("steps-template-name").textContent = name;
+  renderStepsEditor();
+  toggleModal("modal-steps");
+}
+
+function renderStepsEditor() {
+  const container = document.getElementById("steps-editor-list");
+  container.replaceChildren();
+  state.stepsEditor.steps.forEach((step, index) => container.appendChild(buildStepRow(step, index)));
+}
+
+function buildStepRow(step, index) {
+  const stepCount = state.stepsEditor.steps.length;
+  const row = document.createElement("div");
+  row.className = "record pillar-uas";
+
+  const top = document.createElement("div");
+  top.className = "item-top";
+  const title = document.createElement("span");
+  title.className = "item-title";
+  title.textContent = `Step ${index + 1}`;
+  top.appendChild(title);
+
+  const actions = document.createElement("div");
+  actions.className = "item-actions";
+  actions.style.margin = "0";
+
+  const up = document.createElement("button");
+  up.type = "button";
+  up.className = "btn btn-sm";
+  up.title = "Move earlier in the chain";
+  up.textContent = "Move up";
+  up.disabled = index === 0;
+  up.onclick = () => moveStepRow(index, -1);
+  actions.appendChild(up);
+
+  const down = document.createElement("button");
+  down.type = "button";
+  down.className = "btn btn-sm";
+  down.title = "Move later in the chain";
+  down.textContent = "Move down";
+  down.disabled = index === stepCount - 1;
+  down.onclick = () => moveStepRow(index, 1);
+  actions.appendChild(down);
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "btn btn-sm btn-reject";
+  remove.textContent = "Remove";
+  remove.title = stepCount <= 1 ? "A template needs at least one step" : "Remove this step";
+  remove.disabled = stepCount <= 1;
+  remove.onclick = () => removeStepRow(index);
+  actions.appendChild(remove);
+
+  top.appendChild(actions);
+  row.appendChild(top);
+
+  const agentGroup = document.createElement("div");
+  agentGroup.className = "form-group";
+  const agentLabel = document.createElement("label");
+  agentLabel.textContent = "Agent";
+  agentGroup.appendChild(agentLabel);
+  const agentSelect = document.createElement("select");
+  agentSelect.className = "select-input";
+  state.agents.forEach(agent => {
+    const option = new Option(`${agent.name} (${agent.agent_id})`, agent.agent_id);
+    option.selected = agent.agent_id === step.assigned_agent;
+    agentSelect.appendChild(option);
+  });
+  agentSelect.addEventListener("change", event => { step.assigned_agent = event.target.value; });
+  agentGroup.appendChild(agentSelect);
+  row.appendChild(agentGroup);
+
+  const promptGroup = document.createElement("div");
+  promptGroup.className = "form-group";
+  const promptLabel = document.createElement("label");
+  promptLabel.textContent = "Prompt / instructions";
+  promptGroup.appendChild(promptLabel);
+  const promptInput = document.createElement("textarea");
+  promptInput.className = "textarea-input";
+  promptInput.value = step.custom_prompt_text || "";
+  promptInput.addEventListener("input", event => { step.custom_prompt_text = event.target.value; });
+  promptGroup.appendChild(promptInput);
+  row.appendChild(promptGroup);
+
+  const patternGroup = document.createElement("div");
+  patternGroup.className = "form-group";
+  const patternLabel = document.createElement("label");
+  patternLabel.textContent = "Execution pattern";
+  patternGroup.appendChild(patternLabel);
+  const patternSelect = document.createElement("select");
+  patternSelect.className = "select-input";
+  patternSelect.appendChild(new Option("Single agent", "single"));
+  patternSelect.appendChild(new Option(`Race (all ${state.models.length} supported models)`, "race"));
+  patternSelect.value = step.execution_pattern === "race" ? "race" : "single";
+  patternSelect.disabled = state.models.length < 2;
+  patternSelect.addEventListener("change", event => { step.execution_pattern = event.target.value; });
+  patternGroup.appendChild(patternSelect);
+  if (state.models.length < 2) {
+    const note = document.createElement("div");
+    note.className = "item-meta";
+    note.textContent = "Race needs at least two supported models - only one is configured here.";
+    patternGroup.appendChild(note);
+  }
+  row.appendChild(patternGroup);
+
+  return row;
+}
+
+function addStepRow() {
+  state.stepsEditor.steps.push({ assigned_agent: "agent:task-solver", custom_prompt_text: "", execution_pattern: "single" });
+  renderStepsEditor();
+}
+
+function removeStepRow(index) {
+  if (state.stepsEditor.steps.length <= 1) return;
+  state.stepsEditor.steps.splice(index, 1);
+  renderStepsEditor();
+}
+
+function moveStepRow(index, delta) {
+  const steps = state.stepsEditor.steps;
+  const target = index + delta;
+  if (target < 0 || target >= steps.length) return;
+  [steps[index], steps[target]] = [steps[target], steps[index]];
+  renderStepsEditor();
+}
+
+function submitStepsEditor() {
+  const templateId = state.stepsEditor.templateId;
+  const payload = state.stepsEditor.steps.map((step, index) => ({
+    ...step,
+    // Ids are regenerated from the final on-screen order, not kept from the loaded step - the
+    // client always resubmits the whole array, position = index (concept doc, section E.4),
+    // so a stable id scheme derived straight from that order is simpler than tracking renames
+    // across add/remove/reorder.
+    step_id: `step-${index + 1}`,
+    position: index,
+    // Race models are always every model this deployment supports, never hand-picked here
+    // (SUPPORTED_MODELS has exactly the 2-4 race() already needs) - and explicitly cleared
+    // when a step is not a race step, so switching a step away from "race" cannot leave a
+    // stale race_models list that Step's own validator would then reject.
+    race_models: step.execution_pattern === "race" ? state.models : []
+  }));
+  postAndReload(
+    `/api/task-templates/${templateId}/steps`,
+    { method: "PUT", body: new URLSearchParams({ steps: JSON.stringify(payload) }) },
+    "Could not save the steps"
+  );
 }
 
 // ---------------------------------------------------------------------------

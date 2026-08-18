@@ -518,6 +518,7 @@
                 </td>
                 <td>
                   <b>{{ row.name }}</b>
+                  {% if row.step_count > 1 %}<span class="chip" title="Runs as a chain of {{ row.step_count }} steps">{{ row.step_count }} steps</span>{% endif %}
                   {% if row.symbols.gear or row.symbols.clock %}
                   <span class="rt-badges">
                     {% if row.symbols.gear %}<svg class="icon" title="Routine attached"><use href="#i-gear"/></svg>{% endif %}
@@ -532,6 +533,7 @@
                 <td>
                   <div class="item-actions" style="margin: 0">
                     <button class="btn btn-sm" onclick='enqueueTaskTemplate({{ row.template_id|tojson }})'>Enqueue now</button>
+                    <button class="btn btn-sm" onclick='openStepsModal({{ row.template_id|tojson }}, {{ row.name|tojson }}, {{ row.steps|tojson }})'>Edit steps</button>
                     {% if row.routine %}
                     <button class="btn btn-sm" onclick='removeRoutineBinding({{ row.template_id|tojson }})'>Remove routine</button>
                     {% else %}
@@ -1048,6 +1050,33 @@
     </div>
   </div>
 
+  <div id="modal-steps" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Edit steps</h3>
+        <button class="btn btn-sm btn-icon" onclick="toggleModal('modal-steps')" aria-label="Close">
+          <svg class="icon"><use href="#i-close"/></svg>
+        </button>
+      </div>
+      <p class="item-meta" id="steps-template-name" style="margin-bottom: var(--s-3)"></p>
+      <p class="item-desc" style="margin-top: calc(-1 * var(--s-2))">
+        A single step is an ordinary task. Add more to run them as a chain, in order - each
+        step sees the previous step's output as extra context. "Race" runs a step across every
+        supported model at once and forwards all of their labelled answers to the next step.
+      </p>
+      <div id="steps-editor-list"></div>
+      <div class="form-actions" style="justify-content: flex-start; margin-top: var(--s-3)">
+        <button type="button" class="btn btn-sm" onclick="addStepRow()">
+          <svg class="icon"><use href="#i-plus"/></svg> Add step
+        </button>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn" onclick="toggleModal('modal-steps')">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="submitStepsEditor()">Save steps</button>
+      </div>
+    </div>
+  </div>
+
   <div id="modal-ticket" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
@@ -1256,6 +1285,8 @@
 
   <script id="prompt-catalog" type="application/json">{{ prompt_catalog|tojson }}</script>
   <script id="skill-catalog" type="application/json">{{ skill_catalog|tojson }}</script>
+  <script id="agent-catalog" type="application/json">{{ agent_catalog|tojson }}</script>
+  <script id="model-catalog" type="application/json">{{ model_catalog|tojson }}</script>
   <script src="/static/app.js"></script>
 </body>
 </html>
