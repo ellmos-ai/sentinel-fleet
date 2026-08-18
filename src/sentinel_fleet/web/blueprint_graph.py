@@ -46,7 +46,7 @@ def _module_name(path: str, root: str) -> str:
     return relative[: -len(".py")]
 
 
-def _resolve(target: str, importer: str) -> Optional[str]:
+def _resolve(target: str) -> Optional[str]:
     """Map an imported dotted path onto a module in this package, if it is one."""
     if not target.startswith(f"{PACKAGE}."):
         return None
@@ -91,7 +91,7 @@ def collect_graph(root: Optional[str] = None) -> Tuple[List[str], Set[Tuple[str,
                 targets.extend(alias.name for alias in node.names)
 
             for target in targets:
-                resolved = _resolve(target, name)
+                resolved = _resolve(target)
                 if resolved and resolved in known and resolved != name:
                     raw_edges.add((name, resolved))
 

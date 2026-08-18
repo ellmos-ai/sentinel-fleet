@@ -8,7 +8,7 @@ conversation once it has left the console.
 
 import html
 import time
-from typing import Optional, Tuple
+from typing import Tuple
 
 from sentinel_fleet.chat.models import ChatMessage, ChatMode, ChatSession, RaceRecord
 
