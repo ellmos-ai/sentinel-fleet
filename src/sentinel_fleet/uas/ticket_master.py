@@ -1,6 +1,7 @@
 """TicketMaster: Human-in-the-Loop Triage, Capture & Approval Gate."""
 
 import time
+import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
@@ -49,7 +50,8 @@ class TicketMaster:
         payload: Dict[str, Any],
         priority: TicketPriority = TicketPriority.NORMAL
     ) -> Ticket:
-        ticket_id = f"TICK-{self._store.count()+1:04d}"
+        # Collision-free: a counter over a shared store races and repeats ids after deletions
+        ticket_id = f"TICK-{uuid.uuid4().hex[:8].upper()}"
         ticket = Ticket(
             ticket_id=ticket_id,
             title=title,

@@ -1,8 +1,10 @@
 """Persistent Memory Bank based on USMC (Universal Semantic Memory Core)."""
 
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from sentinel_fleet.core.storage import get_store
 
 
 class MemoryEntry(BaseModel):
@@ -16,8 +18,8 @@ class MemoryEntry(BaseModel):
 
 class MemoryBank:
     def __init__(self):
-        self._store: Dict[str, MemoryEntry] = {}
-        # Pre-seed canonical corporate memory
+        self._store = get_store("memory", MemoryEntry)
+        # Pre-seed canonical corporate memory (idempotent: seeds are keyed and overwrite themselves)
         self._seed_default_memory()
 
     def _seed_default_memory(self):
@@ -28,18 +30,18 @@ class MemoryBank:
             ("entity", "vendor:acme_supplier", "Acme Supplier GmbH | IBAN: DE89370400440532013000 | Standard-Zahlungsziel: 14 Tage"),
         ]
         for cat, k, text in seeds:
-            self.store_memory(cat, k, text)
+            if self._store.get(k) is None:
+                self.store_memory(cat, k, text)
 
     def store_memory(self, category: str, key: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> MemoryEntry:
-        mem_id = f"mem-{len(self._store)+1:04d}"
         entry = MemoryEntry(
-            id=mem_id,
+            id=f"mem-{uuid.uuid4().hex[:8]}",
             category=category,
             key=key,
             content=content,
             metadata=metadata or {}
         )
-        self._store[key] = entry
+        self._store.put(key, entry)
         return entry
 
     def get_memory(self, key: str) -> Optional[MemoryEntry]:
@@ -48,13 +50,13 @@ class MemoryBank:
     def search_memories(self, query: str) -> List[MemoryEntry]:
         query_lower = query.lower()
         results = []
-        for entry in self._store.values():
+        for entry in self._store.list_all():
             if query_lower in entry.key.lower() or query_lower in entry.content.lower():
                 results.append(entry)
         return results
 
     def list_all(self) -> List[MemoryEntry]:
-        return list(self._store.values())
+        return self._store.list_all()
 
 
 memory_bank = MemoryBank()

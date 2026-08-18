@@ -2,13 +2,14 @@
 
 import time
 from typing import Dict, List, Any
+from sentinel_fleet.core.storage import get_store
 from sentinel_fleet.domains.omniledger.models import InvoiceDocument, InvoiceStatus
 from sentinel_fleet.memory.bank import memory_bank
 
 
 class LedgerReconciler:
     def __init__(self):
-        self.ledger: Dict[str, InvoiceDocument] = {}
+        self._store = get_store("ledger", InvoiceDocument)
 
     def book_invoice(self, doc: InvoiceDocument) -> InvoiceDocument:
         """Books a verified invoice into the general ledger."""
@@ -16,7 +17,7 @@ class LedgerReconciler:
             raise ValueError(f"Cannot book non-compliant invoice {doc.id}")
 
         doc.status = InvoiceStatus.BOOKED
-        self.ledger[doc.id] = doc
+        self._store.put(doc.id, doc)
 
         # Store persistent entry in Memory Bank
         memory_bank.store_memory(
@@ -28,8 +29,11 @@ class LedgerReconciler:
 
         return doc
 
+    def get_booked(self, doc_id: str) -> Any:
+        return self._store.get(doc_id)
+
     def list_booked(self) -> List[InvoiceDocument]:
-        return list(reversed(list(self.ledger.values())))
+        return list(reversed(self._store.list_all()))
 
 
 ledger_reconciler = LedgerReconciler()

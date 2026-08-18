@@ -1,6 +1,7 @@
 """TaskMaster: Asynchronous Task Engine & Execution State Table."""
 
 import time
+import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
@@ -33,7 +34,8 @@ class TaskMaster:
         self._store = get_store("tasks", TaskRecord)
 
     def create_task(self, name: str, assigned_agent: str, input_data: Dict[str, Any]) -> TaskRecord:
-        task_id = f"TASK-{self._store.count()+1:04d}"
+        # Collision-free: a counter over a shared store races and repeats ids after deletions
+        task_id = f"TASK-{uuid.uuid4().hex[:8].upper()}"
         task = TaskRecord(
             task_id=task_id,
             name=name,
