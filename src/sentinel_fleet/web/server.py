@@ -100,6 +100,54 @@ DEMO_INJECTION_TEXT = (
 )
 
 
+# ---------------------------------------------------------
+# Domain tool functions — every one of them is invoked through the Sovereign Gateway,
+# never called directly, so PoLP scoping, Model Armor and per-agent locks always apply.
+# ---------------------------------------------------------
+
+async def tool_extract_invoice_multimodal(
+    filename: str,
+    file_bytes: Optional[bytes] = None,
+    text_content: Optional[str] = None
+) -> InvoiceDocument:
+    return await extractor.extract_invoice(filename=filename, file_bytes=file_bytes, text_content=text_content)
+
+
+async def tool_validate_tax_compliance(document: InvoiceDocument) -> InvoiceDocument:
+    return compliance_auditor.audit_invoice(document)
+
+
+async def tool_create_reconciliation_draft(document: InvoiceDocument) -> InvoiceDocument:
+    return ledger_reconciler.book_invoice(document)
+
+
+async def tool_draft_vendor_dispute_email(document: InvoiceDocument) -> str:
+    return dispute_communicator.generate_dispute_resolution(document)
+
+
+async def tool_send_external_email(to: str, body: str) -> str:
+    """Outbound mail dispatch. Gated as ASK, so the gateway never reaches this body without approval."""
+    raise NotImplementedError("External mail dispatch is not configured in this deployment")
+
+
+async def execute_via_gateway(
+    agent_id: str,
+    tool_name: str,
+    tool_args: Dict[str, Any],
+    tool_func
+):
+    """Run a domain tool under the Zero-Trust gateway of the agent that owns it."""
+    agent = lifecycle_manager.get_agent(agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    return await gateway.execute_tool_call(
+        agent=agent,
+        tool_name=tool_name,
+        tool_args=tool_args,
+        tool_func=tool_func
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index_view(request: Request):
     """Render the Main Operator Control Dashboard."""
@@ -391,6 +439,11 @@ async def api_approve_ticket(ticket_id: str):
         inv = processed_invoices[doc_id]
         inv.status = "disputed_awaiting_vendor_reply"
 
+    # The gateway parked the agent in WAITING_APPROVAL when it hit the ASK gate; release it now
+    agent = lifecycle_manager.get_agent(ticket.agent_id)
+    if agent and agent.status == AgentStatus.WAITING_APPROVAL:
+        lifecycle_manager.update_agent_status(ticket.agent_id, AgentStatus.IDLE)
+
     return {"status": "approved", "ticket": ticket.model_dump()}
 
 
@@ -398,9 +451,14 @@ async def api_approve_ticket(ticket_id: str):
 async def api_reject_ticket(ticket_id: str, reason: str = Form("Rejected by operator")):
     try:
         ticket = ticket_master.reject_ticket(ticket_id, reason)
-        return {"status": "rejected", "ticket": ticket.model_dump()}
     except TicketNotFoundError:
         raise HTTPException(status_code=404, detail="Ticket not found")
+
+    agent = lifecycle_manager.get_agent(ticket.agent_id)
+    if agent and agent.status == AgentStatus.WAITING_APPROVAL:
+        lifecycle_manager.update_agent_status(ticket.agent_id, AgentStatus.IDLE)
+
+    return {"status": "rejected", "ticket": ticket.model_dump()}
 
 
 @app.post("/api/tasks/create")
@@ -482,35 +540,92 @@ async def api_process_invoice(
     if scan_text:
         inspection = gateway.model_armor.inspect_prompt(scan_text)
         if not inspection.is_safe:
-            agent_extractor.status = AgentStatus.QUARANTINED
-            agent_extractor.quarantine_reason = "Model Armor Alert: Blocked Adversarial Injection Attack"
+            lifecycle_manager.update_agent_status(
+                "agent:invoice-extractor",
+                AgentStatus.QUARANTINED,
+                reason="Model Armor Alert: Blocked Adversarial Injection Attack"
+            )
             task_master.update_task_state(task.task_id, TaskState.FAILED, error="Model Armor Intercepted Injection Attack")
             return JSONResponse(status_code=400, content={
                 "status": "BLOCKED_BY_MODEL_ARMOR",
                 "reason": "Adversarial Prompt Injection Detected",
                 "scenario": scenario,
                 "blocked_patterns": inspection.blocked_patterns,
-                "agent_status": agent_extractor.status
+                "agent_status": agent_extractor.status.value if agent_extractor else "unknown"
             })
 
-    invoice = await extractor.extract_invoice(
-        filename=filename,
-        file_bytes=upload_bytes,
-        text_content=upload_text
+    # 3. Extraction — executed by the extractor agent under its own tool scope
+    extraction = await execute_via_gateway(
+        "agent:invoice-extractor",
+        "extract_invoice_multimodal",
+        {"filename": filename, "file_bytes": upload_bytes, "text_content": upload_text},
+        tool_extract_invoice_multimodal
     )
+    if not extraction.success:
+        task_master.update_task_state(task.task_id, TaskState.FAILED, error=extraction.error)
+        return JSONResponse(status_code=403, content={
+            "status": "BLOCKED_BY_GATEWAY", "stage": "extraction", "reason": extraction.error
+        })
+
+    invoice = extraction.output
     processed_invoices[invoice.id] = invoice
 
-    agent_auditor = lifecycle_manager.get_agent("agent:compliance-auditor")
-    invoice = compliance_auditor.audit_invoice(invoice)
+    # 4. Compliance audit — executed by the compliance agent
+    audit = await execute_via_gateway(
+        "agent:compliance-auditor",
+        "validate_tax_compliance",
+        {"document": invoice},
+        tool_validate_tax_compliance
+    )
+    if not audit.success:
+        task_master.update_task_state(task.task_id, TaskState.FAILED, error=audit.error)
+        return JSONResponse(status_code=403, content={
+            "status": "BLOCKED_BY_GATEWAY", "stage": "compliance", "reason": audit.error
+        })
+
+    invoice = audit.output
+    processed_invoices[invoice.id] = invoice
 
     if invoice.compliance_passed:
-        agent_reconciler = lifecycle_manager.get_agent("agent:ledger-reconciler")
-        invoice = ledger_reconciler.book_invoice(invoice)
+        # 5a. Booking — executed by the reconciler agent
+        booking = await execute_via_gateway(
+            "agent:ledger-reconciler",
+            "create_reconciliation_draft",
+            {"document": invoice},
+            tool_create_reconciliation_draft
+        )
+        if not booking.success:
+            task_master.update_task_state(task.task_id, TaskState.FAILED, error=booking.error)
+            return JSONResponse(status_code=403, content={
+                "status": "BLOCKED_BY_GATEWAY", "stage": "booking", "reason": booking.error
+            })
+        invoice = booking.output
+        processed_invoices[invoice.id] = invoice
         task_master.update_task_state(task.task_id, TaskState.COMPLETED, output_data={"doc_id": invoice.id, "status": "BOOKED"})
     else:
-        agent_dispute = lifecycle_manager.get_agent("agent:vendor-dispute")
-        dispute_body = dispute_communicator.generate_dispute_resolution(invoice)
-        
+        # 5b. Dispute — drafting is autonomous, dispatching hits the ASK gate
+        draft = await execute_via_gateway(
+            "agent:vendor-dispute",
+            "draft_vendor_dispute_email",
+            {"document": invoice},
+            tool_draft_vendor_dispute_email
+        )
+        if not draft.success:
+            task_master.update_task_state(task.task_id, TaskState.FAILED, error=draft.error)
+            return JSONResponse(status_code=403, content={
+                "status": "BLOCKED_BY_GATEWAY", "stage": "dispute_draft", "reason": draft.error
+            })
+        dispute_body = draft.output
+
+        # The gateway itself demands human signoff for send_external_email (ASK rule);
+        # the ticket below is created because of that verdict, not instead of it.
+        dispatch = await execute_via_gateway(
+            "agent:vendor-dispute",
+            "send_external_email",
+            {"to": invoice.vendor_email or "", "body": dispute_body},
+            tool_send_external_email
+        )
+
         ticket = ticket_master.create_approval_ticket(
             title=f"Genehmigung: Korrekturanforderung an {invoice.vendor_name}",
             description=f"Rechnung {invoice.invoice_number} verletzt § 14 UStG ({', '.join(invoice.compliance_violations)}). Entwurf für Korrektur-Mail bereit zur Prüfung.",
@@ -519,7 +634,8 @@ async def api_process_invoice(
             payload={
                 "doc_id": invoice.id,
                 "vendor_email": invoice.vendor_email,
-                "email_body": dispute_body
+                "email_body": dispute_body,
+                "gateway_verdict": "requires_approval" if dispatch.requires_approval else "executed"
             },
             priority=TicketPriority.HIGH
         )
