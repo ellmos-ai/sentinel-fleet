@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from sentinel_fleet.core.storage import get_store
-from sentinel_fleet.core.errors import TaskNotFoundError
+from sentinel_fleet.core.errors import TaskNotFoundError, TaskStateTransitionError
 
 
 class TaskState(str, Enum):
@@ -15,6 +15,16 @@ class TaskState(str, Enum):
     AWAITING_APPROVAL = "awaiting_approval"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+# Terminal states have no outgoing edges: a completed or failed task must never be resurrected.
+ALLOWED_TASK_TRANSITIONS: Dict[TaskState, set] = {
+    TaskState.QUEUED: {TaskState.IN_PROGRESS, TaskState.AWAITING_APPROVAL, TaskState.COMPLETED, TaskState.FAILED},
+    TaskState.IN_PROGRESS: {TaskState.AWAITING_APPROVAL, TaskState.COMPLETED, TaskState.FAILED},
+    TaskState.AWAITING_APPROVAL: {TaskState.IN_PROGRESS, TaskState.COMPLETED, TaskState.FAILED},
+    TaskState.COMPLETED: set(),
+    TaskState.FAILED: set(),
+}
 
 
 class TaskRecord(BaseModel):
@@ -59,6 +69,9 @@ class TaskMaster:
         task = self._store.get(task_id)
         if not task:
             raise TaskNotFoundError(task_id)
+
+        if state != task.state and state not in ALLOWED_TASK_TRANSITIONS.get(task.state, set()):
+            raise TaskStateTransitionError(task_id, task.state.value, state.value)
 
         task.state = state
         task.updated_at = time.time()

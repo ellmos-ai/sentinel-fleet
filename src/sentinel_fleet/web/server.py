@@ -23,7 +23,11 @@ from sentinel_fleet.core.errors import (
     TicketNotFoundError,
     ContactNotFoundError,
     SkillNotFoundError,
-    ContactOptOutViolationError
+    ContactOptOutViolationError,
+    SecurityViolationError,
+    QuarantineLockError,
+    TaskStateTransitionError,
+    TicketResolutionError
 )
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.uas.ticket_master import ticket_master, TicketStatus, TicketPriority
@@ -71,6 +75,23 @@ async def not_found_exception_handler(request: Request, exc: SentinelFleetError)
 @app.exception_handler(ContactOptOutViolationError)
 async def opt_out_violation_handler(request: Request, exc: ContactOptOutViolationError):
     return JSONResponse(status_code=403, content={"error": exc.message, "details": exc.details})
+
+
+@app.exception_handler(SecurityViolationError)
+@app.exception_handler(QuarantineLockError)
+async def zero_trust_violation_handler(request: Request, exc: SentinelFleetError):
+    """Gateway security verdicts are refusals, not internal errors."""
+    return JSONResponse(
+        status_code=403,
+        content={"error": exc.message, "details": exc.details, "status": "BLOCKED_BY_GATEWAY"}
+    )
+
+
+@app.exception_handler(TaskStateTransitionError)
+@app.exception_handler(TicketResolutionError)
+async def conflicting_state_handler(request: Request, exc: SentinelFleetError):
+    """Re-resolving a settled task or ticket is a conflict, not a bad request."""
+    return JSONResponse(status_code=409, content={"error": exc.message, "details": exc.details})
 
 
 @app.exception_handler(SentinelFleetError)

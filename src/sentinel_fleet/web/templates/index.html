@@ -125,7 +125,7 @@
               <div class="item-desc">{{ agent.description }}</div>
               {% if agent.status.value == 'quarantined' %}
               <div style="margin-top: 8px;">
-                <button class="btn btn-sm btn-approve" onclick="releaseQuarantine('{{ agent.agent_id }}')">🔓 Quarantäne aufheben</button>
+                <button class="btn btn-sm btn-approve" onclick='releaseQuarantine({{ agent.agent_id|tojson }})'>🔓 Quarantäne aufheben</button>
               </div>
               {% endif %}
             </div>
@@ -156,8 +156,8 @@
               <div class="item-desc" style="margin-bottom: 8px;">{{ ticket.description }}</div>
               {% if ticket.status.value == 'pending_approval' %}
               <div style="display: flex; gap: 8px;">
-                <button class="btn btn-sm btn-approve" onclick="approveTicket('{{ ticket.ticket_id }}')">✓ Freigeben</button>
-                <button class="btn btn-sm btn-reject" onclick="rejectTicket('{{ ticket.ticket_id }}')">✕ Ablehnen</button>
+                <button class="btn btn-sm btn-approve" onclick='approveTicket({{ ticket.ticket_id|tojson }})'>✓ Freigeben</button>
+                <button class="btn btn-sm btn-reject" onclick='rejectTicket({{ ticket.ticket_id|tojson }})'>✕ Ablehnen</button>
               </div>
               {% endif %}
             </div>
@@ -316,7 +316,7 @@
               <td><span style="font-size: 11.5px; color: var(--ink-dim);">{{ c.dsgvo_notes }}</span></td>
               <td>
                 {% if c.opt_in_status == 'confirmed' %}
-                <button class="btn btn-sm btn-reject" onclick="optOutContact('{{ c.contact_id }}')">🚫 Opt-Out</button>
+                <button class="btn btn-sm btn-reject" onclick='optOutContact({{ c.contact_id|tojson }})'>🚫 Opt-Out</button>
                 {% else %}
                 <span style="font-size: 11px; color: var(--danger);">Tombstone Aktiv</span>
                 {% endif %}
@@ -350,7 +350,7 @@
           </div>
           {% if agent.status.value == 'quarantined' %}
           <div style="margin-top: 8px;">
-            <button class="btn btn-sm btn-approve" onclick="releaseQuarantine('{{ agent.agent_id }}')">🔓 Quarantäne aufheben</button>
+            <button class="btn btn-sm btn-approve" onclick='releaseQuarantine({{ agent.agent_id|tojson }})'>🔓 Quarantäne aufheben</button>
           </div>
           {% endif %}
         </div>
@@ -435,8 +435,8 @@
             </div>
             {% if ticket.status.value == 'pending_approval' %}
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-approve" onclick="approveTicket('{{ ticket.ticket_id }}')">✓ Freigeben &amp; Ausführen</button>
-              <button class="btn btn-reject" onclick="rejectTicket('{{ ticket.ticket_id }}')">✕ Ablehnen &amp; Blockieren</button>
+              <button class="btn btn-approve" onclick='approveTicket({{ ticket.ticket_id|tojson }})'>✓ Freigeben &amp; Ausführen</button>
+              <button class="btn btn-reject" onclick='rejectTicket({{ ticket.ticket_id|tojson }})'>✕ Ablehnen &amp; Blockieren</button>
             </div>
             {% elif ticket.resolution_comment %}
             <div style="font-size: 11.5px; color: var(--accent);">
@@ -511,8 +511,8 @@
             <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--ink-faint);">
               <span>Sichtbarkeit: <b>{{ p.visibility|upper }}</b></span>
               <div style="display: flex; gap: 6px;">
-                <button class="btn btn-sm" onclick="openPromptVersionModal('{{ p.id }}', '{{ p.title }}', '{{ p.current_text }}')">+ Version</button>
-                <button class="btn btn-sm" onclick="openPromptPermsModal('{{ p.id }}', '{{ p.title }}', '{{ p.visibility }}', '{{ p.requires_approval }}')">🔒 Rechte</button>
+                <button class="btn btn-sm" onclick='openPromptVersionModal({{ p.id|tojson }}, {{ p.title|tojson }}, {{ p.current_text|tojson }})'>+ Version</button>
+                <button class="btn btn-sm" onclick='openPromptPermsModal({{ p.id|tojson }}, {{ p.title|tojson }}, {{ p.visibility|tojson }}, {{ p.requires_approval|tojson }})'>🔒 Rechte</button>
               </div>
             </div>
           </div>
@@ -537,7 +537,7 @@
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; color: var(--ink-faint);">
               <span>Gate: <b>{{ s.execution_gate|upper }}</b></span>
-              <button class="btn btn-sm" onclick="openSkillVersionModal('{{ s.skill_id }}', '{{ s.name }}', '{{ s.required_tools|join(\", \") }}')">+ Version</button>
+              <button class="btn btn-sm" onclick='openSkillVersionModal({{ s.skill_id|tojson }}, {{ s.name|tojson }}, {{ s.required_tools|join(", ")|tojson }})'>+ Version</button>
             </div>
           </div>
           {% endfor %}

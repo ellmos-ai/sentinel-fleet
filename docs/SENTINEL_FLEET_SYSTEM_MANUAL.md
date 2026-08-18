@@ -3,7 +3,7 @@
 > **Project:** SentinelFleet (Enterprise Multi-Agent Platform & Autonomous Taskmaster)  
 > **Repository:** [github.com/ellmos-ai/sentinel-fleet](https://github.com/ellmos-ai/sentinel-fleet)  
 > **Google Cloud Hackathon 2026:** Track 1 (Autonomous Taskmaster) & Track 3 (Enterprise Multi-Agent Governance)  
-> **Target Runtime:** Google Cloud Run, Gemini 3.5 Flash / Pro, Google Cloud Firestore, Cloud Pub/Sub, Cloud Trace  
+> **Target Runtime:** Google Cloud Run, Gemini 3.5 Flash / Pro via the Google GenAI SDK (`google-genai`), Google Cloud Firestore, OpenTelemetry (Cloud Trace export optional)  
 
 ---
 
@@ -25,7 +25,7 @@ Paired with **OmniLedger**, its primary business domain pipeline, SentinelFleet 
 | - Zero-Trust  |           | - TaskMaster  |           | - USMC Bank   |
 |   Gateway     | <=======> | - TicketMaster| <=======> | - GARDENER RAG|
 | - Model Armor |  (Clutch) | - Swarm Mesh  |  (Hooker) | - Evidence    |
-| - PII Filter  |           | - Pub/Sub Bus |           |   Reasoner    |
+| - PII Filter  |           | - Event Bus   |           |   Reasoner    |
 +---------------+           +---------------+           +---------------+
                                     |
                                     v
@@ -62,13 +62,13 @@ SentinelFleet unifies and hardens codebases, patterns, and research from several
 ### Pillar 1: Control (Security & Zero-Trust Defense)
 * **Model Armor (`model_armor.py`):** Real-time interception engine analyzing inbound user prompts, document OCR text, and sub-agent thought trajectories for indirect prompt injection attacks, delimiter hijacking (`---END---`), and role tampering. Triggers automated agent quarantining and circuit breaking.
 * **Agent Gateway (`gateway.py`):** Enforces the Principle of Least Privilege (PoLP). Each agent has an immutable allowlist of tools (`allowed_tools`). Any invocation of sensitive tools (e.g., `send_external_email`, `execute_payout`) is trapped by an `ask`-gate.
-* **PII & Secrets Redaction (`pii-redactor-and-sanitizer`):** Replaces IBANs, credit cards, credentials, and names with anonymized hashes before transmitting logs to Google Cloud Trace.
+* **PII & Secrets Redaction (`model_armor.py`):** Replaces IBANs, credit card numbers and API keys in tool arguments with fixed redaction markers (`[REDACTED_IBAN]`, `[REDACTED_CREDIT_CARD]`, `[REDACTED_API_KEY]`) before the call is executed or traced.
 
 ### Pillar 2: UAS (Universal Autonomous System & Taskmaster)
 * **Lifecycle Manager (`lifecycle.py`):** Controls the state machine of 9 fleet agents (`IDLE`, `BUSY`, `WAITING_APPROVAL`, `QUARANTINED`, `OFFLINE`).
-* **TaskMaster (`task_master.py`):** Manages asynchronous background tasks, state transitions (`PENDING` ➔ `IN_PROGRESS` ➔ `COMPLETED` / `FAILED`), and evidence outputs.
+* **TaskMaster (`task_master.py`):** Manages task records and guards their state machine (`QUEUED` ➔ `IN_PROGRESS` ➔ `AWAITING_APPROVAL` ➔ `COMPLETED` / `FAILED`); terminal states are final. Operator-created tasks are queued — no worker executes them in this build.
 * **TicketMaster (`ticket_master.py`):** The Human-in-the-Loop (HITL) gatekeeper. Whenever an agent requires permission, an immutable ticket with priority (`NORMAL`, `HIGH`, `CRITICAL`) and structured payload is created for the operator.
-* **Swarm Conductor & Pub/Sub Mesh:** Serverless distribution across Google Cloud Run with Pub/Sub topics for parallel invoice validation.
+* **Swarm Conductor (`swarm.py`):** Scaffold for multi-agent fan-out on Cloud Run. The current build dispatches the OmniLedger workflow sequentially through the gateway and traces every step; parallel Pub/Sub distribution is designed for, not yet implemented.
 
 ### Pillar 3: Memory (USMC Bank & Context Hooker)
 * **USMC Memory Bank (`bank.py`):** Persistent corporate memory partitioned into four core taxonomies:

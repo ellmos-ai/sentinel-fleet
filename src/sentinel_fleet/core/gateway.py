@@ -57,7 +57,7 @@ class SovereignGateway:
                 if agent.status == AgentStatus.QUARANTINED:
                     error_msg = f"Agent {agent.agent_id} is in QUARANTINE: {agent.quarantine_reason}"
                     telemetry.end_span(span, status="BLOCKED", error=error_msg)
-                    return GatewayExecutionResult(success=False, error=error_msg)
+                    raise QuarantineLockError(agent.agent_id, agent.quarantine_reason)
 
                 # 2. Scoped Capability Check (PoLP)
                 if not agent.is_tool_scoped(tool_name):
@@ -65,7 +65,9 @@ class SovereignGateway:
                     agent.quarantine_reason = f"Attempted unauthorized tool execution: {tool_name}"
                     error_msg = f"Security Violation: Agent '{agent.agent_id}' is not scoped for tool '{tool_name}'"
                     telemetry.end_span(span, status="SECURITY_VIOLATION", error=error_msg)
-                    return GatewayExecutionResult(success=False, error=error_msg)
+                    raise SecurityViolationError(
+                        agent.agent_id, tool_name, "Tool is outside the agent's least-privilege scope."
+                    )
 
                 # 3. Model Armor Inspection (Anti-Injection & PII Redaction Async Offloaded)
                 sanitized_args = await self.model_armor.sanitize_arguments_async(tool_args)
@@ -76,7 +78,9 @@ class SovereignGateway:
                 if perm_action == PermissionAction.DENY:
                     error_msg = f"Access Denied: Tool '{tool_name}' is strictly forbidden by policy"
                     telemetry.end_span(span, status="DENIED", error=error_msg)
-                    return GatewayExecutionResult(success=False, error=error_msg)
+                    raise SecurityViolationError(
+                        agent.agent_id, tool_name, "Tool is denied by the permission registry."
+                    )
 
                 if perm_action == PermissionAction.ASK:
                     agent.status = AgentStatus.WAITING_APPROVAL
@@ -97,6 +101,10 @@ class SovereignGateway:
                 result = await tool_func(**sanitized_args)
                 telemetry.end_span(span, status="OK")
                 return GatewayExecutionResult(success=True, output=result)
+
+            except (SecurityViolationError, QuarantineLockError):
+                # Security verdicts must surface as errors, not be flattened into a result object
+                raise
 
             except Exception as e:
                 error_msg = str(e)

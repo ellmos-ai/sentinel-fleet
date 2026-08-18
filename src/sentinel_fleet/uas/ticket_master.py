@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from sentinel_fleet.core.storage import get_store
-from sentinel_fleet.core.errors import TicketNotFoundError
+from sentinel_fleet.core.errors import TicketNotFoundError, TicketResolutionError
 
 
 class TicketStatus(str, Enum):
@@ -72,6 +72,8 @@ class TicketMaster:
         ticket = self._store.get(ticket_id)
         if not ticket:
             raise TicketNotFoundError(ticket_id)
+        if ticket.status != TicketStatus.PENDING_APPROVAL:
+            raise TicketResolutionError(ticket_id, f"already resolved as '{ticket.status.value}'")
 
         ticket.status = TicketStatus.APPROVED
         ticket.resolved_at = time.time()
@@ -83,6 +85,8 @@ class TicketMaster:
         ticket = self._store.get(ticket_id)
         if not ticket:
             raise TicketNotFoundError(ticket_id)
+        if ticket.status != TicketStatus.PENDING_APPROVAL:
+            raise TicketResolutionError(ticket_id, f"already resolved as '{ticket.status.value}'")
 
         ticket.status = TicketStatus.REJECTED
         ticket.resolved_at = time.time()
