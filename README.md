@@ -1,3 +1,5 @@
+<img src="assets/banner.svg" width="100%" alt="SentinelFleet — Fortified Enterprise Agent Platform">
+
 # SentinelFleet — Fortified Enterprise Agent Platform & OmniLedger Taskmaster
 
 [![Google Cloud Run](https://img.shields.io/badge/Google%20Cloud-Cloud%20Run-blue.svg?logo=google-cloud)](https://cloud.google.com/run)

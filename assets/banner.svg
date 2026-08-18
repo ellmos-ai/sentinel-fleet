@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#1E293B"/>
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#334155" stroke-width="0.5" opacity="0.35"/>
+    </pattern>
+  </defs>
+
+  <rect width="1280" height="320" fill="url(#bgGrad)"/>
+  <rect width="1280" height="320" fill="url(#grid)"/>
+
+  <!-- circuit accents -->
+  <g stroke="#334155" stroke-width="1.5" fill="none" opacity="0.6">
+    <path d="M40 250 H180 L220 290 H360"/>
+    <path d="M1240 60 H1120 L1080 100 H960"/>
+    <circle cx="360" cy="290" r="4" fill="#334155"/>
+    <circle cx="960" cy="100" r="4" fill="#334155"/>
+  </g>
+
+  <!-- shield emblem -->
+  <g transform="translate(120,160)">
+    <path d="M0 -92 L74 -62 V14 C74 62 40 94 0 108 C-40 94 -74 62 -74 14 V-62 Z"
+          fill="url(#shieldGrad)" stroke="#60A5FA" stroke-width="3"/>
+    <path d="M0 -70 L56 -47 V12 C56 50 30 76 0 88 C-30 76 -56 50 -56 12 V-47 Z"
+          fill="#0F172A" opacity="0.55"/>
+    <!-- checkmark -->
+    <path d="M-26 6 L-6 28 L34 -22" fill="none" stroke="#F8FAFC" stroke-width="11"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- fleet nodes -->
+    <circle cx="-58" cy="-78" r="6" fill="#4285F4"/>
+    <circle cx="58" cy="-78" r="6" fill="#34A853"/>
+    <circle cx="-72" cy="46" r="6" fill="#FBBC05"/>
+    <circle cx="72" cy="46" r="6" fill="#EA4335"/>
+    <g stroke-width="1.5" opacity="0.7">
+      <line x1="-53" y1="-73" x2="-32" y2="-58" stroke="#4285F4"/>
+      <line x1="53" y1="-73" x2="32" y2="-58" stroke="#34A853"/>
+      <line x1="-66" y1="42" x2="-46" y2="30" stroke="#FBBC05"/>
+      <line x1="66" y1="42" x2="46" y2="30" stroke="#EA4335"/>
+    </g>
+  </g>
+
+  <!-- wordmark -->
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <text x="270" y="150" font-size="64" font-weight="700" fill="#F8FAFC" letter-spacing="0.5">Sentinel<tspan fill="#60A5FA">Fleet</tspan></text>
+    <text x="273" y="196" font-size="24" fill="#94A3B8" letter-spacing="0.4">Fortified Enterprise Agent Platform &#183; Google Cloud &#183; Gemini</text>
+    <!-- Google accent bars -->
+    <g transform="translate(275,222)">
+      <rect x="0"   y="0" width="64" height="6" rx="3" fill="#4285F4"/>
+      <rect x="72"  y="0" width="64" height="6" rx="3" fill="#EA4335"/>
+      <rect x="144" y="0" width="64" height="6" rx="3" fill="#FBBC05"/>
+      <rect x="216" y="0" width="64" height="6" rx="3" fill="#34A853"/>
+    </g>
+    <!-- badges -->
+    <g font-size="16" font-weight="600">
+      <rect x="273" y="248" width="118" height="32" rx="16" fill="#1E3A8A" stroke="#3B82F6"/>
+      <text x="332" y="269" fill="#DBEAFE" text-anchor="middle">Cloud Run</text>
+      <rect x="401" y="248" width="132" height="32" rx="16" fill="#3B0764" stroke="#A855F7"/>
+      <text x="467" y="269" fill="#F3E8FF" text-anchor="middle">Gemini 3.5</text>
+      <rect x="543" y="248" width="118" height="32" rx="16" fill="#064E3B" stroke="#10B981"/>
+      <text x="602" y="269" fill="#D1FAE5" text-anchor="middle">Firestore</text>
+    </g>
+  </g>
+
+  <!-- right side: minimal fleet diagram -->
+  <g transform="translate(1020,160)" font-family="Segoe UI, Arial, sans-serif">
+    <g stroke="#475569" stroke-width="1.5" fill="none" opacity="0.9">
+      <line x1="0" y1="0" x2="-90" y2="-62"/>
+      <line x1="0" y1="0" x2="96" y2="-56"/>
+      <line x1="0" y1="0" x2="-96" y2="60"/>
+      <line x1="0" y1="0" x2="90" y2="66"/>
+    </g>
+    <circle r="30" fill="#1E293B" stroke="#60A5FA" stroke-width="2.5"/>
+    <text y="7" font-size="15" font-weight="700" fill="#93C5FD" text-anchor="middle">CORE</text>
+    <g font-size="12" fill="#94A3B8" text-anchor="middle">
+      <circle cx="-90" cy="-62" r="17" fill="#1E293B" stroke="#4285F4" stroke-width="2"/>
+      <text x="-90" y="-58">UAS</text>
+      <circle cx="96" cy="-56" r="17" fill="#1E293B" stroke="#34A853" stroke-width="2"/>
+      <text x="96" y="-52">MEM</text>
+      <circle cx="-96" cy="60" r="17" fill="#1E293B" stroke="#FBBC05" stroke-width="2"/>
+      <text x="-96" y="64">CTL</text>
+      <circle cx="90" cy="66" r="17" fill="#1E293B" stroke="#EA4335" stroke-width="2"/>
+      <text x="90" y="70">DOM</text>
+    </g>
+  </g>
+</svg>

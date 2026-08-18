@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1120"/>
+      <stop offset="0.55" stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#1E293B"/>
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#3B82F6" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#3B82F6" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#334155" stroke-width="0.6" opacity="0.3"/>
+    </pattern>
+  </defs>
+
+  <rect width="1280" height="720" fill="url(#bgGrad)"/>
+  <rect width="1280" height="720" fill="url(#grid)"/>
+  <circle cx="330" cy="360" r="330" fill="url(#glow)"/>
+
+  <!-- circuit accents -->
+  <g stroke="#334155" stroke-width="2" fill="none" opacity="0.7">
+    <path d="M60 640 H300 L360 580 H520"/>
+    <path d="M1220 90 H1020 L960 150 H820"/>
+    <circle cx="520" cy="580" r="5" fill="#334155"/>
+    <circle cx="820" cy="150" r="5" fill="#334155"/>
+  </g>
+
+  <!-- shield emblem left -->
+  <g transform="translate(330,360) scale(1.9)">
+    <path d="M0 -92 L74 -62 V14 C74 62 40 94 0 108 C-40 94 -74 62 -74 14 V-62 Z"
+          fill="url(#shieldGrad)" stroke="#60A5FA" stroke-width="3"/>
+    <path d="M0 -70 L56 -47 V12 C56 50 30 76 0 88 C-30 76 -56 50 -56 12 V-47 Z"
+          fill="#0F172A" opacity="0.55"/>
+    <path d="M-26 6 L-6 28 L34 -22" fill="none" stroke="#F8FAFC" stroke-width="11"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="-58" cy="-78" r="6" fill="#4285F4"/>
+    <circle cx="58" cy="-78" r="6" fill="#34A853"/>
+    <circle cx="-72" cy="46" r="6" fill="#FBBC05"/>
+    <circle cx="72" cy="46" r="6" fill="#EA4335"/>
+    <g stroke-width="1.5" opacity="0.7">
+      <line x1="-53" y1="-73" x2="-32" y2="-58" stroke="#4285F4"/>
+      <line x1="53" y1="-73" x2="32" y2="-58" stroke="#34A853"/>
+      <line x1="-66" y1="42" x2="-46" y2="30" stroke="#FBBC05"/>
+      <line x1="66" y1="42" x2="46" y2="30" stroke="#EA4335"/>
+    </g>
+  </g>
+
+  <!-- headline block right -->
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <text x="620" y="330" font-size="96" font-weight="800" fill="#F8FAFC" letter-spacing="1">Sentinel<tspan fill="#60A5FA">Fleet</tspan></text>
+    <text x="624" y="392" font-size="34" fill="#CBD5E1" letter-spacing="0.4">Enterprise AI Agent Fleet</text>
+    <text x="624" y="438" font-size="34" fill="#CBD5E1" letter-spacing="0.4">on <tspan fill="#8AB4F8" font-weight="700">Google Cloud</tspan></text>
+
+    <!-- Google accent bars -->
+    <g transform="translate(626,472)">
+      <rect x="0"   y="0" width="88" height="8" rx="4" fill="#4285F4"/>
+      <rect x="96"  y="0" width="88" height="8" rx="4" fill="#EA4335"/>
+      <rect x="192" y="0" width="88" height="8" rx="4" fill="#FBBC05"/>
+      <rect x="288" y="0" width="88" height="8" rx="4" fill="#34A853"/>
+    </g>
+
+    <!-- badge pills -->
+    <g font-size="26" font-weight="700">
+      <rect x="624" y="510" width="200" height="52" rx="26" fill="#3B0764" stroke="#A855F7" stroke-width="2"/>
+      <text x="724" y="544" fill="#F3E8FF" text-anchor="middle">Gemini 3.5</text>
+      <rect x="840" y="510" width="200" height="52" rx="26" fill="#1E3A8A" stroke="#3B82F6" stroke-width="2"/>
+      <text x="940" y="544" fill="#DBEAFE" text-anchor="middle">Cloud Run</text>
+    </g>
+  </g>
+</svg>
