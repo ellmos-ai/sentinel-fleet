@@ -13,14 +13,30 @@ model plus a thin registry over `get_store()`.
 import time
 import uuid
 from typing import Any, List, Optional
-from pydantic import BaseModel, Field, computed_field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 from sentinel_fleet.core.storage import get_store
 from sentinel_fleet.core.errors import TemplateNotFoundError, TemplatePermissionError
 
-# MVP capacity for `TaskTemplate.steps` - a single-step task is the special case of a chain,
-# not a different shape (concept doc, section E.1/E.4). Multi-step chains are Phase 2; this is
-# the schema-level guard that keeps Phase 1 from silently accepting a shape it cannot execute.
-MAX_STEPS_IN_MVP = 1
+# A task template needs at least one step (concept doc, section E.1/E.4): a single-step task is
+# the special case of a chain, not a different shape. Multi-step chains are the "Minimaler
+# Ketten-Schnitt" of Phase 2, executed by `core/chain_runner.py`.
+MIN_STEPS = 1
+
+# The minimal chain cut supports exactly two execution patterns (concept doc, section E.4):
+# "single" (the pre-existing one-model-call path) and "race" (chat_service.race(), bound to a
+# step). Swarm/operator patterns are real, but their dispatch loops are Phase 3 - a schema that
+# accepted them here would let the UI save a step the chain runner then silently cannot execute.
+SUPPORTED_EXECUTION_PATTERNS = {"single", "race"}
+
+# Mirrors `chat/service.py`'s `MAX_RACE_LANES` (`RACE_LANE_AGENT_IDS` has 4 entries) - duplicated
+# rather than imported so this low-level model module stays free of a dependency on the chat/
+# gateway layer. If that race-lane roster ever changes size, this constant must move with it.
+MAX_RACE_MODELS = 4
+
+# Tool name a template/step run is scoped under at the Sovereign Gateway. Lives here, not in
+# `routines.py` or `core/chain_runner.py`, because both of those modules need it and importing
+# one from the other would be circular (routines.py calls into chain_runner.py to run a chain).
+EXECUTE_TEMPLATE_TOOL = "execute_template"
 
 
 class Step(BaseModel):
@@ -39,17 +55,57 @@ class Step(BaseModel):
     prompt_id: Optional[str] = None
     prompt_version: Optional[str] = None
     custom_prompt_text: Optional[str] = None
-    # "previous_output" | "template_input" | "artifact:<step_id>" once Phase 2 chains exist;
-    # None here because a single step has no predecessor to read from.
+    # "previous_output" is the only value the minimal chain cut's runner understands (concept
+    # doc, section E.4: input_spec stays fixed at "previous_output" for this cut). None means
+    # "no predecessor yet" - the default single step, or a chain's first step.
     input_spec: Optional[str] = None
     # Required by the concept for a real chain (a Phase-2 runner enforces every step
     # depositing its output at a fixed handoff point) but left optional here: Phase 1 has
     # nothing that reads it yet, and the single default step is never chained into anything.
     output_artifact_id: Optional[str] = None
+    # Parallel branches ("Schwarm (b)", concept doc section E.1) are a later phase - the minimal
+    # chain cut is strictly linear, so this must stay unset (validated below).
     parallel_group: Optional[str] = None
-    execution_pattern: str = "single"        # "single" | "swarm:<id>" | "operator" | "race"
+    execution_pattern: str = "single"        # "single" | "race" (see SUPPORTED_EXECUTION_PATTERNS)
     swarm_pattern: Optional[str] = None
     race_models: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _minimal_chain_cut_shape(self) -> "Step":
+        """Rejects step shapes the chain runner cannot execute, before they are ever persisted
+        (concept doc, section E.4 "Minimaler Ketten-Schnitt"). Same spirit as the old
+        `MAX_STEPS_IN_MVP` guard it replaces: a schema that quietly accepts an unexecutable
+        shape just moves the failure to run time, where it is harder to trace back to the step
+        that caused it.
+        """
+        if self.execution_pattern not in SUPPORTED_EXECUTION_PATTERNS:
+            raise ValueError(
+                f"step '{self.step_id}': execution_pattern must be one of "
+                f"{sorted(SUPPORTED_EXECUTION_PATTERNS)} in this deployment (swarm/operator "
+                f"patterns are Phase 3, concept doc section E.4) - got '{self.execution_pattern}'."
+            )
+        if self.execution_pattern == "race":
+            if not (2 <= len(self.race_models) <= MAX_RACE_MODELS):
+                raise ValueError(
+                    f"step '{self.step_id}': a race step needs between 2 and {MAX_RACE_MODELS} "
+                    f"models (concept doc, section E.1) - got {len(self.race_models)}."
+                )
+        elif self.race_models:
+            raise ValueError(
+                f"step '{self.step_id}': race_models is only meaningful with "
+                f"execution_pattern='race', but this step's pattern is '{self.execution_pattern}'."
+            )
+        if self.parallel_group is not None:
+            raise ValueError(
+                f"step '{self.step_id}': parallel_group is a later phase's parallel-branch "
+                "feature, not part of the minimal chain cut (concept doc, section E.4)."
+            )
+        if self.input_spec not in (None, "previous_output"):
+            raise ValueError(
+                f"step '{self.step_id}': input_spec must be unset or 'previous_output' in this "
+                f"deployment (concept doc, section E.4) - got '{self.input_spec}'."
+            )
+        return self
 
 
 class LoopConfig(BaseModel):
@@ -87,12 +143,26 @@ class TaskTemplate(BaseModel):
 
     @field_validator("steps")
     @classmethod
-    def _mvp_supports_exactly_one_step(cls, value: List[Step]) -> List[Step]:
-        if len(value) != MAX_STEPS_IN_MVP:
+    def _steps_form_a_valid_chain(cls, value: List[Step]) -> List[Step]:
+        """A single-step template (the default) and a multi-step chain (concept doc, section
+        E.4 "Minimaler Ketten-Schnitt") are the same shape, validated the same way - there is no
+        separate "MVP mode" any more. Three invariants: at least one step, unique step ids, and
+        positions that form a gapless 0..n-1 sequence once sorted - the
+        chain runner executes `sorted(steps, key=lambda s: s.position)`, so a gap or a duplicate
+        would silently skip or collide two steps at run time instead of failing here.
+        """
+        if len(value) < MIN_STEPS:
+            raise ValueError(f"A task template needs at least {MIN_STEPS} step - got {len(value)}.")
+
+        step_ids = [s.step_id for s in value]
+        if len(set(step_ids)) != len(step_ids):
+            raise ValueError(f"Step ids must be unique within a template - got {step_ids}.")
+
+        positions = sorted(s.position for s in value)
+        if positions != list(range(len(value))):
             raise ValueError(
-                f"This deployment (Phase 1 MVP) supports exactly {MAX_STEPS_IN_MVP} step per "
-                f"task template - multi-step chains are not implemented yet (concept doc, "
-                f"Phase 2 / section E.4). Got {len(value)} steps."
+                "Step positions must be gapless and unique, forming a dense 0..n-1 sequence "
+                f"once sorted (concept doc, section E.4) - got {positions}."
             )
         return value
 
@@ -250,6 +320,12 @@ class TaskTemplateRegistry:
             fields["steps"] = [template.steps[0].model_copy(update=step_overrides)]
 
         updated = template.model_copy(update={**fields, "updated_at": time.time()})
+        # model_copy() does not re-run validators (Pydantic v2, by design) - revalidate
+        # explicitly so an update that breaks a cross-field invariant (steps positions, a race
+        # step's model count, ...) is caught here instead of persisting a template the chain
+        # runner cannot execute. The round trip itself is already exercised and proven safe by
+        # test_template_roundtrips_through_model_dump_and_validate.
+        updated = TaskTemplate.model_validate(updated.model_dump())
         self._store.put(template_id, updated)
         return updated
 

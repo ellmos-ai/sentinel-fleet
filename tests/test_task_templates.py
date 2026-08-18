@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from sentinel_fleet.core.errors import TemplateHasBindingsError, TemplateNotFoundError, TemplatePermissionError
 from sentinel_fleet.uas import routines
-from sentinel_fleet.uas.task_templates import Step, TaskTemplate, task_template_registry
+from sentinel_fleet.uas.task_templates import MAX_RACE_MODELS, Step, TaskTemplate, task_template_registry
 from sentinel_fleet.web.server import app
 
 
@@ -176,26 +176,111 @@ def test_flat_property_assignment_writes_through_to_the_step():
     assert template.steps[0].skill_ids == ["skill:model-armor-sentry"]
 
 
-def test_more_than_one_step_is_rejected_in_the_mvp():
-    with pytest.raises(ValidationError, match="exactly 1 step"):
-        TaskTemplate(
-            template_id="TMPL-TOO-MANY",
-            name="Two-step chain",
-            steps=[Step(step_id="a", position=0), Step(step_id="b", position=1)]
-        )
+def test_multi_step_chains_are_now_supported():
+    """Migrated from the old "exactly 1 step" MVP guard (concept doc, section E.4 "Minimaler
+    Ketten-Schnitt"): a template with several steps, gapless positions and unique ids is valid
+    - the shape this test used to reject is now the shape Phase 2 chains use.
+    """
+    template = TaskTemplate(
+        template_id="TMPL-TWO-STEPS",
+        name="Two-step chain",
+        steps=[Step(step_id="a", position=0), Step(step_id="b", position=1)]
+    )
+    assert len(template.steps) == 2
 
-    with pytest.raises(ValidationError, match="exactly 1 step"):
-        task_template_registry.create_template(
-            name="Two-step chain via registry",
-            owner="mia",
-            steps=[Step(step_id="a", position=0), Step(step_id="b", position=1)]
-        )
+    via_registry = task_template_registry.create_template(
+        name="Two-step chain via registry",
+        owner="mia",
+        steps=[Step(step_id="a", position=0), Step(step_id="b", position=1)]
+    )
+    assert len(via_registry.steps) == 2
 
 
-def test_zero_steps_is_rejected_in_the_mvp():
-    """A template needs its one executable step - an empty chain is as invalid as a chain."""
-    with pytest.raises(ValidationError, match="exactly 1 step"):
+def test_zero_steps_is_rejected():
+    """A template needs at least one executable step - an empty chain is as invalid as before,
+    just under the new "at least 1" wording (concept doc, section E.4)."""
+    with pytest.raises(ValidationError, match="at least 1 step"):
         TaskTemplate(template_id="TMPL-EMPTY", name="No steps", steps=[])
+
+
+def test_duplicate_step_ids_are_rejected():
+    with pytest.raises(ValidationError, match="unique"):
+        TaskTemplate(
+            template_id="TMPL-DUP-IDS",
+            name="Duplicate step ids",
+            steps=[Step(step_id="a", position=0), Step(step_id="a", position=1)]
+        )
+
+
+def test_duplicate_positions_are_rejected():
+    with pytest.raises(ValidationError, match="gapless"):
+        TaskTemplate(
+            template_id="TMPL-DUP-POS",
+            name="Duplicate positions",
+            steps=[Step(step_id="a", position=0), Step(step_id="b", position=0)]
+        )
+
+
+def test_gappy_positions_are_rejected():
+    with pytest.raises(ValidationError, match="gapless"):
+        TaskTemplate(
+            template_id="TMPL-GAP-POS",
+            name="Gappy positions",
+            steps=[Step(step_id="a", position=0), Step(step_id="b", position=2)]
+        )
+
+
+def test_only_single_and_race_execution_patterns_are_supported():
+    with pytest.raises(ValidationError, match="execution_pattern"):
+        Step(step_id="a", execution_pattern="operator")
+    with pytest.raises(ValidationError, match="execution_pattern"):
+        Step(step_id="a", execution_pattern="swarm:hierarchy")
+
+
+def test_race_step_needs_between_two_and_four_models():
+    with pytest.raises(ValidationError, match="between 2 and"):
+        Step(step_id="a", execution_pattern="race", race_models=["gemini-3.5-flash"])
+    with pytest.raises(ValidationError, match="between 2 and"):
+        Step(
+            step_id="a", execution_pattern="race",
+            race_models=[f"model-{i}" for i in range(MAX_RACE_MODELS + 1)]
+        )
+    # Exactly at the bounds is valid.
+    Step(step_id="a", execution_pattern="race", race_models=["gemini-3.5-flash", "gemini-3.5-pro"])
+
+
+def test_race_models_only_allowed_with_race_pattern():
+    with pytest.raises(ValidationError, match="only meaningful with execution_pattern='race'"):
+        Step(step_id="a", execution_pattern="single", race_models=["gemini-3.5-flash", "gemini-3.5-pro"])
+
+
+def test_parallel_group_is_rejected_in_the_minimal_chain_cut():
+    with pytest.raises(ValidationError, match="parallel_group"):
+        Step(step_id="a", parallel_group="branch-1")
+
+
+def test_input_spec_only_supports_previous_output():
+    with pytest.raises(ValidationError, match="input_spec"):
+        Step(step_id="a", input_spec="template_input")
+    with pytest.raises(ValidationError, match="input_spec"):
+        Step(step_id="a", input_spec="artifact:step-1")
+    # Both the default (None) and the one supported value are valid.
+    Step(step_id="a")
+    Step(step_id="a", input_spec="previous_output")
+
+
+def test_update_template_revalidates_steps_and_rejects_a_broken_chain():
+    """model_copy(update=...) does not re-run validators (Pydantic v2) - update_template() must
+    revalidate explicitly, or a broken chain (duplicate positions here) would silently persist.
+    """
+    template = task_template_registry.create_template(name="Revalidation probe", owner="nadia")
+    with pytest.raises(ValidationError, match="gapless"):
+        task_template_registry.update_template(
+            template.template_id,
+            steps=[Step(step_id="a", position=0), Step(step_id="b", position=0)]
+        )
+    # Untouched: the broken update never persisted.
+    assert len(task_template_registry.get_template(template.template_id).steps) == 1
 
 
 def test_template_roundtrips_through_model_dump_and_validate():
@@ -250,12 +335,30 @@ async def test_create_task_template_accepts_an_explicit_single_step_array(client
 
 
 @pytest.mark.asyncio
-async def test_create_task_template_rejects_an_explicit_multi_step_array(client):
+async def test_create_task_template_accepts_a_valid_multi_step_array(client):
+    """A gapless, uniquely-positioned multi-step array is now a real chain (concept doc,
+    section E.4), not just schema future-proofing - this used to be the rejection case."""
     response = await client.post("/api/task-templates", data={
-        "name": "Explicit steps array, too many",
-        "steps": '[{"step_id": "a"}, {"step_id": "b"}]'
+        "name": "Two-step chain via the API",
+        "steps": '[{"step_id": "step-1", "position": 0, "custom_prompt_text": "First."}, '
+                 '{"step_id": "step-2", "position": 1, "custom_prompt_text": "Second."}]'
+    })
+    assert response.status_code == 200
+    template = response.json()["template"]
+    assert len(template["steps"]) == 2
+    assert [s["step_id"] for s in template["steps"]] == ["step-1", "step-2"]
+
+
+@pytest.mark.asyncio
+async def test_create_task_template_rejects_steps_with_duplicate_positions(client):
+    """Both steps default to position=0 here - rejected for a duplicate position, not for
+    having "too many" steps (that rule no longer exists, see the test above)."""
+    response = await client.post("/api/task-templates", data={
+        "name": "Explicit steps array, duplicate positions",
+        "steps": '[{"step_id": "a", "position": 0}, {"step_id": "b", "position": 0}]'
     })
     assert response.status_code == 422
+    assert "gapless" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
