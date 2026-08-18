@@ -277,7 +277,8 @@ approval flag. It describes *what* runs, never *when*. Two independent bindings
   run-history row.
 
 Neither binding is a stored "template type" — both the gear/clock badges and the
-running/preparing/idle runtime colour in the dashboard's **Task templates** table are derived on
+running/preparing/idle runtime colour in the dashboard's **Tasks** table (next to the existing
+Task queue table, both in the Fleet tab) are derived on
 every read, never stored, the same principle the Routinika desktop app uses to derive
 `item_type` from two flags instead of storing it. The two derivations read different sources,
 though: `routines.derive_symbols` reads the current bindings (a routine attached → gear; a

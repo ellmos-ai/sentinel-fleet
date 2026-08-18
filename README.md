@@ -98,8 +98,8 @@ should happen, never *when*. Attaching a `RoutineBinding` (recurring: interval /
 or a `ScheduleBinding` (a one-off `due_at`) turns it recurring or dated; removing both bindings
 leaves a bare, deletable template again — a template never migrates between object types. The
 gear/clock badges (from the bindings) and the running/preparing/idle status dot (from this
-template's own `TaskRecord`s, never a next-due lookahead) in the **Task templates** table
-(Fleet tab) are all derived on every read, never stored.
+template's own `TaskRecord`s, never a next-due lookahead) in the **Tasks** table (Fleet tab,
+next to the existing Task queue table) are all derived on every read, never stored.
 
 Running a template goes through the same `SovereignGateway` path as the chat console — an agent
 identity, model armor, permission gate — and produces a real `TaskRecord` in the existing Task
