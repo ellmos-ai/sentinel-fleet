@@ -15,3 +15,28 @@ data/
 credentials*.json
 .vscode/
 .idea/
+
+# Arbeitsdokumente & interne Berichte (REQUIREMENTS §4, Lehrfall CALL-E)
+AGENTS.md
+CLAUDE.md
+AUFGABEN.txt
+TODO.md
+SPEC*.md
+UI-SPEC.md
+BLUEPRINT-*.md
+ABLAUF.md
+DEVPOST*.md
+PR-VORSCHAU.md
+HOST-READINESS.md
+VIDEO-ENTWURF.md
+STORYBOARD*.md
+GAP-*.md
+_AGY*.md
+_CODEX*.md
+_OPUS*.md
+_reports/
+docs/audits/
+
+# Medien-Baubereich (Render-Pipeline bleibt lokal, Video via YouTube)
+_media_build/
+docs/media/*.mp4

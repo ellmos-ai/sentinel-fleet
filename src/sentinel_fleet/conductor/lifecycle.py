@@ -1,5 +1,6 @@
 """Agent Lifecycle & Spawning Manager based on coma."""
 
+import threading
 from typing import Dict, List, Optional
 from sentinel_fleet.core.identity import AgentIdentity, AgentRole, AgentStatus
 
@@ -7,6 +8,7 @@ from sentinel_fleet.core.identity import AgentIdentity, AgentRole, AgentStatus
 class LifecycleManager:
     def __init__(self):
         self._fleet: Dict[str, AgentIdentity] = {}
+        self._lock = threading.RLock()
         self._seed_default_fleet()
 
     def _seed_default_fleet(self):
@@ -79,18 +81,21 @@ class LifecycleManager:
             self._fleet[a.agent_id] = a
 
     def get_agent(self, agent_id: str) -> Optional[AgentIdentity]:
-        return self._fleet.get(agent_id)
+        with self._lock:
+            return self._fleet.get(agent_id)
 
     def list_fleet(self) -> List[AgentIdentity]:
-        return list(self._fleet.values())
+        with self._lock:
+            return list(self._fleet.values())
 
     def update_agent_status(self, agent_id: str, status: AgentStatus, reason: str = ""):
-        agent = self.get_agent(agent_id)
-        if agent:
-            agent.status = status
-            agent.quarantine_reason = reason if status == AgentStatus.QUARANTINED else ""
-            if status == AgentStatus.ACTIVE or status == AgentStatus.IDLE:
-                agent.consecutive_steps = 0
+        with self._lock:
+            agent = self.get_agent(agent_id)
+            if agent:
+                agent.status = status
+                agent.quarantine_reason = reason if status == AgentStatus.QUARANTINED else ""
+                if status == AgentStatus.ACTIVE or status == AgentStatus.IDLE:
+                    agent.consecutive_steps = 0
 
 
 lifecycle_manager = LifecycleManager()

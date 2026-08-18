@@ -4,6 +4,8 @@ import time
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from sentinel_fleet.core.storage import get_store
+from sentinel_fleet.core.errors import TicketNotFoundError
 
 
 class TicketStatus(str, Enum):
@@ -36,7 +38,7 @@ class Ticket(BaseModel):
 
 class TicketMaster:
     def __init__(self):
-        self._tickets: Dict[str, Ticket] = {}
+        self._store = get_store("tickets", Ticket)
 
     def create_approval_ticket(
         self,
@@ -47,7 +49,7 @@ class TicketMaster:
         payload: Dict[str, Any],
         priority: TicketPriority = TicketPriority.NORMAL
     ) -> Ticket:
-        ticket_id = f"TICK-{len(self._tickets)+1:04d}"
+        ticket_id = f"TICK-{self._store.count()+1:04d}"
         ticket = Ticket(
             ticket_id=ticket_id,
             title=title,
@@ -58,30 +60,41 @@ class TicketMaster:
             priority=priority,
             status=TicketStatus.PENDING_APPROVAL
         )
-        self._tickets[ticket_id] = ticket
+        self._store.put(ticket_id, ticket)
         return ticket
 
-    def approve_ticket(self, ticket_id: str, comment: str = "Approved by operator") -> Optional[Ticket]:
-        ticket = self._tickets.get(ticket_id)
-        if ticket:
-            ticket.status = TicketStatus.APPROVED
-            ticket.resolved_at = time.time()
-            ticket.resolution_comment = comment
+    def get_ticket(self, ticket_id: str) -> Optional[Ticket]:
+        return self._store.get(ticket_id)
+
+    def approve_ticket(self, ticket_id: str, comment: str = "Approved by operator") -> Ticket:
+        ticket = self._store.get(ticket_id)
+        if not ticket:
+            raise TicketNotFoundError(ticket_id)
+
+        ticket.status = TicketStatus.APPROVED
+        ticket.resolved_at = time.time()
+        ticket.resolution_comment = comment
+        self._store.put(ticket_id, ticket)
         return ticket
 
-    def reject_ticket(self, ticket_id: str, reason: str = "Rejected by operator") -> Optional[Ticket]:
-        ticket = self._tickets.get(ticket_id)
-        if ticket:
-            ticket.status = TicketStatus.REJECTED
-            ticket.resolved_at = time.time()
-            ticket.resolution_comment = reason
+    def reject_ticket(self, ticket_id: str, reason: str = "Rejected by operator") -> Ticket:
+        ticket = self._store.get(ticket_id)
+        if not ticket:
+            raise TicketNotFoundError(ticket_id)
+
+        ticket.status = TicketStatus.REJECTED
+        ticket.resolved_at = time.time()
+        ticket.resolution_comment = reason
+        self._store.put(ticket_id, ticket)
         return ticket
 
     def get_pending_tickets(self) -> List[Ticket]:
-        return [t for t in self._tickets.values() if t.status == TicketStatus.PENDING_APPROVAL]
+        return [t for t in self._store.list_all() if t.status == TicketStatus.PENDING_APPROVAL]
 
     def list_all(self) -> List[Ticket]:
-        return list(reversed(list(self._tickets.values())))
+        tickets = self._store.list_all()
+        tickets.sort(key=lambda t: t.created_at, reverse=True)
+        return tickets
 
 
 ticket_master = TicketMaster()

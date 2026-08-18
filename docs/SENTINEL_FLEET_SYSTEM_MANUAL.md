@@ -177,9 +177,16 @@ The entire codebase is validated by a rigorous Pytest test suite covering unit l
 python -m pytest tests -v
 ```
 
-### Test Results (20/20 Passed — 100% Green):
+### Test Results (27/27 Passed — 100% Green):
 * `test_gateway_enforces_tool_scoping` — PASSED
 * `test_gateway_triggers_hitl_approval_for_ask_permission` — PASSED
+* `test_component_v1_yaml_loader_and_32_skills` — PASSED
+* `test_skill_not_found_error` — PASSED
+* `test_async_model_armor_non_blocking_and_recursion` — PASSED
+* `test_strict_task_master_errors_and_persistence` — PASSED
+* `test_strict_ticket_master_errors_and_persistence` — PASSED
+* `test_privacy_contacts_strict_errors_and_tombstones` — PASSED
+* `test_gateway_concurrency_lock` — PASSED
 * `test_create_custom_ticket` — PASSED
 * `test_create_custom_task` — PASSED
 * `test_create_custom_memory` — PASSED

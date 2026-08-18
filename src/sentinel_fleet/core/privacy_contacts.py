@@ -3,6 +3,8 @@
 import time
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
+from sentinel_fleet.core.storage import get_store
+from sentinel_fleet.core.errors import ContactNotFoundError, ContactOptOutViolationError
 
 
 class PrivacyContact(BaseModel):
@@ -24,8 +26,9 @@ class PrivacyContact(BaseModel):
 
 class PrivacyContactHub:
     def __init__(self):
-        self._contacts: Dict[str, PrivacyContact] = {}
-        self._seed_default_contacts()
+        self._store = get_store("privacy_contacts", PrivacyContact)
+        if self._store.count() == 0:
+            self._seed_default_contacts()
 
     def _seed_default_contacts(self):
         seeds = [
@@ -71,15 +74,19 @@ class PrivacyContactHub:
             )
         ]
         for c in seeds:
-            self._contacts[c.contact_id] = c
+            self._store.put(c.contact_id, c)
 
     def list_all(self, include_tombstones: bool = False) -> List[PrivacyContact]:
+        contacts = self._store.list_all()
         if include_tombstones:
-            return list(self._contacts.values())
-        return [c for c in self._contacts.values() if not c.is_tombstone]
+            return contacts
+        return [c for c in contacts if not c.is_tombstone]
+
+    def get_contact_by_id(self, contact_id: str) -> Optional[PrivacyContact]:
+        return self._store.get(contact_id)
 
     def get_contact_by_email(self, email: str) -> Optional[PrivacyContact]:
-        for c in self._contacts.values():
+        for c in self._store.list_all():
             if c.email.lower() == email.lower():
                 return c
         return None
@@ -102,17 +109,19 @@ class PrivacyContactHub:
             protection_level=protection_level,
             opt_in_status="confirmed"
         )
-        self._contacts[contact_id] = contact
+        self._store.put(contact_id, contact)
         return contact
 
-    def mark_opt_out(self, contact_id: str, reason: str = "Operator opt-out") -> Optional[PrivacyContact]:
-        contact = self._contacts.get(contact_id)
+    def mark_opt_out(self, contact_id: str, reason: str = "Operator opt-out") -> PrivacyContact:
+        contact = self._store.get(contact_id)
         if not contact:
-            return None
+            raise ContactNotFoundError(contact_id)
+
         contact.opt_in_status = "unsubscribed"
         contact.is_tombstone = True
         contact.dsgvo_notes = f"Widerruf / Opt-Out am {time.strftime('%Y-%m-%d')}: {reason}"
         contact.updated_at = time.time()
+        self._store.put(contact_id, contact)
         return contact
 
     def validate_send_permission(self, email: str) -> Dict[str, Any]:
@@ -120,21 +129,22 @@ class PrivacyContactHub:
         contact = self.get_contact_by_email(email)
         if not contact:
             return {"allowed": True, "reason": "New transaction contact (Ad-hoc B2B)"}
-        
+
         if contact.is_tombstone or contact.opt_in_status in ["unsubscribed", "blacklisted"]:
             return {
                 "allowed": False,
                 "reason": f"DSGVO Block: Kontakt {email} hat widersprochen ({contact.dsgvo_notes})."
             }
-        
+
         return {"allowed": True, "reason": f"DSGVO Valid: Schutzstufe {contact.protection_level} aktiv."}
 
     def run_dsgvo_retention_audit(self) -> Dict[str, Any]:
         """Audits contacts for retention compliance."""
-        total = len(self._contacts)
-        active = len(self.list_all(include_tombstones=False))
-        tombstones = len([c for c in self._contacts.values() if c.is_tombstone])
-        
+        all_contacts = self._store.list_all()
+        total = len(all_contacts)
+        active = len([c for c in all_contacts if not c.is_tombstone])
+        tombstones = len([c for c in all_contacts if c.is_tombstone])
+
         return {
             "total_records": total,
             "active_contacts": active,

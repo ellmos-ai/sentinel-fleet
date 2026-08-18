@@ -1,6 +1,7 @@
 """Model Armor & Inline Guardrails (Anti-Prompt-Injection & PII Masking)."""
 
 import re
+import asyncio
 from typing import Any, Dict, List, Tuple
 from pydantic import BaseModel
 
@@ -27,12 +28,18 @@ class ModelArmor:
     API_KEY_PATTERN = re.compile(r"(AIza[0-9A-Za-z-_]{30,}|sk-[a-zA-Z0-9]{20,})")
     CREDIT_CARD_PATTERN = re.compile(r"\b(?:\d{4}[ -]?){3}\d{4}\b")
 
+    MAX_RECURSION_DEPTH = 10
+    MAX_STRING_SCAN_BYTES = 500_000
+
     @classmethod
     def inspect_prompt(cls, prompt_text: str) -> ArmorInspectionResult:
         """Scan input prompts for adversarial injections and jailbreaks."""
         detected = []
+        # Protect against oversized prompts
+        text_to_scan = prompt_text[:cls.MAX_STRING_SCAN_BYTES] if len(prompt_text) > cls.MAX_STRING_SCAN_BYTES else prompt_text
+
         for pattern in cls.INJECTION_PATTERNS:
-            if pattern.search(prompt_text):
+            if pattern.search(text_to_scan):
                 detected.append(pattern.pattern)
 
         if detected:
@@ -65,15 +72,34 @@ class ModelArmor:
         return text, redacted
 
     @classmethod
-    def sanitize_arguments(cls, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Deep sanitization of dictionary arguments."""
+    def sanitize_arguments(cls, args: Dict[str, Any], depth: int = 0) -> Dict[str, Any]:
+        """Deep synchronous sanitization of dictionary arguments with recursion bounds."""
+        if depth > cls.MAX_RECURSION_DEPTH:
+            return args
+
         clean = {}
         for k, v in args.items():
             if isinstance(v, str):
                 clean_v, _ = cls.sanitize_pii(v)
                 clean[k] = clean_v
             elif isinstance(v, dict):
-                clean[k] = cls.sanitize_arguments(v)
+                clean[k] = cls.sanitize_arguments(v, depth=depth + 1)
+            elif isinstance(v, list):
+                clean_list = []
+                for item in v:
+                    if isinstance(item, str):
+                        item_clean, _ = cls.sanitize_pii(item)
+                        clean_list.append(item_clean)
+                    elif isinstance(item, dict):
+                        clean_list.append(cls.sanitize_arguments(item, depth=depth + 1))
+                    else:
+                        clean_list.append(item)
+                clean[k] = clean_list
             else:
                 clean[k] = v
         return clean
+
+    @classmethod
+    async def sanitize_arguments_async(cls, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Non-blocking async sanitization offloading regex processing to a worker thread."""
+        return await asyncio.to_thread(cls.sanitize_arguments, args)

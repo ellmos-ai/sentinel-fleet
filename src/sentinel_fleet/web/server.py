@@ -15,6 +15,14 @@ from sentinel_fleet.core.prompts import prompt_registry
 from sentinel_fleet.core.skills import skill_registry
 from sentinel_fleet.core.domains import domain_registry
 from sentinel_fleet.core.privacy_contacts import privacy_contact_hub
+from sentinel_fleet.core.errors import (
+    SentinelFleetError,
+    TaskNotFoundError,
+    TicketNotFoundError,
+    ContactNotFoundError,
+    SkillNotFoundError,
+    ContactOptOutViolationError
+)
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.uas.ticket_master import ticket_master, TicketStatus, TicketPriority
 from sentinel_fleet.uas.task_master import task_master, TaskState
@@ -33,6 +41,25 @@ app = FastAPI(
     description="Fortified Enterprise Agent Platform & Autonomous Taskmaster",
     version="1.0.0"
 )
+
+# Exception handlers for SentinelFleet errors
+@app.exception_handler(TaskNotFoundError)
+@app.exception_handler(TicketNotFoundError)
+@app.exception_handler(ContactNotFoundError)
+@app.exception_handler(SkillNotFoundError)
+async def not_found_exception_handler(request: Request, exc: SentinelFleetError):
+    return JSONResponse(status_code=404, content={"error": exc.message, "details": exc.details})
+
+
+@app.exception_handler(ContactOptOutViolationError)
+async def opt_out_violation_handler(request: Request, exc: ContactOptOutViolationError):
+    return JSONResponse(status_code=403, content={"error": exc.message, "details": exc.details})
+
+
+@app.exception_handler(SentinelFleetError)
+async def general_sentinel_exception_handler(request: Request, exc: SentinelFleetError):
+    return JSONResponse(status_code=400, content={"error": exc.message, "details": exc.details})
+
 
 # Setup directories
 base_dir = os.path.dirname(__file__)
@@ -170,10 +197,11 @@ async def api_create_contact(
 
 @app.post("/api/contacts/{contact_id}/opt-out")
 async def api_contact_opt_out(contact_id: str, reason: str = Form("Operator manual opt-out")):
-    contact = privacy_contact_hub.mark_opt_out(contact_id, reason)
-    if not contact:
+    try:
+        contact = privacy_contact_hub.mark_opt_out(contact_id, reason)
+        return {"status": "opt_out_recorded", "contact": contact.model_dump()}
+    except ContactNotFoundError:
         raise HTTPException(status_code=404, detail="Contact not found")
-    return {"status": "opt_out_recorded", "contact": contact.model_dump()}
 
 
 @app.get("/api/contacts/dsgvo-audit")
@@ -264,15 +292,16 @@ async def api_add_skill_version(
     required_tools: str = Form("")
 ):
     tools = [t.strip() for t in required_tools.split(",") if t.strip()]
-    skill = skill_registry.add_skill_version(
-        skill_id=skill_id,
-        new_version_number=new_version_number,
-        change_summary=change_summary,
-        required_tools=tools
-    )
-    if not skill:
+    try:
+        skill = skill_registry.add_skill_version(
+            skill_id=skill_id,
+            new_version_number=new_version_number,
+            change_summary=change_summary,
+            required_tools=tools
+        )
+        return {"status": "version_added", "skill": skill.model_dump()}
+    except SkillNotFoundError:
         raise HTTPException(status_code=404, detail="Skill not found")
-    return {"status": "version_added", "skill": skill.model_dump()}
 
 
 @app.post("/api/skills/{skill_id}/permissions")
@@ -281,14 +310,15 @@ async def api_update_skill_permissions(
     visibility: str = Form("organization"),
     execution_gate: str = Form("auto")
 ):
-    skill = skill_registry.update_permissions(
-        skill_id=skill_id,
-        visibility=visibility,
-        execution_gate=execution_gate
-    )
-    if not skill:
+    try:
+        skill = skill_registry.update_permissions(
+            skill_id=skill_id,
+            visibility=visibility,
+            execution_gate=execution_gate
+        )
+        return {"status": "permissions_updated", "skill": skill.model_dump()}
+    except SkillNotFoundError:
         raise HTTPException(status_code=404, detail="Skill not found")
-    return {"status": "permissions_updated", "skill": skill.model_dump()}
 
 
 @app.get("/api/domains")
@@ -325,8 +355,9 @@ async def api_create_ticket(
 
 @app.post("/api/tickets/{ticket_id}/approve")
 async def api_approve_ticket(ticket_id: str):
-    ticket = ticket_master.approve_ticket(ticket_id)
-    if not ticket:
+    try:
+        ticket = ticket_master.approve_ticket(ticket_id)
+    except TicketNotFoundError:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
     # If ticket was a dispute email approval, update invoice state
@@ -340,10 +371,11 @@ async def api_approve_ticket(ticket_id: str):
 
 @app.post("/api/tickets/{ticket_id}/reject")
 async def api_reject_ticket(ticket_id: str, reason: str = Form("Rejected by operator")):
-    ticket = ticket_master.reject_ticket(ticket_id, reason)
-    if not ticket:
+    try:
+        ticket = ticket_master.reject_ticket(ticket_id, reason)
+        return {"status": "rejected", "ticket": ticket.model_dump()}
+    except TicketNotFoundError:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    return {"status": "rejected", "ticket": ticket.model_dump()}
 
 
 @app.post("/api/tasks/create")
@@ -375,7 +407,9 @@ async def api_create_task(
     )
     telemetry.end_span(span, status="OK")
 
-    return {"status": "created", "task": task.model_dump()}
+    # Fetch fresh task state from storage
+    updated_task = task_master.get_task(task.task_id) or task
+    return {"status": "created", "task": updated_task.model_dump()}
 
 
 # ---------------------------------------------------------
