@@ -149,6 +149,33 @@ Open **`http://localhost:8080`** for the operator console, the chat and race tab
 python -m pytest tests/ -v
 ```
 
+### 3. Deploy to Google Cloud Run
+
+These are the commands the hosted demo was actually deployed with (project ID and file
+paths generalised; secret values never leave Secret Manager):
+
+```bash
+# One-time: store the Gemini key and the routines fire token as secrets
+gcloud secrets create gemini-api-key --data-file=gemini_api_key.txt
+gcloud secrets create routines-fire-token --data-file=fire_token.txt
+
+# Build from source (the Dockerfile copies sources BEFORE `pip install .`) and deploy
+gcloud run deploy sentinel-fleet --source . --region europe-west3 \
+  --update-secrets "GEMINI_API_KEY=gemini-api-key:latest,ROUTINES_FIRE_TOKEN=routines-fire-token:latest" \
+  --max-instances 2
+
+# Recurring agent work: ONE idempotent Cloud Scheduler job walks all due bindings.
+# Note the explicit empty JSON body — Google's front end answers 411 to body-less POSTs.
+gcloud scheduler jobs create http routines-fire --location europe-west3 \
+  --schedule "*/5 * * * *" --http-method POST \
+  --uri "https://<your-service-url>/api/routines/fire" \
+  --headers "X-Fire-Token=<your-token>,Content-Type=application/json" \
+  --message-body "{}"
+```
+
+Scale-to-zero stays intact: there is no in-process tick loop, the Scheduler wakes the
+service only when bindings may be due, and `fire_due()` is idempotent by construction.
+
 ---
 
 ## 🔒 Security & Model Armor
