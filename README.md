@@ -136,3 +136,9 @@ python -m pytest tests/ -v
 Copyright (C) 2026 Lukas Geiger.
 
 SentinelFleet is licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0-only) — see [LICENSE](LICENSE). If you run a modified version of this software as a network service, the AGPL requires you to offer its source to your users. For commercial licensing outside the AGPL terms, contact the author.
+
+## Scope, Provenance & Data Notes
+
+* **Demo, not advice.** The OmniLedger domain validates demo invoices against German statutory rules (§ 14 UStG, GoBD) as a technical showcase. It is an AI-assisted engineering demo — not tax, accounting or legal advice; whether any concrete use meets statutory requirements depends on the individual case.
+* **Provenance.** Built by Lukas Geiger for the Google Cloud All Things Agentic Hackathon with substantial AI coding assistance (Google Gemini, Anthropic Claude); all AI-generated code was human-directed and is covered by the 121-test suite. Some skill definitions are English rebrands of the author's private skills library.
+* **Data.** Chat and document uploads may be sent to the Gemini API when a `GEMINI_API_KEY` is configured; without a key the console runs in a labelled deterministic demo mode and nothing leaves the process. Do not upload real invoices or personal data to a demo deployment, and please do not post case data in issues.
