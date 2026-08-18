@@ -1,5 +1,7 @@
 """Unit tests for FastAPI Endpoints & UI Rendering."""
 
+from pathlib import Path
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -21,6 +23,39 @@ async def test_health_endpoint():
         data = response.json()
         assert data["status"] == "healthy"
         assert data["app"] == "SentinelFleet"
+
+
+@pytest.mark.asyncio
+async def test_index_renders_html(client):
+    """The operator dashboard was never covered, which let a template syntax error ship.
+
+    A Jinja error in index.html turns the whole entry page into HTTP 500, so this test
+    renders it with the seeded fleet, prompts and skills, exercising every loop body.
+    """
+    response = await client.get("/")
+    assert response.status_code == 200
+
+    body = response.text
+    assert '<html lang="en"' in body
+    assert "Enterprise Fleet Control Center" in body
+    # Loop bodies really ran: agents, prompts and skills each render their controls
+    assert "agent:invoice-extractor" in body
+    assert "openPromptVersionModal(" in body
+    assert "openSkillVersionModal(" in body
+    assert "extraction-mode-badge" in body
+
+
+def test_all_templates_compile():
+    """Guards the failure mode directly: a template that does not parse breaks its route."""
+    from jinja2 import Environment, FileSystemLoader
+
+    template_dir = Path(__file__).resolve().parents[1] / "src" / "sentinel_fleet" / "web" / "templates"
+    env = Environment(loader=FileSystemLoader(str(template_dir)), autoescape=True)
+
+    templates = sorted(p.name for p in template_dir.glob("*.html"))
+    assert templates, "no templates found"
+    for name in templates:
+        env.get_template(name)  # raises TemplateSyntaxError on a broken template
 
 
 @pytest.mark.asyncio

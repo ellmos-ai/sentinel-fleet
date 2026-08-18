@@ -177,9 +177,9 @@ The entire codebase is validated by a rigorous Pytest test suite covering unit l
 python -m pytest tests -v
 ```
 
-### Test Results (62/62 Passed — 100% Green):
+### Test Results (64/64 Passed — 100% Green):
 
-The roster below lists 56 test functions; the seven parametrised cases of
+The roster below lists 58 test functions; the seven parametrised cases of
 `test_settings_read_environment_overrides` are named once and counted individually above.
 
 * `test_gateway_enforces_tool_scoping` — PASSED
@@ -229,6 +229,8 @@ The roster below lists 56 test functions; the seven parametrised cases of
 * `test_error_status_is_propagated_to_the_span` — PASSED
 * `test_both_buffers_are_bounded_and_ids_stay_unique` — PASSED
 * `test_health_endpoint` — PASSED
+* `test_index_renders_html` — PASSED
+* `test_all_templates_compile` — PASSED
 * `test_blueprint_renders_html` — PASSED
 * `test_omniledger_process_api` — PASSED
 * `test_ticket_create_and_approve` — PASSED
