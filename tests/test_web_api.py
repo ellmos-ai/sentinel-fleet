@@ -17,12 +17,17 @@ async def test_health_endpoint():
 
 
 @pytest.mark.asyncio
-async def test_schaltplan_renders_html():
+async def test_blueprint_renders_html():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        response = await ac.get("/schaltplan")
+        response = await ac.get("/blueprint")
         assert response.status_code == 200
         assert "Architecture &amp; Circuit Blueprint" in response.text or "Architecture & Circuit Blueprint" in response.text
+
+        # The old German route must keep working for existing links and recordings
+        legacy = await ac.get("/schaltplan")
+        assert legacy.status_code == 307
+        assert legacy.headers["location"] == "/blueprint"
 
 
 @pytest.mark.asyncio

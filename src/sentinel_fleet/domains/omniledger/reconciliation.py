@@ -23,7 +23,7 @@ class LedgerReconciler:
         memory_bank.store_memory(
             category="entity",
             key=f"ledger:invoice:{doc.invoice_number}",
-            content=f"Gebucht: Rechnung {doc.invoice_number} von {doc.vendor_name} ({doc.gross_amount:.2f} {doc.currency}) am {doc.invoice_date}",
+            content=f"Booked: invoice {doc.invoice_number} from {doc.vendor_name} ({doc.gross_amount:.2f} {doc.currency}) dated {doc.invoice_date}",
             metadata={"doc_id": doc.id, "vendor": doc.vendor_name, "amount": doc.gross_amount}
         )
 

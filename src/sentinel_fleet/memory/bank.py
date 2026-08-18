@@ -23,15 +23,22 @@ class MemoryBank:
         self._seed_default_memory()
 
     def _seed_default_memory(self):
+        """Write the canonical seeds and refresh outdated ones.
+
+        The seed keys belong to the seeds: a stale persisted copy is healed on startup, so a
+        redeployed build never serves memory content the current code no longer contains.
+        Operator entries use their own keys and are never touched.
+        """
         seeds = [
-            ("fact", "org:tax_id", "Unsere Firmen-USt-IdNr lautet DE314159265 (Acme Corp GmbH)."),
-            ("fact", "org:vat_policy", "Rechnungen ohne gültige Steuernummer des Ausstellers dürfen nach § 14 UStG nicht freigegeben werden."),
-            ("lesson", "vendor:cloud_solutions", "Cloud Solutions Inc. vergisst häufig das Leistungsdatum. Immer prüfen!"),
-            ("entity", "vendor:acme_supplier", "Acme Supplier GmbH | IBAN: DE89370400440532013000 | Standard-Zahlungsziel: 14 Tage"),
+            ("fact", "org:tax_id", "Our company VAT ID is DE314159265 (Acme Corp GmbH)."),
+            ("fact", "org:vat_policy", "Invoices without a valid issuer VAT ID must not be released under § 14 UStG."),
+            ("lesson", "vendor:cloud_solutions", "Cloud Solutions Inc. frequently omits the delivery date. Always verify it."),
+            ("entity", "vendor:acme_supplier", "Acme Supplier GmbH | IBAN: DE89370400440532013000 | Standard payment term: 14 days"),
         ]
         for cat, k, text in seeds:
-            if self._store.get(k) is None:
-                self.store_memory(cat, k, text)
+            existing = self._store.get(k)
+            if existing is None or existing.content != text:
+                self.store_memory(cat, k, text, metadata={"seed": True})
 
     def store_memory(self, category: str, key: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> MemoryEntry:
         entry = MemoryEntry(

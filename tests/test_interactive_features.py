@@ -11,7 +11,7 @@ async def test_create_custom_ticket():
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.post("/api/tickets/create", data={
             "title": "Vendor Bank Account Change",
-            "description": "Lieferant Acme bittet um Aktualisierung der IBAN.",
+            "description": "Vendor Acme requests an update of its IBAN.",
             "agent_id": "agent:vendor-dispute",
             "priority": "high"
         })
@@ -45,12 +45,12 @@ async def test_create_custom_memory():
         response = await ac.post("/api/memory/create", data={
             "category": "lesson",
             "key": "lesson:vendor_discount",
-            "content": "Lieferant gewährt 3% Skonto bei Zahlung binnen 7 Tagen."
+            "content": "Vendor grants a 3% early payment discount when paid within 7 days."
         })
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "created"
-        assert "Skonto" in data["entry"]["content"]
+        assert "early payment discount" in data["entry"]["content"]
 
 
 @pytest.mark.asyncio
@@ -60,7 +60,7 @@ async def test_prompt_version_bump_and_permissions():
         # Bump version
         res_bump = await ac.post("/api/prompts/prompt:invoice-vision-multimodal/version", data={
             "new_version_number": "1.3.0",
-            "new_text": "Aktualisierter Vision Prompt für 2026",
+            "new_text": "Updated vision prompt for 2026",
             "change_summary": "Added support for electronic e-invoice formats"
         })
         assert res_bump.status_code == 200
@@ -94,7 +94,7 @@ async def test_privacy_contacts_crud_and_opt_out():
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # 1. Create contact
         res_create = await ac.post("/api/contacts/create", data={
-            "name": "Datenschutz Testkontakt",
+            "name": "Privacy Test Contact",
             "email": "privacy-test@partner.eu",
             "organization": "Test Partner Org",
             "category": "vendor",

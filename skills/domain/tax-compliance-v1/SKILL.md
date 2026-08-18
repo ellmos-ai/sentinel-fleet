@@ -7,7 +7,7 @@ status: active
 language: en
 pillar: domain
 description: >
-  Automatische Prüfung gesetzlicher Pflichtangaben, USt-IdNr und mathematischer Konsistenz nach deutschem Steuerrecht (§ 14 UStG).
+  Automated check of statutory mandatory fields, VAT ID and arithmetic consistency under German tax law (§ 14 UStG).
 compatibility:
   google_adk: true
   gemini_3_5: true

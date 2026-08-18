@@ -12,7 +12,7 @@ def test_model_armor_detects_prompt_injection():
 
 
 def test_model_armor_allows_benign_prompt():
-    benign_prompt = "Bitte extrahiere die Rechnungsdaten für den Monat August 2026."
+    benign_prompt = "Please extract the invoice data for August 2026."
     result = ModelArmor.inspect_prompt(benign_prompt)
     assert result.is_safe is True
     assert result.sanitized_data == benign_prompt

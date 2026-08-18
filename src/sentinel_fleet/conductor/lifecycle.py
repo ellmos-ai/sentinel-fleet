@@ -17,63 +17,63 @@ class LifecycleManager:
                 agent_id="agent:orchestrator",
                 name="Fleet Conductor",
                 role=AgentRole.ORCHESTRATOR,
-                description="Zentraler Koordinator für Task-Dekomposition und Schwarm-Delegation.",
+                description="Central coordinator for task decomposition and swarm delegation.",
                 allowed_tools={"query_memory_bank", "create_task", "assign_task", "dispatch_swarm"}
             ),
             AgentIdentity(
                 agent_id="agent:task-writer",
                 name="TaskWriter",
                 role=AgentRole.ORCHESTRATOR,
-                description="Spezifiziert und strukturiert unklare Aufträge in atomare, idempotente Tasks.",
+                description="Turns vague requests into atomic, idempotent task specifications.",
                 allowed_tools={"query_memory_bank", "create_task"}
             ),
             AgentIdentity(
                 agent_id="agent:task-maintainer",
                 name="TaskMaintainer",
                 role=AgentRole.ORCHESTRATOR,
-                description="Überwacht den Lebenszyklus, beseitigt Blockaden und bereinigt verwaiste Tasks.",
+                description="Watches the task lifecycle, clears blockers and cleans up orphaned tasks.",
                 allowed_tools={"query_memory_bank", "update_task_state", "audit_task_health"}
             ),
             AgentIdentity(
                 agent_id="agent:task-solver",
                 name="TaskSolver",
                 role=AgentRole.ORCHESTRATOR,
-                description="Führt komplexe Berechnungen, RAG-Recherchen und Code-Synthesen autonom aus.",
+                description="Runs complex calculations, RAG research and code synthesis autonomously.",
                 allowed_tools={"query_memory_bank", "execute_calculation", "solve_task"}
             ),
             AgentIdentity(
                 agent_id="agent:system-auditor",
                 name="SystemAuditor",
                 role=AgentRole.SECURITY_SENTRY,
-                description="Prüft Richtlinien, validiert Audit-Receipts und überwacht OpenTelemetry Spans.",
+                description="Checks policies, validates audit receipts and watches OpenTelemetry spans.",
                 allowed_tools={"query_memory_bank", "verify_receipts", "audit_telemetry"}
             ),
             AgentIdentity(
                 agent_id="agent:invoice-extractor",
                 name="Vision Extractor",
                 role=AgentRole.FINANCE_TASKMASTER,
-                description="Multimodaler Gemini 3.5 Flash Vision Agent für Beleg- und Tabellenextraktion.",
+                description="Multimodal Gemini 3.5 Flash vision agent for document and table extraction.",
                 allowed_tools={"extract_invoice_multimodal", "query_memory_bank"}
             ),
             AgentIdentity(
                 agent_id="agent:compliance-auditor",
                 name="Tax Compliance Sentinel",
                 role=AgentRole.COMPLIANCE_AUDITOR,
-                description="Auditiert Belege gegen § 14 UStG Pflichtfelder und GoBD-Richtlinien.",
+                description="Audits documents against § 14 UStG mandatory fields and GoBD guidelines.",
                 allowed_tools={"validate_tax_compliance", "query_memory_bank", "flag_compliance_error"}
             ),
             AgentIdentity(
                 agent_id="agent:ledger-reconciler",
                 name="Ledger Reconciler",
                 role=AgentRole.LEDGER_RECONCILER,
-                description="Verbucht validierte Rechnungen in Firestore und generiert Buchungssätze.",
+                description="Books validated invoices into the ledger store and generates journal entries.",
                 allowed_tools={"store_memory_bank", "create_reconciliation_draft", "execute_bank_transfer"}
             ),
             AgentIdentity(
                 agent_id="agent:vendor-dispute",
                 name="Dispute Communicator",
                 role=AgentRole.VENDOR_COMMUNICATOR,
-                description="Generiert autonome, rechtssichere Korrektur-Mails an Lieferanten bei Fehlern.",
+                description="Drafts autonomous, legally sound correction letters to vendors when defects are found.",
                 allowed_tools={"draft_vendor_dispute_email", "send_external_email", "query_memory_bank"}
             )
         ]

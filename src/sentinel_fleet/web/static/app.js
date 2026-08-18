@@ -187,7 +187,7 @@ async function submitNewContact(event) {
 }
 
 async function optOutContact(contactId) {
-  if (!confirm("Kontakt wirklich abmelden und Tombstone-Sperre aktivieren?")) return;
+  if (!confirm("Opt this contact out and activate the tombstone block?")) return;
   try {
     const res = await fetch(`/api/contacts/${contactId}/opt-out`, { method: "POST" });
     if (res.ok) location.reload();

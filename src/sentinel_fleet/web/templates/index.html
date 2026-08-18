@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de" data-theme="light">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -17,7 +17,7 @@
     </div>
     <div class="nav-links">
       <a href="/" class="nav-link active">🎛️ Operator Control Center</a>
-      <a href="/schaltplan" class="nav-link">⌁ Architecture &amp; Blueprint</a>
+      <a href="/blueprint" class="nav-link">⌁ Architecture &amp; Blueprint</a>
       <button class="btn btn-sm" onclick="toggleTheme()">🌓 Theme</button>
     </div>
   </header>
@@ -77,30 +77,30 @@
           </div>
         </div>
         <p class="item-desc">
-          Wähle einen Testfall, um die synchrone und asynchrone Multi-Agenten-Pipeline auf Google Cloud Run auszuführen:
+          Pick a test case to run the synchronous and asynchronous multi-agent pipeline on Google Cloud Run:
         </p>
         <div class="trigger-grid">
           <div class="trigger-btn btn-valid" onclick="processInvoicePreset('valid')">
-            <b>📄 1. Saubere Rechnung</b>
-            <span>Auto-Booking im Firestore Ledger &amp; Memory Bank</span>
+            <b>📄 1. Clean invoice</b>
+            <span>Auto-booking into the ledger store &amp; memory bank</span>
           </div>
           <div class="trigger-btn btn-vat" onclick="processInvoicePreset('missing_vat')">
-            <b>⚠️ 2. Fehlende USt-IdNr</b>
+            <b>⚠️ 2. Missing VAT ID</b>
             <span>§ 14 UStG Dispute Loop &amp; Human-in-the-Loop Ticket</span>
           </div>
           <div class="trigger-btn btn-math" onclick="processInvoicePreset('math_error')">
-            <b>🧮 3. Rechenfehler Netto/Brutto</b>
-            <span>Inkonsistenz-Block &amp; Korrekturschreiben</span>
+            <b>🧮 3. Net/gross arithmetic error</b>
+            <span>Consistency block &amp; correction letter</span>
           </div>
           <div class="trigger-btn btn-attack" onclick="processInvoicePreset('injection_attack')">
             <b>🛡️ 4. Prompt Injection Attack</b>
-            <span>Model Armor Interception &amp; Agenten-Quarantäne</span>
+            <span>Model Armor interception &amp; agent quarantine</span>
           </div>
         </div>
         <div class="upload-row">
-          <label for="invoice-upload">Oder eigenen Beleg hochladen (PDF, PNG, JPG, TXT):</label>
+          <label for="invoice-upload">Or upload your own document (PDF, PNG, JPG, TXT):</label>
           <input type="file" id="invoice-upload" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt" class="text-input">
-          <button class="btn btn-primary btn-sm" onclick="processInvoiceUpload()">⬆️ Beleg verarbeiten</button>
+          <button class="btn btn-primary btn-sm" onclick="processInvoiceUpload()">⬆️ Process document</button>
         </div>
       </div>
 
@@ -125,7 +125,7 @@
               <div class="item-desc">{{ agent.description }}</div>
               {% if agent.status.value == 'quarantined' %}
               <div style="margin-top: 8px;">
-                <button class="btn btn-sm btn-approve" onclick='releaseQuarantine({{ agent.agent_id|tojson }})'>🔓 Quarantäne aufheben</button>
+                <button class="btn btn-sm btn-approve" onclick='releaseQuarantine({{ agent.agent_id|tojson }})'>🔓 Release quarantine</button>
               </div>
               {% endif %}
             </div>
@@ -143,7 +143,7 @@
           </div>
           <div class="card-body">
             {% if not tickets %}
-            <p class="item-desc">Keine Tickets in der Warteschlange. Alle Aktionen genehmigt.</p>
+            <p class="item-desc">No tickets queued. All actions approved.</p>
             {% endif %}
             {% for ticket in tickets[:3] %}
             <div class="ticket-item">
@@ -156,8 +156,8 @@
               <div class="item-desc" style="margin-bottom: 8px;">{{ ticket.description }}</div>
               {% if ticket.status.value == 'pending_approval' %}
               <div style="display: flex; gap: 8px;">
-                <button class="btn btn-sm btn-approve" onclick='approveTicket({{ ticket.ticket_id|tojson }})'>✓ Freigeben</button>
-                <button class="btn btn-sm btn-reject" onclick='rejectTicket({{ ticket.ticket_id|tojson }})'>✕ Ablehnen</button>
+                <button class="btn btn-sm btn-approve" onclick='approveTicket({{ ticket.ticket_id|tojson }})'>✓ Approve</button>
+                <button class="btn btn-sm btn-reject" onclick='rejectTicket({{ ticket.ticket_id|tojson }})'>✕ Reject</button>
               </div>
               {% endif %}
             </div>
@@ -173,7 +173,7 @@
           </div>
           <div class="card-body">
             {% if not invoices %}
-            <p class="item-desc">Noch keine Belege verarbeitet. Klicke oben auf einen Showcase-Button.</p>
+            <p class="item-desc">No documents processed yet. Trigger one of the showcase buttons above.</p>
             {% endif %}
             {% for inv in invoices[:3] %}
             <div class="invoice-item">
@@ -184,11 +184,11 @@
                 </span>
               </div>
               <div class="item-desc">
-                Betrag: <b>{{ "%.2f"|format(inv.gross_amount) }} {{ inv.currency }}</b> (Netto {{ "%.2f"|format(inv.net_amount) }} + {{ "%.1f"|format(inv.tax_rate) }}% MwSt)
+                Amount: <b>{{ "%.2f"|format(inv.gross_amount) }} {{ inv.currency }}</b> (net {{ "%.2f"|format(inv.net_amount) }} + {{ "%.1f"|format(inv.tax_rate) }}% VAT)
               </div>
               {% if inv.compliance_violations %}
               <div style="color: var(--warn); font-size: 11px; margin-top: 6px; font-weight: 500;">
-                Abweichung: {{ inv.compliance_violations|join(', ') }}
+                Defects: {{ inv.compliance_violations|join(', ') }}
               </div>
               {% endif %}
             </div>
@@ -212,7 +212,7 @@
               {% endfor %}
             </div>
             <div>
-              <b style="font-size: 12px; color: var(--accent);">Live OpenTelemetry Spans (Cloud Trace):</b>
+              <b style="font-size: 12px; color: var(--accent);">Live OpenTelemetry spans:</b>
               {% for s in spans[:3] %}
               <div class="span-item" style="padding: 6px 8px; margin-top: 6px;">
                 <div class="item-top" style="font-size: 11px;">
@@ -245,7 +245,7 @@
           <div class="item-desc" style="margin-bottom: 12px;">{{ d.description }}</div>
           
           <div style="margin-bottom: 10px;">
-            <b style="font-size: 11.5px; color: var(--google-blue);">Aktive Policies:</b>
+            <b style="font-size: 11.5px; color: var(--google-blue);">Active policies:</b>
             <div style="margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap;">
               {% for p in d.active_policies %}
               <span style="font-family: var(--font-mono); font-size: 10.5px; background: var(--panel); border: 1px solid var(--zone-edge); padding: 2px 6px; border-radius: 4px;">{{ p }}</span>
@@ -254,14 +254,14 @@
           </div>
 
           <div style="margin-bottom: 10px;">
-            <b style="font-size: 11.5px; color: var(--google-purple);">Zugeordnete Agenten:</b>
+            <b style="font-size: 11.5px; color: var(--google-purple);">Bound agents:</b>
             <div style="font-size: 11.5px; color: var(--ink-dim); margin-top: 2px;">
               {{ d.bound_agents|join(', ') }}
             </div>
           </div>
 
           <div>
-            <b style="font-size: 11.5px; color: var(--google-green);">Integrierte Skills:</b>
+            <b style="font-size: 11.5px; color: var(--google-green);">Bound skills:</b>
             <div style="font-size: 11.5px; color: var(--ink-dim); margin-top: 2px;">
               {{ d.bound_skills|join(', ') }}
             </div>
@@ -276,26 +276,26 @@
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <div>
           <h3>📇 DSGVO Privacy Contact Hub &amp; Address Book (PrivacyMailDesk / Umbruch)</h3>
-          <span style="font-size: 12px; color: var(--ink-dim);">Schutzstufen S1 (6m), S2 (12m), S3 (36m § 147 AO), S4 (Permanent) · Tombstone Opt-Out Guard</span>
+          <span style="font-size: 12px; color: var(--ink-dim);">Protection levels S1 (6m), S2 (12m), S3 (36m, § 147 AO), S4 (permanent) · tombstone opt-out guard</span>
         </div>
-        <button class="btn btn-primary" onclick="toggleModal('modal-contact')">+ Neuen Kontakt anlegen</button>
+        <button class="btn btn-primary" onclick="toggleModal('modal-contact')">+ Add contact</button>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h3>Lieferanten-, Partner- &amp; Institutionen-Kontaktdatenbank</h3>
-          <span class="badge-status badge-ok">{{ dsgvo_audit.status }} ({{ contacts|length }} Kontakte)</span>
+          <h3>Vendor, partner &amp; institution contact database</h3>
+          <span class="badge-status badge-ok">{{ dsgvo_audit.status }} ({{ contacts|length }} contacts)</span>
         </div>
         <table class="data-table">
           <thead>
             <tr>
-              <th>Name &amp; Organisation</th>
-              <th>E-Mail-Adresse</th>
-              <th>Kategorie</th>
-              <th>Schutzstufe</th>
-              <th>DSGVO-Status</th>
-              <th>Aufbewahrungs-Grund</th>
-              <th>Aktion</th>
+              <th>Name &amp; organisation</th>
+              <th>Email address</th>
+              <th>Category</th>
+              <th>Protection level</th>
+              <th>GDPR status</th>
+              <th>Retention reason</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -318,7 +318,7 @@
                 {% if c.opt_in_status == 'confirmed' %}
                 <button class="btn btn-sm btn-reject" onclick='optOutContact({{ c.contact_id|tojson }})'>🚫 Opt-Out</button>
                 {% else %}
-                <span style="font-size: 11px; color: var(--danger);">Tombstone Aktiv</span>
+                <span style="font-size: 11px; color: var(--danger);">Tombstone active</span>
                 {% endif %}
               </td>
             </tr>
@@ -332,7 +332,7 @@
     <div id="tab-fleet" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3>👥 Fleet Directory &amp; Task Master Engine</h3>
-        <button class="btn btn-primary" onclick="toggleModal('modal-task')">+ Neuen Task beauftragen</button>
+        <button class="btn btn-primary" onclick="toggleModal('modal-task')">+ Queue new task</button>
       </div>
       
       <div class="pillars-grid" style="margin-bottom: 24px;">
@@ -346,11 +346,11 @@
           </div>
           <div class="item-desc" style="margin-bottom: 8px;">{{ agent.description }}</div>
           <div style="font-size: 11px; color: var(--ink-faint);">
-            <b>Erlaubte Tools:</b> {{ agent.allowed_tools|join(', ') }}
+            <b>Allowed tools:</b> {{ agent.allowed_tools|join(', ') }}
           </div>
           {% if agent.status.value == 'quarantined' %}
           <div style="margin-top: 8px;">
-            <button class="btn btn-sm btn-approve" onclick='releaseQuarantine({{ agent.agent_id|tojson }})'>🔓 Quarantäne aufheben</button>
+            <button class="btn btn-sm btn-approve" onclick='releaseQuarantine({{ agent.agent_id|tojson }})'>🔓 Release quarantine</button>
           </div>
           {% endif %}
         </div>
@@ -359,17 +359,17 @@
 
       <div class="card">
         <div class="card-header">
-          <h3>📋 TaskMaster State Table (Asynchrone Hintergrund-Ausführung)</h3>
+          <h3>📋 TaskMaster state table (asynchronous background execution)</h3>
           <span class="badge-status badge-info">{{ tasks|length }} Tasks</span>
         </div>
         <table class="data-table">
           <thead>
             <tr>
               <th>Task ID</th>
-              <th>Aufgabe</th>
-              <th>Zugewiesener Agent</th>
+              <th>Task</th>
+              <th>Assigned agent</th>
               <th>Status</th>
-              <th>Output / Evidenz</th>
+              <th>Output / evidence</th>
             </tr>
           </thead>
           <tbody>
@@ -405,19 +405,19 @@
     <div id="tab-tickets" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3>📥 TicketMaster — Human-in-the-Loop Triage &amp; Gating</h3>
-        <button class="btn btn-primary" onclick="toggleModal('modal-ticket')">+ Neues Ticket anlegen</button>
+        <button class="btn btn-primary" onclick="toggleModal('modal-ticket')">+ New ticket</button>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h3>Warteschlange für verbindliche Nutzer-Freigaben (ask-Gates)</h3>
+          <h3>Queue of binding operator approvals (ask gates)</h3>
           <span class="badge-status {% if pending_tickets %}badge-warn{% else %}badge-ok{% endif %}">
-            {{ pending_tickets|length }} Wartend
+            {{ pending_tickets|length }} pending
           </span>
         </div>
         <div class="card-body">
           {% if not tickets %}
-          <p class="item-desc">Keine offenen Tickets vorhanden.</p>
+          <p class="item-desc">No open tickets.</p>
           {% endif %}
           {% for ticket in tickets %}
           <div class="ticket-item" style="margin-bottom: 14px;">
@@ -431,16 +431,16 @@
             </div>
             <p class="item-desc" style="margin-bottom: 8px;">{{ ticket.description }}</p>
             <div style="font-size: 11.5px; color: var(--ink-faint); margin-bottom: 10px;">
-              Agent: <code>{{ ticket.agent_id }}</code> | Tool: <code>{{ ticket.tool_name }}</code> | Priorität: <b>{{ ticket.priority.value|upper }}</b>
+              Agent: <code>{{ ticket.agent_id }}</code> | Tool: <code>{{ ticket.tool_name }}</code> | Priority: <b>{{ ticket.priority.value|upper }}</b>
             </div>
             {% if ticket.status.value == 'pending_approval' %}
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-approve" onclick='approveTicket({{ ticket.ticket_id|tojson }})'>✓ Freigeben &amp; Ausführen</button>
-              <button class="btn btn-reject" onclick='rejectTicket({{ ticket.ticket_id|tojson }})'>✕ Ablehnen &amp; Blockieren</button>
+              <button class="btn btn-approve" onclick='approveTicket({{ ticket.ticket_id|tojson }})'>✓ Approve &amp; execute</button>
+              <button class="btn btn-reject" onclick='rejectTicket({{ ticket.ticket_id|tojson }})'>✕ Reject &amp; block</button>
             </div>
             {% elif ticket.resolution_comment %}
             <div style="font-size: 11.5px; color: var(--accent);">
-              <b>Beschluss:</b> {{ ticket.resolution_comment }}
+              <b>Decision:</b> {{ ticket.resolution_comment }}
             </div>
             {% endif %}
           </div>
@@ -453,21 +453,21 @@
     <div id="tab-memory" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3>🧠 USMC Memory Bank &amp; GARDENER RAG Corpus</h3>
-        <button class="btn btn-primary" onclick="toggleModal('modal-memory')">+ Memory-Eintrag speichern</button>
+        <button class="btn btn-primary" onclick="toggleModal('modal-memory')">+ Store memory entry</button>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h3>Kuratierte Fakten, Lessons, Richtlinien &amp; Firestore-State</h3>
-          <span class="badge-status badge-info">{{ memories|length }} Einträge</span>
+          <h3>Curated facts, lessons, policies &amp; persisted state</h3>
+          <span class="badge-status badge-info">{{ memories|length }} entries</span>
         </div>
         <table class="data-table">
           <thead>
             <tr>
-              <th>Kategorie</th>
-              <th>Schlüssel (Key)</th>
-              <th>Inhalt &amp; Richtlinie</th>
-              <th>Metadaten</th>
+              <th>Category</th>
+              <th>Key</th>
+              <th>Content &amp; policy</th>
+              <th>Metadata</th>
             </tr>
           </thead>
           <tbody>
@@ -487,7 +487,7 @@
     <!-- TAB 7: PROMPTS & SKILLS -->
     <div id="tab-prompts" class="tab-pane" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <h3>📝 Prompt- &amp; Skill-Verwaltung (ProfiPrompt v1 &amp; ControlCenter Governance)</h3>
+        <h3>📝 Prompt &amp; skill governance (ProfiPrompt v1 &amp; ControlCenter)</h3>
       </div>
 
       <div class="pillars-grid" style="margin-bottom: 24px;">
@@ -502,17 +502,17 @@
           <div class="prompt-item">
             <div class="item-top">
               <span class="item-title">{{ p.title }}</span>
-              <span class="badge-status badge-ok">v{{ p.active_version }} ({{ p.versions|length }} Vers.)</span>
+              <span class="badge-status badge-ok">v{{ p.active_version }} ({{ p.versions|length }} versions)</span>
             </div>
-            <div class="item-desc" style="margin-bottom: 6px;"><b>Zweck:</b> {{ p.purpose }}</div>
+            <div class="item-desc" style="margin-bottom: 6px;"><b>Purpose:</b> {{ p.purpose }}</div>
             <div class="item-desc" style="font-family: var(--font-mono); font-size: 11.5px; background: var(--panel); padding: 8px; border-radius: 4px; margin-bottom: 8px;">
               {{ p.current_text }}
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--ink-faint);">
-              <span>Sichtbarkeit: <b>{{ p.visibility|upper }}</b></span>
+              <span>Visibility: <b>{{ p.visibility|upper }}</b></span>
               <div style="display: flex; gap: 6px;">
                 <button class="btn btn-sm" onclick='openPromptVersionModal({{ p.id|tojson }}, {{ p.title|tojson }}, {{ p.current_text|tojson }})'>+ Version</button>
-                <button class="btn btn-sm" onclick='openPromptPermsModal({{ p.id|tojson }}, {{ p.title|tojson }}, {{ p.visibility|tojson }}, {{ p.requires_approval|tojson }})'>🔒 Rechte</button>
+                <button class="btn btn-sm" onclick='openPromptPermsModal({{ p.id|tojson }}, {{ p.title|tojson }}, {{ p.visibility|tojson }}, {{ p.requires_approval|tojson }})'>🔒 Permissions</button>
               </div>
             </div>
           </div>
@@ -529,7 +529,7 @@
           <div class="skill-item">
             <div class="item-top">
               <span class="item-title">{{ s.name }} (v{{ s.version }})</span>
-              <span class="badge-status badge-purple">Säule: {{ s.pillar|upper }}</span>
+              <span class="badge-status badge-purple">Pillar: {{ s.pillar|upper }}</span>
             </div>
             <div class="item-desc" style="margin-bottom: 6px;">{{ s.description }}</div>
             <div style="font-size: 11px; color: var(--google-blue); margin-bottom: 6px;">
@@ -550,7 +550,7 @@
     <div id="tab-telemetry" class="tab-pane" style="display: none;">
       <div class="card">
         <div class="card-header">
-          <h3>📊 OpenTelemetry Traces (Google Cloud Trace Integration)</h3>
+          <h3>📊 OpenTelemetry traces (in-memory exporter, Cloud Trace optional)</h3>
           <span class="badge-status badge-info">{{ spans|length }} Spans</span>
         </div>
         <table class="data-table">
@@ -560,8 +560,8 @@
               <th>Operation / Event</th>
               <th>Agent Identity</th>
               <th>Status</th>
-              <th>Dauer</th>
-              <th>Fehler / Audit</th>
+              <th>Duration</th>
+              <th>Error / audit</th>
             </tr>
           </thead>
           <tbody>
@@ -592,65 +592,65 @@
 
   </div>
 
-  <!-- MODAL: NEUER KONTAKT (DSGVO) -->
+  <!-- MODAL: NEW CONTACT (GDPR) -->
   <div id="modal-contact" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
-        <h3>+ Neuen DSGVO-Kontakt anlegen</h3>
+        <h3>+ Add GDPR contact</h3>
         <button class="btn btn-sm" onclick="toggleModal('modal-contact')">✕</button>
       </div>
       <form onsubmit="submitNewContact(event)">
         <div class="form-group">
-          <label>Name / Ansprechpartner:</label>
-          <input type="text" name="name" class="text-input" placeholder="z. B. Rechnungsstelle Acme Corp" required>
+          <label>Name / contact person:</label>
+          <input type="text" name="name" class="text-input" placeholder="e.g. Accounts payable, Acme Corp" required>
         </div>
         <div class="form-group">
-          <label>E-Mail-Adresse:</label>
+          <label>Email address:</label>
           <input type="email" name="email" class="text-input" placeholder="billing@acme.de" required>
         </div>
         <div class="form-group">
-          <label>Organisation / Firma:</label>
+          <label>Organisation / company:</label>
           <input type="text" name="organization" class="text-input" placeholder="Acme International GmbH">
         </div>
         <div class="form-group">
-          <label>Kategorie:</label>
+          <label>Category:</label>
           <select name="category" class="select-input">
-            <option value="vendor">Vendor (Lieferant)</option>
-            <option value="institution">Institution / Behörde</option>
-            <option value="partner">Geschäftspartner</option>
+            <option value="vendor">Vendor</option>
+            <option value="institution">Institution / public authority</option>
+            <option value="partner">Business partner</option>
           </select>
         </div>
         <div class="form-group">
-          <label>DSGVO Schutzstufe &amp; Aufbewahrungsfrist:</label>
+          <label>GDPR protection level &amp; retention period:</label>
           <select name="protection_level" class="select-input">
-            <option value="S3">S3: 36 Monate (Steuerrelevanter Belegverkehr gem. § 147 AO)</option>
-            <option value="S1">S1: 6 Monate (Kurzzeitige Projektanfragen)</option>
-            <option value="S2">S2: 12 Monate (Geschäftsanbahnung)</option>
-            <option value="S4">S4: Permanent bis Widerruf (Vertragspartner)</option>
+            <option value="S3">S3: 36 months (tax-relevant documents under § 147 AO)</option>
+            <option value="S1">S1: 6 months (short-lived project enquiries)</option>
+            <option value="S2">S2: 12 months (business development)</option>
+            <option value="S4">S4: permanent until revoked (contractual partners)</option>
           </select>
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
-          <button type="button" class="btn" onclick="toggleModal('modal-contact')">Abbrechen</button>
-          <button type="submit" class="btn btn-primary">Kontakt Speichern</button>
+          <button type="button" class="btn" onclick="toggleModal('modal-contact')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save contact</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- MODAL: NEUER TASK -->
+  <!-- MODAL: NEW TASK -->
   <div id="modal-task" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
-        <h3>+ Neuen Task beauftragen</h3>
+        <h3>+ Queue new task</h3>
         <button class="btn btn-sm" onclick="toggleModal('modal-task')">✕</button>
       </div>
       <form onsubmit="submitNewTask(event)">
         <div class="form-group">
-          <label>Task Bezeichnung:</label>
-          <input type="text" name="name" class="text-input" placeholder="z. B. Beleg-Audit oder RAG-Recherche" required>
+          <label>Task name:</label>
+          <input type="text" name="name" class="text-input" placeholder="e.g. document audit or RAG research" required>
         </div>
         <div class="form-group">
-          <label>Zugewiesener Agent:</label>
+          <label>Assigned agent:</label>
           <select name="assigned_agent" class="select-input">
             {% for a in agents %}
             <option value="{{ a.agent_id }}">{{ a.name }} ({{ a.role.value }})</option>
@@ -658,18 +658,18 @@
           </select>
         </div>
         <div class="form-group">
-          <label>Eingabe-Daten (JSON oder Text):</label>
-          <textarea name="input_payload" class="textarea-input" placeholder='{"query": "§ 14 UStG Fristen", "priority": "high"}'></textarea>
+          <label>Input data (JSON or text):</label>
+          <textarea name="input_payload" class="textarea-input" placeholder='{"query": "§ 14 UStG deadlines", "priority": "high"}'></textarea>
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
-          <button type="button" class="btn" onclick="toggleModal('modal-task')">Abbrechen</button>
-          <button type="submit" class="btn btn-primary">Task Starten</button>
+          <button type="button" class="btn" onclick="toggleModal('modal-task')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Queue task</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- MODAL: NEUES TICKET -->
+  <!-- MODAL: NEW TICKET -->
   <div id="modal-ticket" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
@@ -678,15 +678,15 @@
       </div>
       <form onsubmit="submitNewTicket(event)">
         <div class="form-group">
-          <label>Titel des Tickets:</label>
-          <input type="text" name="title" class="text-input" placeholder="z. B. Manuelle Freigabe für Lieferanten-Zahlung" required>
+          <label>Ticket title:</label>
+          <input type="text" name="title" class="text-input" placeholder="e.g. manual approval for a vendor payment" required>
         </div>
         <div class="form-group">
-          <label>Beschreibung &amp; Sachverhalt:</label>
-          <textarea name="description" class="textarea-input" placeholder="Begründung für die Prüfung durch den Operator..." required></textarea>
+          <label>Description &amp; context:</label>
+          <textarea name="description" class="textarea-input" placeholder="Why does the operator need to review this..." required></textarea>
         </div>
         <div class="form-group">
-          <label>Zuständiger Agent:</label>
+          <label>Responsible agent:</label>
           <select name="agent_id" class="select-input">
             {% for a in agents %}
             <option value="{{ a.agent_id }}">{{ a.name }}</option>
@@ -694,49 +694,49 @@
           </select>
         </div>
         <div class="form-group">
-          <label>Priorität:</label>
+          <label>Priority:</label>
           <select name="priority" class="select-input">
             <option value="normal">Normal</option>
-            <option value="high">Hoch (High)</option>
-            <option value="critical">Kritisch (Critical)</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
           </select>
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
-          <button type="button" class="btn" onclick="toggleModal('modal-ticket')">Abbrechen</button>
-          <button type="submit" class="btn btn-primary">Ticket Erstellen</button>
+          <button type="button" class="btn" onclick="toggleModal('modal-ticket')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create ticket</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- MODAL: NEUES MEMORY -->
+  <!-- MODAL: NEW MEMORY ENTRY -->
   <div id="modal-memory" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
-        <h3>+ Neuen Memory-Eintrag speichern</h3>
+        <h3>+ Store memory entry</h3>
         <button class="btn btn-sm" onclick="toggleModal('modal-memory')">✕</button>
       </div>
       <form onsubmit="submitNewMemory(event)">
         <div class="form-group">
-          <label>Kategorie:</label>
+          <label>Category:</label>
           <select name="category" class="select-input">
-            <option value="fact">Fact (Kuratierter Fakt)</option>
-            <option value="lesson">Lesson (Erkenntnis / Erfahrung)</option>
-            <option value="entity">Entity (Stammdaten / Partner)</option>
-            <option value="policy">Policy (Betriebsregel)</option>
+            <option value="fact">Fact (curated fact)</option>
+            <option value="lesson">Lesson (learned experience)</option>
+            <option value="entity">Entity (master data / partner)</option>
+            <option value="policy">Policy (operating rule)</option>
           </select>
         </div>
         <div class="form-group">
-          <label>Schlüssel (Key):</label>
+          <label>Key:</label>
           <input type="text" name="key" class="text-input" placeholder="z. B. vendor:partner_ag:tax_rule" required>
         </div>
         <div class="form-group">
-          <label>Inhalt (Content):</label>
-          <textarea name="content" class="textarea-input" placeholder="Wissensinhalt, der dauerhaft persistent im Gedächtnis gehalten werden soll..." required></textarea>
+          <label>Content:</label>
+          <textarea name="content" class="textarea-input" placeholder="Knowledge that should be kept in persistent memory..." required></textarea>
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
-          <button type="button" class="btn" onclick="toggleModal('modal-memory')">Abbrechen</button>
-          <button type="submit" class="btn btn-primary">Im Gedächtnis Speichern</button>
+          <button type="button" class="btn" onclick="toggleModal('modal-memory')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Store in memory</button>
         </div>
       </form>
     </div>
@@ -746,26 +746,26 @@
   <div id="modal-prompt-version" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
-        <h3>+ Neue Version: <span id="pv-title"></span></h3>
+        <h3>+ New version: <span id="pv-title"></span></h3>
         <button class="btn btn-sm" onclick="toggleModal('modal-prompt-version')">✕</button>
       </div>
       <form onsubmit="submitPromptVersion(event)">
         <input type="hidden" id="pv-prompt-id">
         <div class="form-group">
-          <label>Neue Versionsnummer (SemVer):</label>
-          <input type="text" name="new_version_number" class="text-input" placeholder="z. B. 1.3.0" required>
+          <label>New version number (SemVer):</label>
+          <input type="text" name="new_version_number" class="text-input" placeholder="e.g. 1.3.0" required>
         </div>
         <div class="form-group">
-          <label>Änderungs-Zusammenfassung:</label>
-          <input type="text" name="change_summary" class="text-input" placeholder="Kurzbeschreibung der Anpassungen..." required>
+          <label>Change summary:</label>
+          <input type="text" name="change_summary" class="text-input" placeholder="Short description of the changes..." required>
         </div>
         <div class="form-group">
-          <label>Aktualisierter Prompt-Text:</label>
+          <label>Updated prompt text:</label>
           <textarea id="pv-text" name="new_text" class="textarea-input" required></textarea>
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
-          <button type="button" class="btn" onclick="toggleModal('modal-prompt-version')">Abbrechen</button>
-          <button type="submit" class="btn btn-primary">Version Speichern</button>
+          <button type="button" class="btn" onclick="toggleModal('modal-prompt-version')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save version</button>
         </div>
       </form>
     </div>
@@ -775,26 +775,26 @@
   <div id="modal-prompt-perms" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
-        <h3>🔒 Rechte &amp; Freigaben: <span id="pp-title"></span></h3>
+        <h3>🔒 Permissions &amp; sharing: <span id="pp-title"></span></h3>
         <button class="btn btn-sm" onclick="toggleModal('modal-prompt-perms')">✕</button>
       </div>
       <form onsubmit="submitPromptPerms(event)">
         <input type="hidden" id="pp-prompt-id">
         <div class="form-group">
-          <label>Sichtbarkeit &amp; Sharing:</label>
+          <label>Visibility &amp; sharing:</label>
           <select id="pp-visibility" name="visibility" class="select-input">
-            <option value="organization">Organization (Gesamtes Team &amp; Flotte)</option>
-            <option value="public">Public (Exportierbar &amp; Öffentlich)</option>
-            <option value="restricted">Restricted (Nur berechtigte Rollen)</option>
+            <option value="organization">Organization (whole team &amp; fleet)</option>
+            <option value="public">Public (exportable &amp; publicly visible)</option>
+            <option value="restricted">Restricted (authorised roles only)</option>
           </select>
         </div>
         <div class="form-group" style="display: flex; align-items: center; gap: 10px; margin-top: 12px;">
           <input type="checkbox" id="pp-approval" name="requires_approval" value="true">
-          <label for="pp-approval" style="margin-bottom: 0;">Erfordert verbindliche Operator-Freigabe (HITL Gate)</label>
+          <label for="pp-approval" style="margin-bottom: 0;">Requires binding operator approval (HITL gate)</label>
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px;">
-          <button type="button" class="btn" onclick="toggleModal('modal-prompt-perms')">Abbrechen</button>
-          <button type="submit" class="btn btn-primary">Rechte Aktualisieren</button>
+          <button type="button" class="btn" onclick="toggleModal('modal-prompt-perms')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Update permissions</button>
         </div>
       </form>
     </div>
@@ -804,26 +804,26 @@
   <div id="modal-skill-version" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
-        <h3>+ Neue Skill-Version: <span id="sv-name"></span></h3>
+        <h3>+ New skill version: <span id="sv-name"></span></h3>
         <button class="btn btn-sm" onclick="toggleModal('modal-skill-version')">✕</button>
       </div>
       <form onsubmit="submitSkillVersion(event)">
         <input type="hidden" id="sv-skill-id">
         <div class="form-group">
-          <label>Neue Versionsnummer (SemVer):</label>
-          <input type="text" name="new_version_number" class="text-input" placeholder="z. B. 2.2.0" required>
+          <label>New version number (SemVer):</label>
+          <input type="text" name="new_version_number" class="text-input" placeholder="e.g. 2.2.0" required>
         </div>
         <div class="form-group">
-          <label>Änderungs-Zusammenfassung:</label>
-          <input type="text" name="change_summary" class="text-input" placeholder="Was wurde am Skill geändert..." required>
+          <label>Change summary:</label>
+          <input type="text" name="change_summary" class="text-input" placeholder="What changed in this skill..." required>
         </div>
         <div class="form-group">
-          <label>Erforderliche Tools (Kommagetrennt):</label>
+          <label>Required tools (comma separated):</label>
           <input type="text" id="sv-tools" name="required_tools" class="text-input">
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
-          <button type="button" class="btn" onclick="toggleModal('modal-skill-version')">Abbrechen</button>
-          <button type="submit" class="btn btn-primary">Skill Versionieren</button>
+          <button type="button" class="btn" onclick="toggleModal('modal-skill-version')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save skill version</button>
         </div>
       </form>
     </div>

@@ -20,7 +20,9 @@ class DisputeCommunicator:
 
         # 2. Inject corporate memory / policy context and quote it in the draft, so the
         #    operator can see which retrieved knowledge the argument rests on.
-        memory_clues = memory_hooker.inject_context("Rechnungsprüfung § 14 UStG Korrekturanforderung")
+        # The query keeps the statute tokens (14, UStG) on purpose: the legal corpus is
+        # indexed in German, and dropping them would silently empty the retrieval.
+        memory_clues = memory_hooker.inject_context("invoice audit § 14 UStG correction request")
         clue_lines = [line for line in memory_clues.splitlines() if line.startswith("- ")]
         reference_block = ""
         if clue_lines:
@@ -31,16 +33,19 @@ class DisputeCommunicator:
             )
 
         body = (
-            f"Sehr geehrte Damen und Herren,\n\n"
-            f"vielen Dank für die Zusendung Ihrer Rechnung Nr. {doc.invoice_number} vom {doc.invoice_date} über brutto {doc.gross_amount:.2f} {doc.currency}.\n\n"
-            f"Bei unserer automatisierten steuerlichen Eingangsprüfung gemäß § 14 UStG wurden folgende formale Abweichungen festgestellt:\n"
+            f"Dear Sir or Madam,\n\n"
+            f"thank you for sending your invoice no. {doc.invoice_number} dated {doc.invoice_date} "
+            f"for a gross amount of {doc.gross_amount:.2f} {doc.currency}.\n\n"
+            f"Our automated tax intake audit under § 14 UStG found the following formal defects:\n"
             f"{violations_formatted}\n\n"
-            f"Gemäß den steuerrechtlichen Vorgaben der Bundesrepublik Deutschland sind wir zum Vorsteuerabzug nur bei Vorliegen aller Pflichtangaben berechtigt. "
-            f"Wir bitten Sie daher höflich, uns eine entsprechend korrigierte Rechnung (oder Rechnungskorrektur) zukommen zu lassen.\n\n"
-            f"Bis zum Eingang des korrigierten Belegs wurde die automatische Zahlungsanweisung für diese Rechnung temporär pausiert.\n\n"
+            f"Under German tax law we may only deduct input VAT once all mandatory fields are present. "
+            f"We therefore kindly ask you to send us a corrected invoice or a formal invoice correction.\n\n"
+            f"Until the corrected document arrives, the automatic payment instruction for this invoice "
+            f"has been placed on hold.\n\n"
             f"{reference_block}"
-            f"Datenschutz-Hinweis: Ihre Kontaktdaten werden bei uns gemäß DSGVO Schutzstufe S3 zur steuerlichen Erfüllung verarbeitet.\n\n"
-            f"Mit freundlichen Grüßen\n"
+            f"Data protection notice: your contact details are processed under GDPR protection level S3 "
+            f"for the purpose of meeting our tax obligations.\n\n"
+            f"Kind regards\n"
             f"SentinelFleet Autonomous Accounting Governance"
         )
 

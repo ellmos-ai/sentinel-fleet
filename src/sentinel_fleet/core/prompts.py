@@ -46,10 +46,10 @@ class PromptRegistry:
             PromptItem(
                 id="prompt:invoice-vision-multimodal",
                 title="Multimodal § 14 UStG Extraction Prompt",
-                purpose="Extrahiert Rechnungsdaten und Pflichtfelder pixelgenau aus Dokumenten.",
+                purpose="Extracts invoice data and statutory mandatory fields from documents.",
                 category="finance",
                 active_version="1.2.0",
-                current_text="Extrahiere alle steuerlichen Pflichtangaben gemäß § 14 UStG aus dem Dokument: {{filename}}. Achte auf Steuernummer, Leistungsdatum und Steuersatz-Aufschlüsselung.",
+                current_text="Extract every statutory field required by § 14 UStG from the document: {{filename}}. Pay attention to the VAT ID, the delivery date and the tax rate breakdown.",
                 variables=["filename"],
                 tags=["ustg", "vision", "gemini-3.5", "invoice"],
                 visibility="organization",
@@ -61,26 +61,26 @@ class PromptRegistry:
                         prompt_id="prompt:invoice-vision-multimodal",
                         version_number="1.0.0",
                         title="Basic OCR Prompt",
-                        text="Extrahiere Daten aus Rechnung {{filename}}.",
-                        change_summary="Basis-Extraktion ohne UStG-Fokus"
+                        text="Extract data from invoice {{filename}}.",
+                        change_summary="Baseline extraction without § 14 UStG focus"
                     ),
                     PromptVersionRecord(
                         version_id="ver-inv-120",
                         prompt_id="prompt:invoice-vision-multimodal",
                         version_number="1.2.0",
                         title="§ 14 UStG Compliance Prompt",
-                        text="Extrahiere alle steuerlichen Pflichtangaben gemäß § 14 UStG aus dem Dokument: {{filename}}. Achte auf Steuernummer, Leistungsdatum und Steuersatz-Aufschlüsselung.",
-                        change_summary="Hinzunahme von Pflichtfeld-Validierung und Netto/Brutto Konsistenz"
+                        text="Extract every statutory field required by § 14 UStG from the document: {{filename}}. Pay attention to the VAT ID, the delivery date and the tax rate breakdown.",
+                        change_summary="Added mandatory field validation and net/gross consistency"
                     )
                 ]
             ),
             PromptItem(
                 id="prompt:vendor-dispute-resolution",
                 title="Vendor Dispute Legal Correction Notice",
-                purpose="Formelle Mahn- und Korrespondenzvorlage bei Belegabweichungen.",
+                purpose="Formal correspondence template for documents that fail the compliance audit.",
                 category="compliance",
                 active_version="2.0.1",
-                current_text="Verfasse ein formelles, rechtssicheres Korrekturschreiben an {{vendor_name}} bezüglich Rechnung {{invoice_number}}. Begründe die Zahlungsunterbrechung mit folgenden Mängeln: {{violations}}.",
+                current_text="Draft a formal, legally sound correction request to {{vendor_name}} regarding invoice {{invoice_number}}. Justify the payment hold with the following defects: {{violations}}.",
                 variables=["vendor_name", "invoice_number", "violations"],
                 tags=["compliance", "dispute", "vendor", "healing"],
                 visibility="restricted",
@@ -91,19 +91,19 @@ class PromptRegistry:
                         version_id="ver-disp-201",
                         prompt_id="prompt:vendor-dispute-resolution",
                         version_number="2.0.1",
-                        title="Formelle UStG-Korrekturanforderung",
-                        text="Verfasse ein formelles, rechtssicheres Korrekturschreiben an {{vendor_name}} bezüglich Rechnung {{invoice_number}}. Begründe die Zahlungsunterbrechung mit folgenden Mängeln: {{violations}}.",
-                        change_summary="Zahlungsstopp-Hinweis und 14-Tage-Frist ergänzt"
+                        title="Formal correction request under § 14 UStG",
+                        text="Draft a formal, legally sound correction request to {{vendor_name}} regarding invoice {{invoice_number}}. Justify the payment hold with the following defects: {{violations}}.",
+                        change_summary="Added payment hold notice and 14-day deadline"
                     )
                 ]
             ),
             PromptItem(
                 id="prompt:deep-task-solver",
                 title="Deep Task Solver & Evidence Synthesizer",
-                purpose="Schrittweise Aufgabenlösung mit Evidenzprüfung und Memory-Injektion.",
+                purpose="Step-by-step task solving with evidence checks and memory injection.",
                 category="orchestration",
                 active_version="1.0.0",
-                current_text="Analysiere die Aufgabenstellung '{{task_title}}' unter Berücksichtigung von Gedächtniskontext {{memory_context}}. Führe die Lösung schrittweise mit überprüfbaren Belegen aus.",
+                current_text="Analyse the task '{{task_title}}' in the light of the memory context {{memory_context}}. Work through the solution step by step with verifiable evidence.",
                 variables=["task_title", "memory_context"],
                 tags=["taskmaster", "evidence", "reasoning"],
                 visibility="organization",
@@ -115,8 +115,8 @@ class PromptRegistry:
                         prompt_id="prompt:deep-task-solver",
                         version_number="1.0.0",
                         title="Initial Solver Template",
-                        text="Analysiere die Aufgabenstellung '{{task_title}}' unter Berücksichtigung von Gedächtniskontext {{memory_context}}. Führe die Lösung schrittweise mit überprüfbaren Belegen aus.",
-                        change_summary="Initiale Version"
+                        text="Analyse the task '{{task_title}}' in the light of the memory context {{memory_context}}. Work through the solution step by step with verifiable evidence.",
+                        change_summary="Initial version"
                     )
                 ]
             )

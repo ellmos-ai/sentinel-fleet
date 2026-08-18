@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="de" data-theme="light">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ app_name }} — Google Cloud Architecture &amp; Circuit Blueprint</title>
   <link rel="stylesheet" href="/static/style.css">
   <style>
-    .schaltplan-board {
+    .blueprint-board {
       background: var(--board);
       border: 1px solid var(--zone-edge);
       border-radius: var(--radius);
@@ -79,7 +79,7 @@
     </div>
     <div class="nav-links">
       <a href="/" class="nav-link">🎛️ Operator Dashboard</a>
-      <a href="/schaltplan" class="nav-link active">⌁ Architecture &amp; Blueprint</a>
+      <a href="/blueprint" class="nav-link active">⌁ Architecture &amp; Blueprint</a>
       <button class="btn btn-sm" onclick="toggleTheme()">🌓 Theme</button>
     </div>
   </header>
@@ -87,18 +87,18 @@
   <div class="container">
     <div class="hero-banner">
       <div class="hero-text">
-        <h2>Interaktiver Architektur-Schaltplan (Google Cloud Hackathon Blueprint)</h2>
-        <p>End-to-End Datenfluss: Event Ingestion → Model Armor → Multi-Agent Conductor → Gemini 3.5 Flash → Memory Bank → Firestore → Cloud Trace</p>
+        <h2>Interactive Architecture &amp; Circuit Blueprint (Google Cloud Hackathon)</h2>
+        <p>End-to-end data flow: event ingestion → Model Armor → multi-agent conductor → Gemini 3.5 Flash → memory bank → ledger store → OpenTelemetry</p>
       </div>
     </div>
 
-    <div class="schaltplan-board">
+    <div class="blueprint-board">
       
       <!-- STEP 1: Ingestion -->
       <div class="flow-step">
         <div class="flow-title">1. Event Ingestion &amp; Input Channels (Pillar UAS)</div>
         <div class="flow-meta">
-          Eingehende Dokumente (PDF-Rechnungen, E-Mail-Anhänge, Scans, API-Payloads) werden über REST-Endpunkte angenommen und über einen In-Process Event Bus verteilt (Pub/Sub-kompatibler Adapter für das Cloud-Run-Deployment).
+          Incoming documents (PDF invoices, email attachments, scans, API payloads) are accepted over REST endpoints and distributed through an in-process event bus (Pub/Sub-compatible adapter for the Cloud Run deployment).
         </div>
         <div class="flow-chips">
           <span class="chip-item">In-process event bus (Pub/Sub-compatible adapter)</span>
@@ -111,7 +111,7 @@
       <div class="flow-step">
         <div class="flow-title">2. Zero-Trust Gateway &amp; Model Armor (Pillar Control)</div>
         <div class="flow-meta">
-          Jeder Request durchläuft die Model Armor: Prompt Injection Defense, PII-Maskierung (IBAN, API-Keys, Kreditkartennummern) und Zero-Trust Permission Check (LOCK.permissions.json).
+          Every request passes through Model Armor: prompt injection defence, PII masking (IBAN, API keys, credit card numbers) and a Zero-Trust permission check against the permission registry.
         </div>
         <div class="flow-chips">
           <span class="chip-item">lock-master</span>
@@ -125,7 +125,7 @@
       <div class="flow-step">
         <div class="flow-title">3. Multi-Agent Conductor &amp; Gemini 3.5 Flash Vision (Pillar Control &amp; Conductor)</div>
         <div class="flow-meta">
-          Der Roshambo Swarm Conductor und Clutch Router delegieren Subtasks an isolierte Agenten (Extractor, Auditor, Reconciler, Dispute Communicator).
+          The Roshambo swarm conductor and the Clutch router delegate subtasks to isolated agents (extractor, auditor, reconciler, dispute communicator), each call passing the Sovereign Gateway.
         </div>
         <div class="flow-chips">
           <span class="chip-item">Gemini 3.5 Flash Vision</span>
@@ -139,7 +139,7 @@
       <div class="flow-step">
         <div class="flow-title">4. Memory Bank &amp; Context Injection (Pillar Memory)</div>
         <div class="flow-meta">
-          MemoryHooker injiziert relevante Firmenrichtlinien (USMC Fakten &amp; GARDENER RAG Chunks) dynamisch in die Prompts der Sub-Agenten.
+          MemoryHooker injects the relevant corporate policies (USMC facts &amp; GARDENER retrieval chunks) into the prompts of the sub-agents, and the retrieved context is quoted in the generated dispute letter.
         </div>
         <div class="flow-chips">
           <span class="chip-item">USMC Memory Bank</span>
@@ -152,7 +152,7 @@
       <div class="flow-step">
         <div class="flow-title">5. § 14 UStG Compliance Audit &amp; Self-Healing Loop (Pillar Domain: OmniLedger)</div>
         <div class="flow-meta">
-          Gültige Belege werden direkt im Ledger-Store verbucht (Firestore im Produktivbetrieb, lokaler JSON-Store in der Demo). Bei Mängeln (fehlende USt-IdNr, Rechenfehler) generiert der Agent autonom ein Korrekturschreiben und übergibt es an das Human-in-the-Loop Ticket-Gate.
+          Valid documents are booked straight into the ledger store (Firestore in production, local JSON store in the demo). On defects (missing VAT ID, arithmetic errors) the agent drafts a correction letter autonomously and hands it to the human-in-the-loop ticket gate.
         </div>
         <div class="flow-chips">
           <span class="chip-item">law-checker (§14 UStG)</span>
@@ -166,7 +166,7 @@
       <div class="flow-step">
         <div class="flow-title">6. Observability Mesh &amp; OpenTelemetry Tracing</div>
         <div class="flow-meta">
-          Jeder Tool-Aufruf wird als OpenTelemetry-Span aufgezeichnet (In-Memory-Exporter; Cloud-Trace-Export zuschaltbar über ENABLE_CLOUD_TRACE). Loop-Detektoren greifen bei Anomalien ein.
+          Every tool call is recorded as an OpenTelemetry span (in-memory exporter; Cloud Trace export can be enabled via ENABLE_CLOUD_TRACE). Loop detectors step in on anomalies.
         </div>
         <div class="flow-chips">
           <span class="chip-item">OpenTelemetry SDK (Cloud Trace optional)</span>

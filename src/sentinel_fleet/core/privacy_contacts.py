@@ -18,7 +18,7 @@ class PrivacyContact(BaseModel):
     protection_level: str = "S3"
     opt_in_status: str = "confirmed"  # confirmed | pending | unsubscribed | blacklisted
     is_tombstone: bool = False  # If True, contact is deleted but email is blocked to prevent re-contacting
-    dsgvo_notes: str = "Gesetzliche Aufbewahrung gem. § 147 AO / § 14 UStG"
+    dsgvo_notes: str = "Statutory retention under § 147 AO / § 14 UStG"
     last_contacted_at: float = Field(default_factory=time.time)
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
@@ -27,30 +27,29 @@ class PrivacyContact(BaseModel):
 class PrivacyContactHub:
     def __init__(self):
         self._store = get_store("privacy_contacts", PrivacyContact)
-        if self._store.count() == 0:
-            self._seed_default_contacts()
+        self._seed_default_contacts()
 
     def _seed_default_contacts(self):
         seeds = [
             PrivacyContact(
                 contact_id="cnt-cloudscale",
-                name="Rechnungsstelle CloudScale GmbH",
+                name="Accounts Payable, CloudScale GmbH",
                 email="billing@cloudscale.de",
                 organization="CloudScale Solutions GmbH",
                 category="vendor",
                 protection_level="S3",
                 opt_in_status="confirmed",
-                dsgvo_notes="Geschäftskontakt: Rechnungsverkehr gem. § 14 UStG"
+                dsgvo_notes="Business contact: invoicing correspondence under § 14 UStG"
             ),
             PrivacyContact(
                 contact_id="cnt-office",
-                name="Buchhaltung Office Supplies Ltd",
+                name="Accounting, Office Supplies Ltd",
                 email="invoices@officesupplies.eu",
                 organization="Office Supplies Ltd",
                 category="vendor",
                 protection_level="S3",
                 opt_in_status="confirmed",
-                dsgvo_notes="Lieferantenvertrag & Belegwesen"
+                dsgvo_notes="Vendor contract & document exchange"
             ),
             PrivacyContact(
                 contact_id="cnt-cybersec",
@@ -60,7 +59,7 @@ class PrivacyContactHub:
                 category="vendor",
                 protection_level="S3",
                 opt_in_status="confirmed",
-                dsgvo_notes="Sicherheitsdienstleister"
+                dsgvo_notes="Security services provider"
             ),
             PrivacyContact(
                 contact_id="cnt-acme",
@@ -70,11 +69,20 @@ class PrivacyContactHub:
                 category="vendor",
                 protection_level="S3",
                 opt_in_status="confirmed",
-                dsgvo_notes="Beratungsvertrag"
+                dsgvo_notes="Consulting contract"
             )
         ]
         for c in seeds:
-            self._store.put(c.contact_id, c)
+            stored = self._store.get(c.contact_id)
+            if stored is None:
+                self._store.put(c.contact_id, c)
+                continue
+            # Refresh only the descriptive fields of a seeded contact. Consent state and
+            # tombstones are operator decisions and must survive a redeploy untouched.
+            stored.name = c.name
+            stored.organization = c.organization
+            stored.dsgvo_notes = c.dsgvo_notes
+            self._store.put(stored.contact_id, stored)
 
     def list_all(self, include_tombstones: bool = False) -> List[PrivacyContact]:
         contacts = self._store.list_all()

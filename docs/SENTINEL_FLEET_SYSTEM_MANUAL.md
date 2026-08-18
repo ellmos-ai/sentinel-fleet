@@ -50,10 +50,10 @@ SentinelFleet unifies and hardens codebases, patterns, and research from several
 | **`.CONTROL`** (`.armor`, `.gateway`, `.clutch`) | `OneDrive/.TOPICS/.AI/.CONTROL` | Zero-Trust Model Armor (regex + semantic injection detection), Agent Gateway scoping (PoLP), Dynamic Intent Dispatcher (`clutch`). |
 | **`.RUNTIME` / UAS** (`.uas`) | `OneDrive/.TOPICS/.AI/.RUNTIME/.uas` | Universal Autonomous System: `task_master.py` (idempotent state tracking), `ticket_master.py` (HITL ask-gates), `lifecycle_manager.py`. |
 | **`.MEMORY`** (`.bank`, `.gardener`, `.hooker`) | `OneDrive/.TOPICS/.AI/.MEMORY` | Curated USMC Memory Bank (`fact`, `lesson`, `policy`, `entity`), GARDENER RAG vector search, Just-in-Time Context Injector (`letter-hooker`). |
-| **`.UMBRUCH` Mail** | `OneDrive/.TOPICS/.UMBRUCH/.UmbruchMail` | DSGVO Schutzstufenmodell (S1–S4), gesetzliche Aufbewahrungsfristen (§ 147 AO), automatisierte Lösch- und Fristenprüfungen (`dsgvo-check`). |
-| **`DEV_PrivacyMailDesk_SOCIAL`** | `OneDrive/.TOPICS/.SOFTWARE/MAIL/...` | Local-First Zero-Cloud-CRM Architektur, **Tombstone-Prinzip** (gesperrte Lösch-Marker verhindern Re-Ingestion und unerlaubten Mailversand). |
+| **`.UMBRUCH` Mail** | `OneDrive/.TOPICS/.UMBRUCH/.UmbruchMail` | GDPR protection level model (S1-S4), statutory retention periods (§ 147 AO), automated deletion and deadline checks (`dsgvo-check`). |
+| **`DEV_PrivacyMailDesk_SOCIAL`** | `OneDrive/.TOPICS/.SOFTWARE/MAIL/...` | Local-first zero-cloud CRM architecture, **tombstone principle** (locked deletion markers prevent re-ingestion and unauthorised mail dispatch). |
 | **`.SKILLS` Repository** | `OneDrive/.TOPICS/.AI/.SKILLS/skills` | 32 standardisierte, bilinguale und Google-Cloud-gebrandete Enterprise-Skills nach dem **Component-v1**-Schema. |
-| **`ProfiPrompt` Library** | `OneDrive/.TOPICS/.AI/.PROMPTS` | ProfiPrompt v1 Schema mit SemVer-Versionierung, Änderungshistorie und rollenbasierter Sichtbarkeit (`organization`, `restricted`, `public`). |
+| **`ProfiPrompt` Library** | `OneDrive/.TOPICS/.AI/.PROMPTS` | ProfiPrompt v1 schema with SemVer versioning, change history and role-based visibility (`organization`, `restricted`, `public`). |
 
 ---
 

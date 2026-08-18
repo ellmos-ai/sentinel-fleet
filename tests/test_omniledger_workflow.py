@@ -30,11 +30,12 @@ async def test_missing_vat_triggers_dispute_loop():
     doc = ComplianceAuditor.audit_invoice(doc)
     assert doc.compliance_passed is False
     assert doc.status == InvoiceStatus.DISPUTED
-    assert any("Steuernummer" in v for v in doc.compliance_violations)
+    assert any("VAT ID is missing" in v for v in doc.compliance_violations)
 
     email_draft = DisputeCommunicator.generate_dispute_resolution(doc)
+    # The statute reference stays German because it cites German law verbatim
     assert "14 UStG" in email_draft
-    assert "korrigiert" in email_draft.lower() or "korrektur" in email_draft.lower()
+    assert "corrected invoice" in email_draft.lower() or "invoice correction" in email_draft.lower()
 
 
 @pytest.mark.asyncio
@@ -59,4 +60,4 @@ async def test_math_error_triggers_compliance_block():
     
     doc = ComplianceAuditor.audit_invoice(doc)
     assert doc.compliance_passed is False
-    assert any("mathematisch inkonsistent" in v for v in doc.compliance_violations)
+    assert any("arithmetically inconsistent" in v for v in doc.compliance_violations)

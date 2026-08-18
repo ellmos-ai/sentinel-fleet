@@ -139,7 +139,7 @@ class SkillRegistry:
                 name="§ 14 UStG Tax Compliance Auditor",
                 pillar="domain",
                 version="1.4.0",
-                description="Automatische Prüfung gesetzlicher Pflichtangaben, USt-IdNr und mathematischer Konsistenz nach deutschem Steuerrecht.",
+                description="Automated check of statutory mandatory fields, VAT ID and arithmetic consistency under German tax law.",
                 required_tools=["validate_tax_compliance"],
                 tags=["tax", "compliance", "ustg", "finance", "audit"]
             ),

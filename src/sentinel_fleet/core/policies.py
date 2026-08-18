@@ -24,14 +24,14 @@ class PolicyEngine:
         """Enforces § 14 UStG mandatory invoice fields."""
         violations = []
         required_fields = [
-            ("vendor_name", "Lieferantenname fehlt"),
-            ("vendor_vat_id", "Steuernummer / USt-IdNr des Ausstellers fehlt (§ 14 Abs. 4 Nr. 2 UStG)"),
-            ("invoice_number", "Fortlaufende Rechnungsnummer fehlt (§ 14 Abs. 4 Nr. 4 UStG)"),
-            ("invoice_date", "Ausstellungsdatum fehlt (§ 14 Abs. 4 Nr. 3 UStG)"),
-            ("delivery_date", "Liefer- / Leistungsdatum fehlt (§ 14 Abs. 4 Nr. 6 UStG)"),
-            ("net_amount", "Nettobetrag fehlt"),
-            ("tax_rate", "Steuersatz fehlt"),
-            ("gross_amount", "Bruttobetrag fehlt")
+            ("vendor_name", "Vendor name is missing"),
+            ("vendor_vat_id", "Issuer VAT ID is missing (§ 14 Abs. 4 Nr. 2 UStG)"),
+            ("invoice_number", "Sequential invoice number is missing (§ 14 Abs. 4 Nr. 4 UStG)"),
+            ("invoice_date", "Issue date is missing (§ 14 Abs. 4 Nr. 3 UStG)"),
+            ("delivery_date", "Delivery or service date is missing (§ 14 Abs. 4 Nr. 6 UStG)"),
+            ("net_amount", "Net amount is missing"),
+            ("tax_rate", "Tax rate is missing"),
+            ("gross_amount", "Gross amount is missing")
         ]
 
         for field, error_msg in required_fields:
@@ -52,7 +52,7 @@ class PolicyEngine:
             expected_gross = round(net + expected_tax, 2)
             diff = abs(expected_gross - gross)
             if diff > 0.02:  # Tolerance of 2 cents for rounding
-                violations.append(f"Rechnungsbetrag mathematisch inkonsistent: Netto {net} + Steuer {expected_tax} != Brutto {gross}")
+                violations.append(f"Invoice total is arithmetically inconsistent: net {net} + tax {expected_tax} != gross {gross}")
 
         if violations:
             return PolicyEvaluationResult(

@@ -149,7 +149,7 @@ class MultimodalExtractor:
                 invoice_date="2026-08-16",
                 delivery_date="2026-08-16",
                 items=[
-                    InvoiceLineItem(description="Ergonomischer Bürostuhl Pro", quantity=2, unit_price=400.0, total_price=800.0),
+                    InvoiceLineItem(description="Ergonomic Office Chair Pro", quantity=2, unit_price=400.0, total_price=800.0),
                 ],
                 net_amount=800.0,
                 tax_rate=19.0,
@@ -172,7 +172,7 @@ class MultimodalExtractor:
             invoice_date="2026-08-17",
             delivery_date="2026-08-17",
             items=[
-                InvoiceLineItem(description="Entwicklungs-Server Cluster Node A", quantity=1, unit_price=2500.0, total_price=2500.0),
+                InvoiceLineItem(description="Development Server Cluster Node A", quantity=1, unit_price=2500.0, total_price=2500.0),
                 InvoiceLineItem(description="NVMe Enterprise Storage 4TB", quantity=2, unit_price=250.0, total_price=500.0)
             ],
             net_amount=3000.0,
@@ -196,7 +196,7 @@ class MultimodalExtractor:
         return InvoiceDocument(
             id=doc_id,
             filename=filename,
-            vendor_name=data.get("vendor_name", "Unbekannt"),
+            vendor_name=data.get("vendor_name", "Unknown"),
             vendor_vat_id=data.get("vendor_vat_id"),
             vendor_address=data.get("vendor_address"),
             vendor_email=data.get("vendor_email"),
