@@ -4,7 +4,7 @@
 [![Gemini 3.5](https://img.shields.io/badge/Gemini-3.5%20Flash%20Vision-orange.svg)](https://deepmind.google/technologies/gemini/)
 [![Zero-Trust Model Armor](https://img.shields.io/badge/Security-Model%20Armor%20%26%20Zero--Trust-green.svg)](#security--governance)
 [![Google GenAI SDK](https://img.shields.io/badge/SDK-google--genai-4285F4.svg)](https://googleapis.github.io/python-genai/)
-[![Pytest](https://img.shields.io/badge/pytest-64%2F64%20passed-brightgreen.svg)](tests/)
+[![Pytest](https://img.shields.io/badge/pytest-114%2F114%20passed-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > Built for the **Google Cloud All Things Agentic Hackathon** (Track 3: The Fortified Enterprise Fleet & Track 1: The Taskmaster).
@@ -63,6 +63,41 @@ SentinelFleet ships with 32 canonical, Google-Cloud-branded enterprise skills ac
 
 ---
 
+## 💬 Governed Chat Console & Model Race
+
+The operator console carries a chat tab in which **every model call takes the same path as the
+document pipeline**: `model_armor.inspect_prompt` scans the message, then
+`gateway.execute_tool_call` runs it under a registered agent identity with that agent's
+least-privilege scope, PII sanitisation and permission gate. There is no second, unguarded route
+to a model.
+
+* **Composed system prompt:** fleet base prompt + the bodies of the skills you select from the
+  registry + one **pinned version** of a prompt template. Pinning matters: a later version bump
+  cannot silently change what a recorded conversation ran on.
+* **Race mode:** one prompt, two or more models, dispatched with `asyncio.gather`. Each lane runs
+  under its **own agent identity** (`agent:race-lane-1..4`) because the gateway locks per agent —
+  lanes sharing an identity would queue and the latencies would measure the queue. Optional judge
+  scores the lanes on quality, correctness, completeness, instruction fidelity and latency;
+  latency is one dimension, not the ranking.
+* **Export:** any transcript as Markdown, plain text, styled HTML or PDF. Every exported turn
+  carries the mode it ran in, so provenance survives leaving the console.
+* **Honest demo mode:** without `GEMINI_API_KEY` the console answers with the request it actually
+  assembled and labels the turn `demo`, rather than presenting invented text as a model reply.
+  The judge refuses to score demo lanes outright — a labelled simulated latency is still a number,
+  an invented quality rating would be fabricated evidence.
+
+---
+
+## ⌁ Architecture Blueprint: Two Views
+
+`/blueprint` serves the pipeline walkthrough and a **module interdependency circuit**. The circuit
+is not drawn by hand: every node is a module under `src/sentinel_fleet` and every trace is an
+import statement parsed out of it with `ast` on each request, laid out so an importer sits left of
+everything it imports. Hover a module to isolate what it wires into. The diagram cannot drift from
+the code, and the test suite checks every edge back against the importing module's source.
+
+---
+
 ## ⚡ Quickstart (Local & Google Cloud Run)
 
 ### 1. Local Run
@@ -77,7 +112,7 @@ pip install -e .
 # Start the Control Center Web App
 python app.py
 ```
-Open **`http://localhost:8080`** in your browser to access the Operator Dashboard and Circuit Blueprint!
+Open **`http://localhost:8080`** for the operator console, the chat and race tabs, and the architecture blueprint.
 
 ### 2. Run Tests
 ```bash

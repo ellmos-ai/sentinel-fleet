@@ -3,6 +3,7 @@
 import os
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
@@ -118,6 +119,14 @@ os.makedirs(templates_dir, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 templates = Jinja2Templates(directory=templates_dir)
+
+
+def _clock(epoch_seconds: float) -> str:
+    """Wall-clock time for the gate ledger. An operator reads a clock, not an epoch."""
+    return time.strftime("%H:%M:%S", time.localtime(epoch_seconds))
+
+
+templates.env.filters["clock"] = _clock
 
 
 # In-memory session tracking for active demo documents

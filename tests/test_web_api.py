@@ -48,16 +48,18 @@ async def test_index_renders_html(client):
 
 
 def test_all_templates_compile():
-    """Guards the failure mode directly: a template that does not parse breaks its route."""
-    from jinja2 import Environment, FileSystemLoader
+    """Guards the failure mode directly: a template that does not parse breaks its route.
+
+    Compiled against the application's own Jinja environment rather than a bare one, so a
+    template calling a filter the app never registered fails here instead of at request time.
+    """
+    from sentinel_fleet.web.server import templates as app_templates
 
     template_dir = Path(__file__).resolve().parents[1] / "src" / "sentinel_fleet" / "web" / "templates"
-    env = Environment(loader=FileSystemLoader(str(template_dir)), autoescape=True)
-
     templates = sorted(p.name for p in template_dir.glob("*.html"))
     assert templates, "no templates found"
     for name in templates:
-        env.get_template(name)  # raises TemplateSyntaxError on a broken template
+        app_templates.env.get_template(name)  # raises on a broken or unresolvable template
 
 
 @pytest.mark.asyncio

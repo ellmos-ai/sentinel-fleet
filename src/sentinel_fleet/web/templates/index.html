@@ -86,7 +86,7 @@
       <div class="ledger-rows">
         {% for s in spans[-7:]|reverse %}
         <div class="ledger-row">
-          <span class="ledger-time">{{ s.start_time|round(1) }}</span>
+          <span class="ledger-time">{{ s.start_time|clock }}</span>
           <span class="ledger-op">{{ s.name }}</span>
           <span class="ledger-actor item-meta">{{ s.agent_id }}</span>
           <span>
@@ -671,7 +671,7 @@
           </div>
           <div style="max-height: 70vh; overflow-y: auto;">
             {% for s in skills %}
-            <div class="record pillar-{{ s.pillar if s.pillar in ('control', 'memory', 'uas', 'domain', 'conductor') else 'control' }}">
+            <div class="record {% if s.pillar in ('control', 'memory', 'uas', 'domain', 'conductor') %}pillar-{{ s.pillar }}{% endif %}">
               <div class="item-top">
                 <span class="item-title">{{ s.name }}</span>
                 <span class="badge-status numeric">v{{ s.version }}</span>
