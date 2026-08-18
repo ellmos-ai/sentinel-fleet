@@ -38,6 +38,21 @@ async def test_missing_vat_triggers_dispute_loop():
 
 
 @pytest.mark.asyncio
+async def test_dispute_draft_embeds_retrieved_memory_context():
+    """M1: retrieved RAG clues must reach the draft instead of being fetched and dropped."""
+    extractor = MultimodalExtractor()
+    doc = await extractor.extract_invoice(filename="Invoice_MissingVAT_CS.pdf")
+    doc = ComplianceAuditor.audit_invoice(doc)
+
+    body = DisputeCommunicator.generate_dispute_resolution(doc)
+
+    assert "Reference context" in body
+    # The statute chunk retrieved from the GARDENER corpus must be quoted in the draft
+    assert "UStG_Paragraph_14" in body
+    assert "[LEGAL_DOC:" in body
+
+
+@pytest.mark.asyncio
 async def test_math_error_triggers_compliance_block():
     extractor = MultimodalExtractor()
     doc = await extractor.extract_invoice(filename="Invoice_MathError_Office.pdf")

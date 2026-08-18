@@ -17,9 +17,18 @@ class DisputeCommunicator:
             return doc.dispute_email_draft
 
         violations_formatted = "\n".join(f"- {v}" for v in doc.compliance_violations)
-        
-        # 2. Inject corporate memory / policy context
+
+        # 2. Inject corporate memory / policy context and quote it in the draft, so the
+        #    operator can see which retrieved knowledge the argument rests on.
         memory_clues = memory_hooker.inject_context("Rechnungsprüfung § 14 UStG Korrekturanforderung")
+        clue_lines = [line for line in memory_clues.splitlines() if line.startswith("- ")]
+        reference_block = ""
+        if clue_lines:
+            reference_block = (
+                "Reference context (retrieved from memory bank and legal corpus):\n"
+                + "\n".join(clue_lines)
+                + "\n\n"
+            )
 
         body = (
             f"Sehr geehrte Damen und Herren,\n\n"
@@ -29,6 +38,7 @@ class DisputeCommunicator:
             f"Gemäß den steuerrechtlichen Vorgaben der Bundesrepublik Deutschland sind wir zum Vorsteuerabzug nur bei Vorliegen aller Pflichtangaben berechtigt. "
             f"Wir bitten Sie daher höflich, uns eine entsprechend korrigierte Rechnung (oder Rechnungskorrektur) zukommen zu lassen.\n\n"
             f"Bis zum Eingang des korrigierten Belegs wurde die automatische Zahlungsanweisung für diese Rechnung temporär pausiert.\n\n"
+            f"{reference_block}"
             f"Datenschutz-Hinweis: Ihre Kontaktdaten werden bei uns gemäß DSGVO Schutzstufe S3 zur steuerlichen Erfüllung verarbeitet.\n\n"
             f"Mit freundlichen Grüßen\n"
             f"SentinelFleet Autonomous Accounting Governance"
