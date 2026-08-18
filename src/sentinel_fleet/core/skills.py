@@ -23,6 +23,9 @@ class AgentSkill(BaseModel):
     pillar: str  # control, memory, uas, domain, dev, assist, infrastructure, utilities, web
     version: str = "1.0.0"
     description: str
+    # Markdown body of the SKILL.md behind the frontmatter. The chat console injects this
+    # verbatim into the system prompt, so a skill governs the model rather than only labelling it.
+    body: str = ""
     required_tools: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     schema_version: str = "component-v1"
@@ -68,6 +71,7 @@ class ComponentV1SkillLoader:
             skill_id = f"skill:{raw_name}" if not raw_name.startswith("skill:") else raw_name
             pillar = data.get("pillar", "domain")
             description = (data.get("description") or "").strip()
+            body = content[frontmatter_match.end():].strip()
 
             return AgentSkill(
                 skill_id=skill_id,
@@ -75,6 +79,7 @@ class ComponentV1SkillLoader:
                 pillar=pillar,
                 version=str(data.get("version", "1.0.0")),
                 description=description,
+                body=body,
                 required_tools=data.get("required_tools", []),
                 tags=data.get("tags", []),
                 schema_version=data.get("schema_version", "component-v1"),
@@ -148,7 +153,7 @@ class SkillRegistry:
                 name="Multimodal PDF & Document Grabber",
                 pillar="domain",
                 version="2.1.0",
-                description="Pixelgenaue Extraktion tabellarischer und unstrukturierter Daten mit Gemini 3.5 Flash Vision.",
+                description="Pixel-accurate extraction of tabular and unstructured data with Gemini 3.5 Flash Vision.",
                 required_tools=["extract_invoice_multimodal"],
                 tags=["vision", "ocr", "multimodal", "gemini", "pdf"]
             ),
@@ -157,7 +162,7 @@ class SkillRegistry:
                 name="Zero-Trust Model Armor Guardrail",
                 pillar="control",
                 version="3.0.0",
-                description="Inline Prompt Injection Scanner, Jailbreak-Blocker und PII-Maskierungsfilter.",
+                description="Inline prompt injection scanner, jailbreak blocker and PII masking filter.",
                 required_tools=["inspect_prompt", "sanitize_pii"],
                 tags=["security", "armor", "zero-trust", "guardrail"]
             )
@@ -187,6 +192,41 @@ class SkillRegistry:
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [item[1] for item in scored]
+
+    def create_skill(
+        self,
+        name: str,
+        pillar: str,
+        description: str,
+        body: str = "",
+        required_tools: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        visibility: str = "organization",
+        execution_gate: str = "auto"
+    ) -> AgentSkill:
+        """Register an operator-authored skill.
+
+        Registry-only, like prompt creation: nothing is written back to the skills directory,
+        so authoring a skill in the console never mutates the repository it was loaded from.
+        """
+        slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+        if not slug:
+            raise SkillSchemaValidationError("name", "A skill name must contain letters or digits")
+
+        skill = AgentSkill(
+            skill_id=f"skill:{slug}",
+            name=slug,
+            pillar=pillar,
+            version="1.0.0",
+            description=description.strip(),
+            body=body.strip(),
+            required_tools=required_tools or [],
+            tags=tags or [],
+            visibility=visibility,
+            execution_gate=execution_gate
+        )
+        self._skills[skill.skill_id] = skill
+        return skill
 
     def add_skill_version(
         self,

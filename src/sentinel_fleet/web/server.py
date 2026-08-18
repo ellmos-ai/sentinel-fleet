@@ -10,6 +10,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from pydantic import BaseModel
+
+from sentinel_fleet.chat.backends import SUPPORTED_MODELS
+from sentinel_fleet.chat.service import chat_service
 from sentinel_fleet.core.config import settings
 from sentinel_fleet.core.identity import AgentStatus
 from sentinel_fleet.core.gateway import gateway
@@ -534,6 +538,101 @@ async def api_create_task(
         "note": "queued for execution",
         "task": task.model_dump()
     }
+
+
+# ---------------------------------------------------------
+# API Endpoints for the governed chat console
+# ---------------------------------------------------------
+
+class ChatSendRequest(BaseModel):
+    message: str
+    session_id: str = ""
+    model: str = ""
+    skill_ids: List[str] = []
+    prompt_id: str = ""
+    prompt_version: str = ""
+
+
+class ChatRaceRequest(BaseModel):
+    message: str
+    models: List[str]
+    judge: bool = False
+    session_id: str = ""
+    skill_ids: List[str] = []
+    prompt_id: str = ""
+    prompt_version: str = ""
+
+
+def _reject_unsupported_models(models: List[str]):
+    unknown = [m for m in models if m not in SUPPORTED_MODELS]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported model(s): {', '.join(unknown)}. Choose from {', '.join(SUPPORTED_MODELS)}."
+        )
+
+
+@app.get("/api/chat/models")
+async def api_chat_models():
+    return {"models": SUPPORTED_MODELS, "live": bool(settings.gemini_api_key)}
+
+
+@app.get("/api/chat/sessions")
+async def api_chat_sessions():
+    return [s.model_dump() for s in chat_service.list_sessions()]
+
+
+@app.get("/api/chat/sessions/{session_id}")
+async def api_chat_session(session_id: str):
+    session = chat_service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return session.model_dump()
+
+
+@app.post("/api/chat/send")
+async def api_chat_send(payload: ChatSendRequest):
+    if not payload.message.strip():
+        raise HTTPException(status_code=400, detail="Message must not be empty")
+    if payload.model:
+        _reject_unsupported_models([payload.model])
+
+    session, reply = await chat_service.send(
+        message=payload.message,
+        session_id=payload.session_id,
+        model=payload.model,
+        skill_ids=payload.skill_ids,
+        prompt_id=payload.prompt_id,
+        prompt_version=payload.prompt_version
+    )
+    return {
+        "session_id": session.session_id,
+        "title": session.title,
+        "mode": reply.mode.value,
+        "message": reply.model_dump()
+    }
+
+
+@app.post("/api/chat/race")
+async def api_chat_race(payload: ChatRaceRequest):
+    if not payload.message.strip():
+        raise HTTPException(status_code=400, detail="Message must not be empty")
+    _reject_unsupported_models(payload.models)
+
+    try:
+        session, record = await chat_service.race(
+            message=payload.message,
+            models=payload.models,
+            judge=payload.judge,
+            session_id=payload.session_id,
+            skill_ids=payload.skill_ids,
+            prompt_id=payload.prompt_id,
+            prompt_version=payload.prompt_version
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"session_id": session.session_id, "race": record.model_dump()}
 
 
 # ---------------------------------------------------------

@@ -75,8 +75,25 @@ class LifecycleManager:
                 role=AgentRole.VENDOR_COMMUNICATOR,
                 description="Drafts autonomous, legally sound correction letters to vendors when defects are found.",
                 allowed_tools={"draft_vendor_dispute_email", "send_external_email", "query_memory_bank"}
+            ),
+            AgentIdentity(
+                agent_id="agent:chat-operator",
+                name="Chat Operator",
+                role=AgentRole.ORCHESTRATOR,
+                description="Carries operator conversations and race verdicts through the gateway to the model.",
+                allowed_tools={"chat_completion", "query_memory_bank"}
             )
         ]
+        # One identity per race lane. The gateway holds a lock per agent, so lanes that shared
+        # an identity would run one after another and their latencies would report the wait.
+        for lane in range(1, 5):
+            default_agents.append(AgentIdentity(
+                agent_id=f"agent:race-lane-{lane}",
+                name=f"Race Lane {lane}",
+                role=AgentRole.ORCHESTRATOR,
+                description=f"Isolated identity for lane {lane} of a side-by-side model race.",
+                allowed_tools={"chat_completion"}
+            ))
         for a in default_agents:
             self._fleet[a.agent_id] = a
 

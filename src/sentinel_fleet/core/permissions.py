@@ -37,6 +37,7 @@ class PermissionRegistry:
             PermissionRule(tool_pattern="store_memory_bank", action=PermissionAction.ALLOW),
             PermissionRule(tool_pattern="create_reconciliation_draft", action=PermissionAction.ALLOW),
             PermissionRule(tool_pattern="draft_vendor_dispute_email", action=PermissionAction.ALLOW),
+            PermissionRule(tool_pattern="chat_completion", action=PermissionAction.ALLOW, reason="Model calls are read-only and carry no external effect"),
         ]
 
     def evaluate(self, tool_name: str) -> PermissionAction:

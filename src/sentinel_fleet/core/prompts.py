@@ -130,6 +130,20 @@ class PromptRegistry:
     def get_prompt(self, prompt_id: str) -> Optional[PromptItem]:
         return self._prompts.get(prompt_id)
 
+    def get_version(self, prompt_id: str, version_number: str) -> Optional[PromptVersionRecord]:
+        """Resolve one specific version of a prompt.
+
+        The chat console pins the version an operator picked, so a later version bump cannot
+        silently change which instructions a recorded conversation actually ran on.
+        """
+        prompt = self.get_prompt(prompt_id)
+        if not prompt:
+            return None
+        for version in prompt.versions:
+            if version.version_number == version_number:
+                return version
+        return None
+
     def create_prompt(
         self,
         title: str,
