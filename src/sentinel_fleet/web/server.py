@@ -488,25 +488,21 @@ async def api_create_task(
         except Exception:
             payload = {"raw_input": input_payload}
 
+    # The task is queued, not executed: there is no worker behind this endpoint, and
+    # reporting a completed run with fabricated evidence would be a false claim.
+    span = telemetry.start_span(f"queue_task:{name}", assigned_agent, {"task_name": name})
     task = task_master.create_task(
         name=name,
         assigned_agent=assigned_agent,
         input_data=payload
     )
-
-    task_master.update_task_state(task.task_id, TaskState.IN_PROGRESS)
-    span = telemetry.start_span(f"execute_task:{task.task_id}", assigned_agent, {"task_name": name})
-    
-    task_master.update_task_state(
-        task.task_id,
-        TaskState.COMPLETED,
-        output_data={"result": f"Task '{name}' erfolgreich von {assigned_agent} ausgeführt.", "evidence": "Verified by SystemAuditor"}
-    )
     telemetry.end_span(span, status="OK")
 
-    # Fetch fresh task state from storage
-    updated_task = task_master.get_task(task.task_id) or task
-    return {"status": "created", "task": updated_task.model_dump()}
+    return {
+        "status": "created",
+        "note": "queued for execution",
+        "task": task.model_dump()
+    }
 
 
 # ---------------------------------------------------------

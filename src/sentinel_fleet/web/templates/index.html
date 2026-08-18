@@ -379,7 +379,7 @@
               <td><b>{{ t.name }}</b></td>
               <td>{{ t.assigned_agent }}</td>
               <td>
-                <span class="badge-status {% if t.state.value == 'completed' %}badge-ok{% elif t.state.value == 'failed' %}badge-danger{% else %}badge-warn{% endif %}">
+                <span class="badge-status {% if t.state.value == 'completed' %}badge-ok{% elif t.state.value == 'failed' %}badge-danger{% elif t.state.value == 'queued' %}badge-info{% else %}badge-warn{% endif %}">
                   {{ t.state.value|upper }}
                 </span>
               </td>
@@ -388,6 +388,8 @@
                   <span style="font-size: 11px; color: var(--ink-dim);">{{ t.output_data }}</span>
                 {% elif t.error_message %}
                   <span style="font-size: 11px; color: var(--danger);">{{ t.error_message }}</span>
+                {% elif t.state.value == 'queued' %}
+                  <span style="font-size: 11px; color: var(--ink-faint);">queued for execution - no worker attached</span>
                 {% else %}
                   <span style="font-size: 11px; color: var(--ink-faint);">-</span>
                 {% endif %}

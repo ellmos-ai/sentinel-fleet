@@ -33,7 +33,9 @@ async def test_create_custom_task():
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "created"
-        assert data["task"]["state"] == "completed"
+        # Honest state: the endpoint queues work, it does not execute it
+        assert data["task"]["state"] == "queued"
+        assert data["task"]["output_data"] == {}
 
 
 @pytest.mark.asyncio
