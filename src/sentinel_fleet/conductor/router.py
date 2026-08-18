@@ -6,8 +6,8 @@ from pydantic import BaseModel
 
 
 class ModelTier(str, Enum):
-    FAST = "gemini-2.5-flash"
-    PRO = "gemini-2.5-pro"
+    FAST = "gemini-3.5-flash"
+    PRO = "gemini-3.5-pro"
     LOCAL_FALLBACK = "gemma-2-9b"
 
 

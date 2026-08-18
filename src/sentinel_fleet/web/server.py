@@ -2,6 +2,8 @@
 
 import os
 import json
+import logging
+from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -36,10 +38,25 @@ from sentinel_fleet.domains.omniledger.dispute_loop import dispute_communicator
 from sentinel_fleet.domains.omniledger.reconciliation import ledger_reconciler
 
 
+logger = logging.getLogger("sentinel_fleet")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Emit the resolved runtime configuration once, so deployments are auditable from logs."""
+    logging.info("SentinelFleet model: %s", settings.gemini_default_model)
+    logging.info(
+        "SentinelFleet extraction backend: %s",
+        "gemini-live (GEMINI_API_KEY present)" if settings.gemini_api_key else "deterministic-demo (no GEMINI_API_KEY)"
+    )
+    yield
+
+
 app = FastAPI(
     title="SentinelFleet",
     description="Fortified Enterprise Agent Platform & Autonomous Taskmaster",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Exception handlers for SentinelFleet errors
