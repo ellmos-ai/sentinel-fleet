@@ -218,7 +218,16 @@ DASHBOARD_ROW_LIMIT = 50
 
 
 def _tail(records: List[Any]) -> List[Any]:
-    return records[-DASHBOARD_ROW_LIMIT:]
+    """The most recent rows, bounded - not literally the list's tail.
+
+    task_master/ticket_master/privacy_contact_hub.list_all() already sort newest-first
+    (created_at descending, same as telemetry.get_recent_spans()). `records[-N:]` on a
+    newest-first list is the N OLDEST entries, the opposite of what a "recent activity, capped"
+    view needs - and of what the callers' badges ("latest N of M") promise. `records[:N]` is the
+    correct slice for an already-newest-first list; telemetry's own span buffer is oldest-first
+    instead, which is why get_recent_spans() reverses after slicing rather than slicing here.
+    """
+    return records[:DASHBOARD_ROW_LIMIT]
 
 
 def _prompt_catalog() -> List[Dict[str, Any]]:
