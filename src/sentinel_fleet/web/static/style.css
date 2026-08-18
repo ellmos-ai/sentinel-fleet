@@ -299,11 +299,33 @@ header {
   letter-spacing: -0.2px;
 }
 
+.showcase-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .trigger-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 12px;
   margin-top: 14px;
+}
+
+.upload-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--zone-edge);
+  font-size: 12.5px;
+}
+
+.upload-row input[type="file"] {
+  flex: 1 1 240px;
+  min-width: 200px;
 }
 
 .trigger-btn {

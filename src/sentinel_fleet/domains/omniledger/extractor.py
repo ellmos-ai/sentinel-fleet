@@ -2,44 +2,115 @@
 
 import os
 import json
+import asyncio
+import logging
 from typing import Dict, Any, Optional
-from sentinel_fleet.domains.omniledger.models import InvoiceDocument, InvoiceLineItem, InvoiceStatus
+from sentinel_fleet.domains.omniledger.models import (
+    InvoiceDocument,
+    InvoiceLineItem,
+    InvoiceStatus,
+    ExtractionMode
+)
 from sentinel_fleet.core.config import settings
-from sentinel_fleet.core.model_armor import ModelArmor
+
+logger = logging.getLogger(__name__)
+
+# Mime types accepted by the Gemini multimodal file part
+SUPPORTED_MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".txt": "text/plain"
+}
+
+EXTRACTION_PROMPT = (
+    "Extract structured JSON from this invoice with fields: "
+    "vendor_name, vendor_vat_id, vendor_address, vendor_email, invoice_number, "
+    "invoice_date, delivery_date, net_amount, tax_rate, tax_amount, gross_amount, "
+    "currency, items: [{description, quantity, unit_price, total_price}]. "
+    "Return strictly valid JSON only."
+)
 
 
 class MultimodalExtractor:
-    def __init__(self):
-        self.api_key = settings.gemini_api_key
+    @property
+    def api_key(self) -> str:
+        """Read the key from settings on every call so runtime environment changes are honoured."""
+        return settings.gemini_api_key
 
-    async def extract_invoice(self, filename: str, file_bytes: Optional[bytes] = None, text_content: Optional[str] = None) -> InvoiceDocument:
-        """Extracts structured invoice metadata from raw text or multimodal input."""
+    @staticmethod
+    def guess_mime_type(filename: str) -> str:
+        ext = os.path.splitext(filename or "")[1].lower()
+        return SUPPORTED_MIME_TYPES.get(ext, "application/pdf")
+
+    @staticmethod
+    def _strip_code_fence(raw: str) -> str:
+        """Remove a markdown code fence around a JSON payload without eating payload characters."""
+        text = raw.strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            lines = lines[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            text = "\n".join(lines)
+        return text.strip()
+
+    async def extract_invoice(
+        self,
+        filename: str,
+        file_bytes: Optional[bytes] = None,
+        text_content: Optional[str] = None
+    ) -> InvoiceDocument:
+        """Extract structured invoice metadata from an uploaded document, raw text or a demo preset."""
         doc_id = f"INV-{os.urandom(4).hex().upper()}"
 
-        # If real Gemini API Key is present and google-genai is available
-        if self.api_key:
-            try:
-                from google import genai
-                client = genai.Client(api_key=self.api_key)
-                prompt = (
-                    "Extract structured JSON from this invoice with fields: "
-                    "vendor_name, vendor_vat_id, vendor_address, vendor_email, invoice_number, "
-                    "invoice_date, delivery_date, net_amount, tax_rate, tax_amount, gross_amount, "
-                    "currency, items: [{description, quantity, unit_price, total_price}]. "
-                    "Return strictly valid JSON only."
-                )
-                response = client.models.generate_content(
-                    model=settings.gemini_default_model,
-                    contents=[prompt, text_content or filename]
-                )
-                raw_json = response.text.strip("```json").strip("```").strip()
-                data = json.loads(raw_json)
-                return self._dict_to_document(doc_id, filename, data)
-            except Exception:
-                pass  # Fallback to deterministic parser
+        if not self.api_key:
+            logger.warning("MOCK MODE: no GEMINI_API_KEY - deterministic demo extraction")
+            return self._deterministic_extract(doc_id, filename, text_content or "")
 
-        # Robust Built-in Semantic Extractor (for offline / deterministic test verification)
-        return self._deterministic_extract(doc_id, filename, text_content or "")
+        try:
+            return await self._extract_with_gemini(doc_id, filename, file_bytes, text_content)
+        except Exception as exc:
+            logger.warning(
+                "MOCK MODE: Gemini extraction failed (%s: %s) - falling back to deterministic demo extraction",
+                type(exc).__name__, exc
+            )
+            return self._deterministic_extract(doc_id, filename, text_content or "")
+
+    async def _extract_with_gemini(
+        self,
+        doc_id: str,
+        filename: str,
+        file_bytes: Optional[bytes],
+        text_content: Optional[str]
+    ) -> InvoiceDocument:
+        """Call Gemini via the google-genai SDK. Binary uploads are passed as a multimodal file part."""
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=self.api_key)
+
+        if file_bytes:
+            payload = types.Part.from_bytes(
+                data=file_bytes,
+                mime_type=self.guess_mime_type(filename)
+            )
+        else:
+            payload = text_content or filename
+
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=settings.gemini_default_model,
+            contents=[EXTRACTION_PROMPT, payload]
+        )
+
+        data = json.loads(self._strip_code_fence(response.text))
+        doc = self._dict_to_document(doc_id, filename, data)
+        doc.extraction_mode = ExtractionMode.GEMINI
+        logger.info("Gemini extraction succeeded for %s using %s", filename, settings.gemini_default_model)
+        return doc
 
     def _deterministic_extract(self, doc_id: str, filename: str, text: str) -> InvoiceDocument:
         # Check if text contains flawed demo invoice or clean invoice
@@ -62,7 +133,8 @@ class MultimodalExtractor:
                 tax_amount=228.0,
                 gross_amount=1428.0,
                 currency="EUR",
-                status=InvoiceStatus.EXTRACTED
+                status=InvoiceStatus.EXTRACTED,
+                extraction_mode=ExtractionMode.DETERMINISTIC_DEMO
             )
 
         if "MathError" in filename or "rechenfehler" in text.lower():
@@ -84,7 +156,8 @@ class MultimodalExtractor:
                 tax_amount=152.0,
                 gross_amount=1050.0,  # Intentional math error (800 + 152 != 1050)
                 currency="EUR",
-                status=InvoiceStatus.EXTRACTED
+                status=InvoiceStatus.EXTRACTED,
+                extraction_mode=ExtractionMode.DETERMINISTIC_DEMO
             )
 
         # Standard Perfect Invoice
@@ -107,7 +180,8 @@ class MultimodalExtractor:
             tax_amount=570.0,
             gross_amount=3570.0,
             currency="EUR",
-            status=InvoiceStatus.EXTRACTED
+            status=InvoiceStatus.EXTRACTED,
+            extraction_mode=ExtractionMode.DETERMINISTIC_DEMO
         )
 
     def _dict_to_document(self, doc_id: str, filename: str, data: Dict[str, Any]) -> InvoiceDocument:

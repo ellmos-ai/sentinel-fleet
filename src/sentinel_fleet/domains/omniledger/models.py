@@ -14,6 +14,12 @@ class InvoiceStatus(str, Enum):
     PAID = "paid"
 
 
+class ExtractionMode(str, Enum):
+    """Declares which backend produced an extraction. Never claim a live model for demo data."""
+    GEMINI = "gemini-3.5"
+    DETERMINISTIC_DEMO = "deterministic-demo"
+
+
 class InvoiceLineItem(BaseModel):
     description: str
     quantity: float = 1.0
@@ -38,6 +44,7 @@ class InvoiceDocument(BaseModel):
     gross_amount: float
     currency: str = "EUR"
     status: InvoiceStatus = InvoiceStatus.RECEIVED
+    extraction_mode: ExtractionMode = ExtractionMode.DETERMINISTIC_DEMO
     compliance_passed: bool = False
     compliance_violations: List[str] = Field(default_factory=list)
     dispute_email_draft: Optional[str] = None

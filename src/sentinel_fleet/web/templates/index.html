@@ -67,7 +67,14 @@
       <div class="showcase-box">
         <div class="showcase-header">
           <h3>⚡ OmniLedger Live Demo Trigger (Taskmaster &amp; Model Armor)</h3>
-          <div id="process-status"></div>
+          <div class="showcase-status">
+            <span id="extraction-mode-badge"
+                  class="badge-status {% if gemini_live %}badge-ok{% else %}badge-warn{% endif %}"
+                  title="{% if gemini_live %}GEMINI_API_KEY is set: documents are extracted by {{ gemini_model }}{% else %}No GEMINI_API_KEY: extraction falls back to deterministic demo data{% endif %}">
+              {% if gemini_live %}Gemini Live{% else %}Demo Mode{% endif %}
+            </span>
+            <div id="process-status"></div>
+          </div>
         </div>
         <p class="item-desc">
           Wähle einen Testfall, um die synchrone und asynchrone Multi-Agenten-Pipeline auf Google Cloud Run auszuführen:
@@ -89,6 +96,11 @@
             <b>🛡️ 4. Prompt Injection Attack</b>
             <span>Model Armor Interception &amp; Agenten-Quarantäne</span>
           </div>
+        </div>
+        <div class="upload-row">
+          <label for="invoice-upload">Oder eigenen Beleg hochladen (PDF, PNG, JPG, TXT):</label>
+          <input type="file" id="invoice-upload" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt" class="text-input">
+          <button class="btn btn-primary btn-sm" onclick="processInvoiceUpload()">⬆️ Beleg verarbeiten</button>
         </div>
       </div>
 

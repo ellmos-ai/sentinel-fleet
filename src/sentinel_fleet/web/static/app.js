@@ -40,12 +40,31 @@ function toggleModal(modalId) {
 }
 
 // Live Showcase & Workflow Triggers
-async function processInvoicePreset(presetType) {
+// API-supplied values are written via textContent, never interpolated into markup.
+function setProcessStatus(text, badgeClass) {
   const statusDiv = document.getElementById("process-status");
-  statusDiv.innerHTML = `<span class="badge-status badge-warn">⏳ Dispatching to Fleet: ${presetType}...</span>`;
+  if (!statusDiv) return;
+  statusDiv.replaceChildren();
+  const badge = document.createElement("span");
+  badge.className = `badge-status ${badgeClass}`;
+  badge.textContent = text;
+  statusDiv.appendChild(badge);
+}
 
-  const formData = new FormData();
-  formData.append("preset_type", presetType);
+// Reflects whether the last extraction ran on Gemini or on deterministic demo data.
+function updateExtractionModeBadge(mode) {
+  const badge = document.getElementById("extraction-mode-badge");
+  if (!badge || !mode) return;
+  const isLive = mode !== "deterministic-demo";
+  badge.className = `badge-status ${isLive ? "badge-ok" : "badge-warn"}`;
+  badge.textContent = isLive ? "Gemini Live" : "Demo Mode";
+  badge.title = isLive
+    ? `Last extraction produced by ${mode}`
+    : "Last extraction produced by deterministic demo data (no live model call)";
+}
+
+async function dispatchInvoiceProcessing(formData, label) {
+  setProcessStatus(`⏳ Dispatching to Fleet: ${label}...`, "badge-warn");
 
   try {
     const res = await fetch("/api/omniledger/process", {
@@ -55,15 +74,37 @@ async function processInvoicePreset(presetType) {
 
     const data = await res.json();
     if (res.ok) {
-      statusDiv.innerHTML = `<span class="badge-status badge-ok">✅ Processed Task: ${data.task_id} (Status: ${data.invoice.status})</span>`;
+      updateExtractionModeBadge(data.extraction_mode);
+      setProcessStatus(
+        `✅ Processed Task: ${data.task_id} (Status: ${data.invoice.status}, Mode: ${data.extraction_mode})`,
+        "badge-ok"
+      );
       setTimeout(() => location.reload(), 1200);
     } else {
-      statusDiv.innerHTML = `<span class="badge-status badge-danger">🛡️ ${data.reason || "Execution Blocked by Model Armor"}</span>`;
+      setProcessStatus(`🛡️ ${data.reason || "Execution Blocked by Model Armor"}`, "badge-danger");
       setTimeout(() => location.reload(), 1800);
     }
   } catch (err) {
-    statusDiv.innerHTML = `<span class="badge-status badge-danger">❌ Error: ${err.message}</span>`;
+    setProcessStatus(`❌ Error: ${err.message}`, "badge-danger");
   }
+}
+
+async function processInvoicePreset(presetType) {
+  const formData = new FormData();
+  formData.append("preset_type", presetType);
+  await dispatchInvoiceProcessing(formData, presetType);
+}
+
+async function processInvoiceUpload() {
+  const input = document.getElementById("invoice-upload");
+  if (!input || !input.files || input.files.length === 0) {
+    setProcessStatus("⚠️ Select a document first", "badge-warn");
+    return;
+  }
+  const formData = new FormData();
+  formData.append("file", input.files[0]);
+  formData.append("preset_type", "upload");
+  await dispatchInvoiceProcessing(formData, input.files[0].name);
 }
 
 // Ticket Master HITL Approvals
