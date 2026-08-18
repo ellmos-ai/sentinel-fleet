@@ -177,9 +177,18 @@ The entire codebase is validated by a rigorous Pytest test suite covering unit l
 python -m pytest tests -v
 ```
 
-### Test Results (27/27 Passed — 100% Green):
+### Test Results (59/59 Passed — 100% Green):
+
+The roster below lists 53 test functions; the seven parametrised cases of
+`test_settings_read_environment_overrides` are named once and counted individually above.
+
 * `test_gateway_enforces_tool_scoping` — PASSED
+* `test_gateway_denies_forbidden_tool_by_permission_registry` — PASSED
+* `test_gateway_locks_quarantined_agent` — PASSED
 * `test_gateway_triggers_hitl_approval_for_ask_permission` — PASSED
+* `test_sources_contain_no_german_outside_whitelist` — PASSED
+* `test_whitelist_has_no_stale_entries` — PASSED
+* `test_templates_declare_english_language` — PASSED
 * `test_component_v1_yaml_loader_and_32_skills` — PASSED
 * `test_skill_not_found_error` — PASSED
 * `test_async_model_armor_non_blocking_and_recursion` — PASSED
@@ -201,10 +210,31 @@ python -m pytest tests -v
 * `test_model_armor_sanitizes_pii_and_secrets` — PASSED
 * `test_valid_invoice_flow` — PASSED
 * `test_missing_vat_triggers_dispute_loop` — PASSED
+* `test_dispute_draft_embeds_retrieved_memory_context` — PASSED
 * `test_math_error_triggers_compliance_block` — PASSED
+* `test_model_tiers_are_gemini_35_or_newer` — PASSED
+* `test_router_selects_fast_tier_by_default` — PASSED
+* `test_router_escalates_on_high_complexity` — PASSED
+* `test_router_honours_a_custom_strategy` — PASSED
+* `test_default_model_setting_is_gemini_35` — PASSED
+* `test_settings_read_environment_overrides` — PASSED
+* `test_cloud_trace_flag_defaults_to_false` — PASSED
+* `test_local_store_crud_roundtrip` — PASSED
+* `test_local_store_persists_and_reloads` — PASSED
+* `test_get_store_returns_local_store_outside_production` — PASSED
+* `test_firestore_store_uses_the_cloud_client` — PASSED
+* `test_firestore_store_falls_back_when_the_client_is_unavailable` — PASSED
+* `test_firestore_store_survives_a_failing_client` — PASSED
 * `test_health_endpoint` — PASSED
-* `test_schaltplan_renders_html` — PASSED
+* `test_blueprint_renders_html` — PASSED
 * `test_omniledger_process_api` — PASSED
+* `test_ticket_create_and_approve` — PASSED
+* `test_contact_create` — PASSED
+* `test_prompt_create_and_version` — PASSED
+* `test_skills_listing` — PASSED
+* `test_task_create_is_queued_not_executed` — PASSED
+* `test_quarantine_release_after_model_armor_block` — PASSED
+* `test_telemetry_status_reports_real_exporter` — PASSED
 
 ---
 
