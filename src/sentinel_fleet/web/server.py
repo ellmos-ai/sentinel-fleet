@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sentinel_fleet.chat import export as chat_export
 from sentinel_fleet.chat.backends import SUPPORTED_MODELS
 from sentinel_fleet.chat.service import chat_service
+from sentinel_fleet.web.blueprint_graph import build_circuit
 from sentinel_fleet.core.config import settings
 from sentinel_fleet.core.identity import AgentStatus
 from sentinel_fleet.core.gateway import gateway
@@ -253,7 +254,9 @@ async def blueprint_view(request: Request):
         context={
             "app_name": settings.app_name,
             "project": settings.google_cloud_project,
-            "domains": domain_registry.list_all()
+            "domains": domain_registry.list_all(),
+            # Parsed from the source tree on every request, so the circuit cannot go stale.
+            "circuit": build_circuit()
         }
     )
 

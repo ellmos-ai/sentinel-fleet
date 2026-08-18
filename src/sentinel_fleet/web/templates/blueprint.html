@@ -37,6 +37,51 @@
       color: var(--ink-2);
       font-family: var(--font-mono);
     }
+    /* Circuit view: schematic traces, not curves. Colour is the pillar index only. */
+    .circuit-frame {
+      background: var(--surface);
+      border: 1px solid var(--rule);
+      border-radius: var(--r-2);
+      padding: var(--s-3);
+      overflow-x: auto;
+    }
+    .circuit-svg { display: block; min-width: 900px; }
+    .circuit-svg .wire { stroke: var(--rule-strong); stroke-width: 1.1; fill: none; }
+    .circuit-svg .node-box { fill: var(--surface-sunk); stroke: var(--rule); stroke-width: 1; }
+    .circuit-svg .node-spine { stroke-width: 2.5; }
+    .circuit-svg .node-label {
+      font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink);
+      dominant-baseline: middle;
+    }
+    .circuit-svg .node-package {
+      font-family: var(--font-mono); font-size: 8.5px; fill: var(--ink-3);
+      dominant-baseline: middle;
+    }
+    .circuit-svg .node { cursor: default; }
+    .pillar-control { stroke: var(--pillar-control); }
+    .pillar-conductor { stroke: var(--pillar-conductor); }
+    .pillar-memory { stroke: var(--pillar-memory); }
+    .pillar-uas { stroke: var(--pillar-uas); }
+    .pillar-domain { stroke: var(--pillar-domain); }
+    .pillar-web { stroke: var(--rule-strong); }
+    /* Hovering a node dims everything that is not directly wired to it. */
+    .circuit-svg.has-focus .node { opacity: 0.16; }
+    .circuit-svg.has-focus .wire { opacity: 0.06; }
+    .circuit-svg.has-focus .node.is-focus,
+    .circuit-svg.has-focus .node.is-neighbour { opacity: 1; }
+    .circuit-svg.has-focus .wire.is-linked { opacity: 1; stroke: var(--accent); stroke-width: 1.8; }
+    .circuit-svg .node.is-focus .node-box { stroke: var(--accent); stroke-width: 1.6; }
+    .legend { display: flex; flex-wrap: wrap; gap: var(--s-3); margin-top: var(--s-3); }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-2); }
+    .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+    .view-switch { display: inline-flex; border: 1px solid var(--rule-strong); border-radius: var(--r-1); overflow: hidden; }
+    .view-switch button {
+      appearance: none; background: var(--surface); border: none; border-right: 1px solid var(--rule);
+      color: var(--ink-2); font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase; padding: 7px 14px; cursor: pointer;
+    }
+    .view-switch button:last-child { border-right: none; }
+    .view-switch button.active { background: var(--accent); color: var(--accent-ink); }
   </style>
 </head>
 <body>
@@ -49,11 +94,15 @@
     <div class="section-head">
       <div>
         <h2>Architecture blueprint</h2>
-        <p>How a document travels the platform: ingestion, guardrail, gateway, conductor, memory, ledger, trace.</p>
+        <p id="blueprint-caption">How a document travels the platform: ingestion, guardrail, gateway, conductor, memory, ledger, trace.</p>
+      </div>
+      <div class="view-switch">
+        <button id="view-btn-flow" class="active" onclick="showBlueprintView('flow')">Pipeline</button>
+        <button id="view-btn-circuit" onclick="showBlueprintView('circuit')">Module circuit</button>
       </div>
     </div>
 
-    <div class="card">
+    <div id="blueprint-view-flow" class="card">
       
       <!-- STEP 1: Ingestion -->
       <div class="flow-step">
@@ -156,6 +205,57 @@
       </div>
 
     </div>
+    <div id="blueprint-view-circuit" style="display: none;">
+      <div class="card" style="margin-bottom: var(--s-4)">
+        <div class="card-header">
+          <h3>Module interdependency circuit</h3>
+          <span class="badge-status badge-info numeric">{{ circuit.module_count }} modules / {{ circuit.wire_count }} imports</span>
+        </div>
+        <p class="item-desc">
+          Read left to right: a module sits left of everything it imports. Every node is a file in
+          <code>src/sentinel_fleet</code> and every trace is an import statement parsed from it, so this
+          diagram is generated from the code on each request and cannot drift out of date. Hover a
+          module to isolate what it wires into.
+        </p>
+        <div class="legend">
+          <span><i style="background: var(--pillar-control)"></i> control</span>
+          <span><i style="background: var(--pillar-conductor)"></i> conductor</span>
+          <span><i style="background: var(--pillar-memory)"></i> memory</span>
+          <span><i style="background: var(--pillar-uas)"></i> uas</span>
+          <span><i style="background: var(--pillar-domain)"></i> domain</span>
+          <span><i style="background: var(--rule-strong)"></i> composition root</span>
+        </div>
+      </div>
+
+      <div class="circuit-frame">
+        <svg id="circuit-svg" class="circuit-svg"
+             viewBox="0 0 {{ circuit.width }} {{ circuit.height }}"
+             width="{{ circuit.width }}" height="{{ circuit.height }}"
+             role="img" aria-label="Module interdependency circuit">
+          <g id="circuit-wires">
+            {% for w in circuit.wires %}
+            <path class="wire" d="{{ w.path }}"
+                  data-source="{{ w.source }}" data-target="{{ w.target }}"></path>
+            {% endfor %}
+          </g>
+          <g id="circuit-nodes">
+            {% for n in circuit.nodes %}
+            <g class="node" data-id="{{ n.id }}"
+               data-neighbours="{{ (n.imports + n.imported_by)|join(' ') }}">
+              <title>{{ n.id }} — imports {{ n.imports|length }}, imported by {{ n.imported_by|length }}</title>
+              <rect class="node-box" x="{{ n.x }}" y="{{ n.y }}"
+                    width="{{ n.width }}" height="{{ n.height }}" rx="3"></rect>
+              <line class="node-spine pillar-{{ n.pillar }}"
+                    x1="{{ n.x }}" y1="{{ n.y + 2 }}" x2="{{ n.x }}" y2="{{ n.y + n.height - 2 }}"></line>
+              <text class="node-label" x="{{ n.x + 10 }}" y="{{ n.y + 13 }}">{{ n.label }}</text>
+              <text class="node-package" x="{{ n.x + 10 }}" y="{{ n.y + 25 }}">{{ n.package }}</text>
+            </g>
+            {% endfor %}
+          </g>
+        </svg>
+      </div>
+    </div>
+
   </div>
 
   <script src="/static/app.js"></script>

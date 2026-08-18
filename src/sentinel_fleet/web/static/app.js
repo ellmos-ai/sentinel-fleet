@@ -700,3 +700,73 @@ function submitSkillVersion(event) {
     "Could not save the skill version"
   );
 }
+
+// ---------------------------------------------------------------------------
+// Blueprint circuit. Hovering a module isolates the modules it is wired to.
+// ---------------------------------------------------------------------------
+
+function showBlueprintView(view) {
+  const flow = document.getElementById("blueprint-view-flow");
+  const circuit = document.getElementById("blueprint-view-circuit");
+  if (!flow || !circuit) return;
+
+  const isCircuit = view === "circuit";
+  flow.style.display = isCircuit ? "none" : "block";
+  circuit.style.display = isCircuit ? "block" : "none";
+  document.getElementById("view-btn-flow").classList.toggle("active", !isCircuit);
+  document.getElementById("view-btn-circuit").classList.toggle("active", isCircuit);
+
+  const caption = document.getElementById("blueprint-caption");
+  if (caption) {
+    caption.textContent = isCircuit
+      ? "Which module imports which, parsed from the source tree on every request."
+      : "How a document travels the platform: ingestion, guardrail, gateway, conductor, memory, ledger, trace.";
+  }
+  localStorage.setItem("sentinel_blueprint_view", view);
+}
+
+function initCircuit() {
+  const svg = document.getElementById("circuit-svg");
+  if (!svg) return;
+
+  const nodes = Array.from(svg.querySelectorAll(".node"));
+  const wires = Array.from(svg.querySelectorAll(".wire"));
+
+  const clear = () => {
+    svg.classList.remove("has-focus");
+    nodes.forEach(n => n.classList.remove("is-focus", "is-neighbour"));
+    wires.forEach(w => w.classList.remove("is-linked"));
+  };
+
+  nodes.forEach(node => {
+    const id = node.getAttribute("data-id");
+    const neighbours = new Set((node.getAttribute("data-neighbours") || "").split(" ").filter(Boolean));
+
+    const focus = () => {
+      svg.classList.add("has-focus");
+      nodes.forEach(other => {
+        const otherId = other.getAttribute("data-id");
+        other.classList.toggle("is-focus", otherId === id);
+        other.classList.toggle("is-neighbour", neighbours.has(otherId));
+      });
+      wires.forEach(wire => {
+        wire.classList.toggle(
+          "is-linked",
+          wire.getAttribute("data-source") === id || wire.getAttribute("data-target") === id
+        );
+      });
+    };
+
+    node.addEventListener("mouseenter", focus);
+    node.addEventListener("focus", focus);
+    node.addEventListener("mouseleave", clear);
+    node.addEventListener("blur", clear);
+    // Reachable by keyboard, so the highlight is not mouse-only.
+    node.setAttribute("tabindex", "0");
+  });
+
+  svg.addEventListener("mouseleave", clear);
+  showBlueprintView(localStorage.getItem("sentinel_blueprint_view") || "flow");
+}
+
+document.addEventListener("DOMContentLoaded", initCircuit);
