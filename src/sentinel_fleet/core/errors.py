@@ -73,3 +73,34 @@ class QuarantineLockError(SentinelFleetError):
     """Raised when an agent in quarantine attempts an action."""
     def __init__(self, agent_id: str, reason: str):
         super().__init__(f"Agent '{agent_id}' is locked in QUARANTINE: {reason}", {"agent_id": agent_id, "reason": reason})
+
+
+class TemplateNotFoundError(SentinelFleetError):
+    """Raised when a requested task template does not exist."""
+    def __init__(self, template_id: str):
+        super().__init__(
+            f"Task template '{template_id}' was not found in the registry.", {"template_id": template_id}
+        )
+
+
+class TemplateHasBindingsError(SentinelFleetError):
+    """A template stays a mere skeleton while a routine or schedule is still attached to it.
+
+    Deleting it now would silently orphan the binding rows, so both must be removed first.
+    """
+    def __init__(self, template_id: str, bindings: list):
+        super().__init__(
+            f"Task template '{template_id}' still has bindings attached ({', '.join(bindings)}). "
+            "Remove the routine and schedule bindings before deleting the template.",
+            {"template_id": template_id, "bindings": bindings}
+        )
+
+
+class TemplatePermissionError(SentinelFleetError):
+    """Raised when a non-owner tries to delete a shared template instead of only hiding it."""
+    def __init__(self, template_id: str, requested_by: str, owner: str):
+        super().__init__(
+            f"'{requested_by}' cannot delete template '{template_id}': only its owner "
+            f"('{owner}') may delete it. A shared template can only be removed from your own view.",
+            {"template_id": template_id, "requested_by": requested_by, "owner": owner}
+        )

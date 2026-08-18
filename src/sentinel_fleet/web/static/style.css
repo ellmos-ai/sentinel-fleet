@@ -530,6 +530,22 @@ a { color: var(--accent); }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: var(--s-1); }
 
+/* ---------- Task template runtime status: derived, never stored (see uas/routines.py) ---------- */
+
+.rt-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--rule-strong);
+}
+
+.rt-dot-running { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-wash); }
+.rt-dot-preparing { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-wash); }
+
+.rt-badges { display: inline-flex; gap: 4px; margin-left: var(--s-2); color: var(--ink-3); vertical-align: middle; }
+.rt-badges .icon { width: 14px; height: 14px; }
+
 .chip {
   font-family: var(--font-mono);
   font-size: 10.5px;

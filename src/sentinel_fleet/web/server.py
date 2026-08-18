@@ -34,11 +34,16 @@ from sentinel_fleet.core.errors import (
     SecurityViolationError,
     QuarantineLockError,
     TaskStateTransitionError,
-    TicketResolutionError
+    TicketResolutionError,
+    TemplateNotFoundError,
+    TemplateHasBindingsError,
+    TemplatePermissionError
 )
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.uas.ticket_master import ticket_master, TicketStatus, TicketPriority
 from sentinel_fleet.uas.task_master import task_master, TaskState, TaskRecord
+from sentinel_fleet.uas.task_templates import task_template_registry
+from sentinel_fleet.uas import routines
 from sentinel_fleet.memory.bank import memory_bank
 from sentinel_fleet.memory.gardener_rag import gardener
 from sentinel_fleet.core.telemetry import telemetry
@@ -78,12 +83,14 @@ app = FastAPI(
 @app.exception_handler(TicketNotFoundError)
 @app.exception_handler(ContactNotFoundError)
 @app.exception_handler(SkillNotFoundError)
+@app.exception_handler(TemplateNotFoundError)
 async def not_found_exception_handler(request: Request, exc: SentinelFleetError):
     return JSONResponse(status_code=404, content={"error": exc.message, "details": exc.details})
 
 
 @app.exception_handler(ContactOptOutViolationError)
-async def opt_out_violation_handler(request: Request, exc: ContactOptOutViolationError):
+@app.exception_handler(TemplatePermissionError)
+async def opt_out_violation_handler(request: Request, exc: SentinelFleetError):
     return JSONResponse(status_code=403, content={"error": exc.message, "details": exc.details})
 
 
@@ -99,8 +106,10 @@ async def zero_trust_violation_handler(request: Request, exc: SentinelFleetError
 
 @app.exception_handler(TaskStateTransitionError)
 @app.exception_handler(TicketResolutionError)
+@app.exception_handler(TemplateHasBindingsError)
 async def conflicting_state_handler(request: Request, exc: SentinelFleetError):
-    """Re-resolving a settled task or ticket is a conflict, not a bad request."""
+    """Re-resolving a settled task or ticket, or deleting a still-bound template, is a
+    conflict with the current state, not a bad request."""
     return JSONResponse(status_code=409, content={"error": exc.message, "details": exc.details})
 
 
@@ -126,7 +135,21 @@ def _clock(epoch_seconds: float) -> str:
     return time.strftime("%H:%M:%S", time.localtime(epoch_seconds))
 
 
+def _when(iso_value: Optional[str]) -> str:
+    """Readable form of a routine/schedule due-timestamp. Stays in UTC deliberately: this
+    deployment tracks no operator timezone, and silently switching to server-local time would
+    misreport when a routine actually fires."""
+    if not iso_value:
+        return "-"
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(iso_value).strftime("%Y-%m-%d %H:%M UTC")
+    except ValueError:
+        return iso_value
+
+
 templates.env.filters["clock"] = _clock
+templates.env.filters["when"] = _when
 
 
 # In-memory session tracking for active demo documents
@@ -218,6 +241,34 @@ def _skill_catalog() -> List[Dict[str, Any]]:
     ]
 
 
+def _routine_catalog(viewer: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Template rows for the Task queue card: every derived field (badges, colour, next due),
+    pre-sorted status-first-then-group, so the template renders it without deriving anything.
+    `viewer` set filters out templates that viewer removed from their own view (still intact
+    for the owner and everyone else - see TaskTemplateRegistry.remove_for_viewer).
+    """
+    entries = routines.sorted_catalog(task_template_registry.list_all(viewer=viewer))
+    rows = []
+    for e in entries:
+        template = e["template"]
+        rows.append({
+            "template_id": template.template_id,
+            "name": template.name,
+            "owner": template.owner,
+            "group": template.group,
+            "assigned_agent": template.assigned_agent,
+            "prompt_source": template.prompt_source,
+            "requires_approval": template.requires_approval,
+            "symbols": e["symbols"],
+            "runtime_status": e["runtime_status"],
+            "next_due_at": e["next_due_at"],
+            "can_delete": e["can_delete"],
+            "routine": e["routine"].model_dump() if e["routine"] else None,
+            "schedule": e["schedule"].model_dump() if e["schedule"] else None,
+        })
+    return rows
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index_view(request: Request):
     """Render the Main Operator Control Dashboard."""
@@ -239,6 +290,8 @@ async def index_view(request: Request):
             "pending_tickets": ticket_master.get_pending_tickets(),
             "tasks": _tail(task_master.list_all()),
             "task_total": len(task_master.list_all()),
+            "task_templates": task_template_registry.list_all(),
+            "routine_catalog": _routine_catalog(),
             "memories": _tail(memory_bank.list_all()),
             "prompts": prompt_registry.list_all(),
             "skills": skill_registry.list_all(),
@@ -618,6 +671,166 @@ async def api_create_task(
         "note": "queued for execution",
         "task": task.model_dump()
     }
+
+
+# ---------------------------------------------------------
+# API Endpoints for Task Templates & Routines
+#
+# A TaskTemplate describes *what* to run; a RoutineBinding or ScheduleBinding decides *when*
+# (see uas/task_templates.py and uas/routines.py). Deleting a template requires both bindings
+# to be gone first - `TemplateHasBindingsError` (409) is the guard for that.
+# ---------------------------------------------------------
+
+def _schedule_spec_from_form(
+    kind: str,
+    interval_seconds: Optional[int],
+    daily_time: Optional[str],
+    cron_expression: Optional[str],
+    timezone_name: str
+) -> Dict[str, Any]:
+    if kind == "interval":
+        return {"kind": "interval", "seconds": interval_seconds or 0}
+    if kind == "daily":
+        return {"kind": "daily", "time": daily_time or "00:00", "timezone": timezone_name}
+    if kind == "cron":
+        return {"kind": "cron", "expression": cron_expression or "", "timezone": timezone_name}
+    raise HTTPException(status_code=400, detail=f"Unknown routine kind '{kind}'. Use interval, daily or cron.")
+
+
+@app.get("/api/task-templates")
+async def api_list_task_templates(viewer: Optional[str] = None):
+    return _routine_catalog(viewer=viewer)
+
+
+@app.post("/api/task-templates")
+async def api_create_task_template(
+    name: str = Form(...),
+    owner: str = Form("operator"),
+    prompt_source: str = Form("custom"),
+    prompt_id: str = Form(""),
+    prompt_version: str = Form(""),
+    custom_prompt_text: str = Form(""),
+    skill_ids: str = Form(""),
+    assigned_agent: str = Form("agent:task-solver"),
+    visibility: str = Form("own"),
+    requires_approval: bool = Form(False),
+    group: str = Form("")
+):
+    template = task_template_registry.create_template(
+        name=name,
+        owner=owner,
+        prompt_source=prompt_source,
+        prompt_id=prompt_id or None,
+        prompt_version=prompt_version or None,
+        custom_prompt_text=custom_prompt_text or None,
+        skill_ids=[s.strip() for s in skill_ids.split(",") if s.strip()],
+        assigned_agent=assigned_agent,
+        visibility=visibility,
+        requires_approval=requires_approval,
+        group=group or None
+    )
+    return {"status": "created", "template": template.model_dump()}
+
+
+@app.get("/api/task-templates/{template_id}")
+async def api_get_task_template(template_id: str):
+    template = task_template_registry.get_template(template_id)
+    if not template:
+        raise TemplateNotFoundError(template_id)
+    return {
+        "template": template.model_dump(),
+        "catalog": routines.catalog_entry(template),
+        # The "Verlauf" (run history): no second store, just this template's own TaskRecords.
+        "runs": [r.model_dump() for r in task_master.list_by_template(template_id)]
+    }
+
+
+@app.delete("/api/task-templates/{template_id}")
+async def api_delete_task_template(template_id: str, requested_by: str = "operator"):
+    routines.delete_template(template_id, requested_by=requested_by)
+    return {"status": "deleted", "template_id": template_id}
+
+
+@app.post("/api/task-templates/{template_id}/remove-for-me")
+async def api_remove_task_template_for_viewer(template_id: str, viewer: str = Form("operator")):
+    """Hides a shared template from one viewer's own list without touching the template
+    itself - "remove a shared item" is not "delete it" (concept doc, section A.4)."""
+    template = task_template_registry.remove_for_viewer(template_id, viewer)
+    return {"status": "removed_for_viewer", "template": template.model_dump()}
+
+
+@app.post("/api/task-templates/{template_id}/enqueue")
+async def api_enqueue_task_template(template_id: str):
+    task = await routines.enqueue_template(template_id, triggered_by="manual")
+    return {"status": "enqueued", "task": task.model_dump()}
+
+
+@app.put("/api/task-templates/{template_id}/routine")
+async def api_bind_routine(
+    template_id: str,
+    kind: str = Form(...),
+    interval_seconds: Optional[int] = Form(None),
+    daily_time: Optional[str] = Form(None),
+    cron_expression: Optional[str] = Form(None),
+    timezone_name: str = Form("UTC"),
+    miss_policy: str = Form("skip"),
+    enabled: bool = Form(True)
+):
+    if not task_template_registry.get_template(template_id):
+        raise TemplateNotFoundError(template_id)
+    spec = _schedule_spec_from_form(kind, interval_seconds, daily_time, cron_expression, timezone_name)
+    binding = routines.routine_binding_registry.set_binding(
+        template_id, spec, miss_policy=miss_policy, enabled=enabled
+    )
+    return {"status": "bound", "routine": binding.model_dump()}
+
+
+@app.delete("/api/task-templates/{template_id}/routine")
+async def api_unbind_routine(template_id: str):
+    removed = routines.routine_binding_registry.remove_for_template(template_id)
+    return {"status": "removed" if removed else "not_found"}
+
+
+@app.put("/api/task-templates/{template_id}/schedule")
+async def api_bind_schedule(
+    template_id: str,
+    due_at: str = Form(...),
+    has_time: bool = Form(True),
+    miss_policy: str = Form("skip")
+):
+    if not task_template_registry.get_template(template_id):
+        raise TemplateNotFoundError(template_id)
+    binding = routines.schedule_binding_registry.set_binding(
+        template_id, due_at=due_at, has_time=has_time, miss_policy=miss_policy
+    )
+    return {"status": "bound", "schedule": binding.model_dump()}
+
+
+@app.delete("/api/task-templates/{template_id}/schedule")
+async def api_unbind_schedule(template_id: str):
+    removed = routines.schedule_binding_registry.remove_pending_for_template(template_id)
+    return {"status": "removed" if removed else "not_found"}
+
+
+@app.post("/api/routines/fire")
+async def api_fire_routines(request: Request):
+    """Idempotent trigger target for Google Cloud Scheduler (concept doc, section C.4).
+
+    Guarded by a shared-secret header when `ROUTINES_FIRE_TOKEN` is set. Without that env var
+    the endpoint stays open and logs a warning - acceptable for a local demo, not for a real
+    deployment, where Cloud Scheduler should instead call it with an OIDC identity token.
+    """
+    expected_token = os.getenv("ROUTINES_FIRE_TOKEN", "")
+    if expected_token:
+        if request.headers.get("X-Fire-Token", "") != expected_token:
+            raise HTTPException(status_code=401, detail="Missing or invalid X-Fire-Token header")
+    else:
+        logger.warning(
+            "POST /api/routines/fire was called without ROUTINES_FIRE_TOKEN set - the endpoint "
+            "is unauthenticated. Set ROUTINES_FIRE_TOKEN (and have Cloud Scheduler send it, or "
+            "switch to an OIDC-authenticated Cloud Run invocation) before a real deployment."
+        )
+    return await routines.fire_due()
 
 
 # ---------------------------------------------------------

@@ -485,6 +485,76 @@
         {% endfor %}
       </div>
 
+      <div class="card" style="margin-bottom: var(--s-5)">
+        <div class="card-header">
+          <h3>Task templates</h3>
+          <button class="btn btn-sm btn-primary" onclick="toggleModal('modal-new-template')">
+            <svg class="icon"><use href="#i-plus"/></svg> New task template
+          </button>
+        </div>
+        <p class="item-desc" style="padding: 0 var(--s-4); margin-top: calc(-1 * var(--s-2))">
+          Everything is a task: a template is a prompt plus skills. Attach a routine (<svg class="icon"><use href="#i-gear"/></svg>) or a schedule (<svg class="icon"><use href="#i-clock"/></svg>) to make it recurring or dated - remove both to make it deletable again.
+        </p>
+        {% if not task_templates %}
+        <div class="empty-state">
+          <svg class="icon icon-lg"><use href="#i-empty"/></svg>
+          <h4>No task templates yet</h4>
+          <p>Create one, enqueue it once to see it run, then attach a routine or a schedule to make it fire on its own.</p>
+        </div>
+        {% else %}
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th></th><th>Name</th><th>Group</th><th>Agent</th><th>Next due</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              {% for row in routine_catalog %}
+              <tr>
+                <td>
+                  <span
+                    class="rt-dot{% if row.runtime_status == 'running' %} rt-dot-running{% elif row.runtime_status == 'preparing' %} rt-dot-preparing{% endif %}"
+                    title="{{ row.runtime_status or 'no active run or upcoming trigger' }}"
+                  ></span>
+                </td>
+                <td>
+                  <b>{{ row.name }}</b>
+                  {% if row.symbols.gear or row.symbols.clock %}
+                  <span class="rt-badges">
+                    {% if row.symbols.gear %}<svg class="icon" title="Routine attached"><use href="#i-gear"/></svg>{% endif %}
+                    {% if row.symbols.clock %}<svg class="icon" title="Scheduled"><use href="#i-clock"/></svg>{% endif %}
+                  </span>
+                  {% endif %}
+                  {% if row.requires_approval %}<div class="item-meta">requires approval</div>{% endif %}
+                </td>
+                <td>{% if row.group %}<span class="chip">{{ row.group }}</span>{% else %}<span class="item-meta">-</span>{% endif %}</td>
+                <td class="item-meta numeric">{{ row.assigned_agent }}</td>
+                <td class="item-meta numeric">{{ row.next_due_at|when }}</td>
+                <td>
+                  <div class="item-actions" style="margin: 0">
+                    <button class="btn btn-sm" onclick='enqueueTaskTemplate({{ row.template_id|tojson }})'>Enqueue now</button>
+                    {% if row.routine %}
+                    <button class="btn btn-sm" onclick='removeRoutineBinding({{ row.template_id|tojson }})'>Remove routine</button>
+                    {% else %}
+                    <button class="btn btn-sm" onclick='openRoutineModal({{ row.template_id|tojson }}, {{ row.name|tojson }})'>Add routine</button>
+                    {% endif %}
+                    {% if row.schedule %}
+                    <button class="btn btn-sm" onclick='removeScheduleBinding({{ row.template_id|tojson }})'>Remove schedule</button>
+                    {% else %}
+                    <button class="btn btn-sm" onclick='openScheduleModal({{ row.template_id|tojson }}, {{ row.name|tojson }})'>Add schedule</button>
+                    {% endif %}
+                    {% if row.can_delete %}
+                    <button class="btn btn-sm btn-reject" onclick='deleteTaskTemplate({{ row.template_id|tojson }}, {{ row.owner|tojson }})'>Delete</button>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </div>
+
       <div class="card">
         <div class="card-header">
           <h3>Task queue</h3>
@@ -500,13 +570,18 @@
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr><th>Task ID</th><th>Task</th><th>Agent</th><th>State</th><th>Evidence</th></tr>
+              <tr><th>Task ID</th><th>Task</th><th>Origin</th><th>Agent</th><th>State</th><th>Evidence</th></tr>
             </thead>
             <tbody>
               {% for t in tasks %}
               <tr>
                 <td><code>{{ t.task_id }}</code></td>
                 <td><b>{{ t.name }}</b></td>
+                <td class="item-meta">
+                  {% if t.source_template_id %}
+                  <span class="chip">{{ t.triggered_by }}</span> <span class="numeric">{{ t.source_template_id }}</span>
+                  {% else %}manual{% endif %}
+                </td>
                 <td class="numeric">{{ t.assigned_agent }}</td>
                 <td>
                   <span class="badge-status {% if t.state.value == 'completed' %}badge-ok{% elif t.state.value == 'failed' %}badge-danger{% elif t.state.value == 'queued' %}badge-info{% else %}badge-warn{% endif %}">
@@ -801,6 +876,173 @@
         <div class="form-actions">
           <button type="button" class="btn" onclick="toggleModal('modal-task')">Cancel</button>
           <button type="submit" class="btn btn-primary">Queue task</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-new-template" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>New task template</h3>
+        <button class="btn btn-sm btn-icon" onclick="toggleModal('modal-new-template')" aria-label="Close">
+          <svg class="icon"><use href="#i-close"/></svg>
+        </button>
+      </div>
+      <form onsubmit="submitNewTaskTemplate(event)">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" name="name" class="text-input" placeholder="Weekly VAT compliance sweep" required>
+        </div>
+        <div class="form-group">
+          <label>Owner</label>
+          <input type="text" name="owner" class="text-input" value="operator">
+        </div>
+        <div class="form-group">
+          <label>Assigned agent</label>
+          <select name="assigned_agent" class="select-input">
+            {% for a in agents %}<option value="{{ a.agent_id }}" {% if a.agent_id == 'agent:task-solver' %}selected{% endif %}>{{ a.name }} ({{ a.role.value }})</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Prompt source</label>
+          <select id="ntt-prompt-source" name="prompt_source" class="select-input" onchange="onTemplatePromptSourceChange()">
+            <option value="custom">Custom inline prompt</option>
+            <option value="library">From the prompt library</option>
+          </select>
+        </div>
+        <div id="ntt-custom-group" class="form-group">
+          <label>Prompt / instructions</label>
+          <textarea name="custom_prompt_text" class="textarea-input" placeholder="Check every open invoice for § 14 UStG compliance and summarise defects."></textarea>
+        </div>
+        <div id="ntt-library-group" style="display: none;">
+          <div class="form-group">
+            <label>Prompt template</label>
+            <select id="ntt-prompt-id" name="prompt_id" class="select-input" onchange="onTemplateLibraryPromptChange()">
+              <option value="">None</option>
+              {% for p in prompts %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Template version</label>
+            <select id="ntt-prompt-version" name="prompt_version" class="select-input" disabled>
+              <option value="">Pick a template first</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Skills</label>
+          <div class="picker" style="max-height: 150px;">
+            {% for s in skills %}
+            <label class="picker-option">
+              <input type="checkbox" class="ntt-skill-box" value="{{ s.skill_id }}">
+              <span class="picker-name">{{ s.name }}</span>
+              <span class="picker-pillar">{{ s.pillar }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          <input type="hidden" name="skill_ids" id="ntt-skill-ids">
+        </div>
+        <div class="form-group">
+          <label>Group</label>
+          <input type="text" name="group" class="text-input" placeholder="compliance">
+        </div>
+        <div class="form-group">
+          <label class="checkbox-row">
+            <input type="checkbox" name="requires_approval" value="true">
+            <span>Requires approval before every run (routes through the approval gate)</span>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn" onclick="toggleModal('modal-new-template')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create template</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-routine" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Add a routine</h3>
+        <button class="btn btn-sm btn-icon" onclick="toggleModal('modal-routine')" aria-label="Close">
+          <svg class="icon"><use href="#i-close"/></svg>
+        </button>
+      </div>
+      <p class="item-meta" id="rt-template-name" style="margin-bottom: var(--s-3)"></p>
+      <form onsubmit="submitRoutineBinding(event)">
+        <input type="hidden" id="rt-template-id">
+        <div class="form-group">
+          <label>Recurrence</label>
+          <select id="rt-kind" name="kind" class="select-input" onchange="onRoutineKindChange()">
+            <option value="interval">Every N seconds</option>
+            <option value="daily">Daily at a fixed time</option>
+            <option value="cron">Cron expression</option>
+          </select>
+        </div>
+        <div class="form-group" id="rt-interval-group">
+          <label>Interval (seconds)</label>
+          <input type="number" name="interval_seconds" class="text-input" min="1" value="3600">
+        </div>
+        <div class="form-group" id="rt-daily-group" style="display: none;">
+          <label>Time of day (UTC unless a timezone is given below)</label>
+          <input type="time" name="daily_time" class="text-input" value="04:00">
+        </div>
+        <div class="form-group" id="rt-cron-group" style="display: none;">
+          <label>Cron expression (5 fields: minute hour day month weekday)</label>
+          <input type="text" name="cron_expression" class="text-input" placeholder="0 8,12,16,20 * * *">
+        </div>
+        <div class="form-group" id="rt-timezone-group" style="display: none;">
+          <label>Timezone</label>
+          <input type="text" name="timezone_name" class="text-input" value="UTC" placeholder="Europe/Berlin">
+        </div>
+        <div class="form-group">
+          <label>If a run was missed (the app was scaled to zero when it was due)</label>
+          <select name="miss_policy" class="select-input">
+            <option value="skip">Skip it - resume counting from now</option>
+            <option value="catch_up">Catch up - run the backlog, one per check</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-row">
+            <input type="checkbox" name="enabled" value="true" checked>
+            <span>Enabled</span>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn" onclick="toggleModal('modal-routine')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save routine</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-schedule" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Add a schedule</h3>
+        <button class="btn btn-sm btn-icon" onclick="toggleModal('modal-schedule')" aria-label="Close">
+          <svg class="icon"><use href="#i-close"/></svg>
+        </button>
+      </div>
+      <p class="item-meta" id="sc-template-name" style="margin-bottom: var(--s-3)"></p>
+      <form onsubmit="submitScheduleBinding(event)">
+        <input type="hidden" id="sc-template-id">
+        <div class="form-group">
+          <label>Due date and time (UTC)</label>
+          <input type="datetime-local" name="due_at" class="text-input" required>
+        </div>
+        <div class="form-group">
+          <label>If the trigger fires late (past the app's grace window)</label>
+          <select name="miss_policy" class="select-input">
+            <option value="skip">Skip it</option>
+            <option value="catch_up">Run it late</option>
+          </select>
+        </div>
+        <input type="hidden" name="has_time" value="true">
+        <div class="form-actions">
+          <button type="button" class="btn" onclick="toggleModal('modal-schedule')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save schedule</button>
         </div>
       </form>
     </div>

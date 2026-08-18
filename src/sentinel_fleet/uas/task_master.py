@@ -37,13 +37,30 @@ class TaskRecord(BaseModel):
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
     error_message: Optional[str] = None
+    # Origin of a run created by the task-templates/routines feature. All four are optional
+    # with a default, so a manually queued task (the pre-existing path) is unaffected. This is
+    # the "view copy" the templates UI reads instead of a second, parallel run table: a run IS
+    # a TaskRecord, just one that carries where it came from.
+    source_template_id: Optional[str] = None
+    source_binding_id: Optional[str] = None
+    triggered_by: str = "manual"  # "manual" | "routine" | "schedule" | "external"
+    scheduled_for: Optional[str] = None
 
 
 class TaskMaster:
     def __init__(self):
         self._store = get_store("tasks", TaskRecord)
 
-    def create_task(self, name: str, assigned_agent: str, input_data: Dict[str, Any]) -> TaskRecord:
+    def create_task(
+        self,
+        name: str,
+        assigned_agent: str,
+        input_data: Dict[str, Any],
+        source_template_id: Optional[str] = None,
+        source_binding_id: Optional[str] = None,
+        triggered_by: str = "manual",
+        scheduled_for: Optional[str] = None
+    ) -> TaskRecord:
         # Collision-free: a counter over a shared store races and repeats ids after deletions
         task_id = f"TASK-{uuid.uuid4().hex[:8].upper()}"
         task = TaskRecord(
@@ -51,10 +68,20 @@ class TaskMaster:
             name=name,
             assigned_agent=assigned_agent,
             state=TaskState.QUEUED,
-            input_data=input_data
+            input_data=input_data,
+            source_template_id=source_template_id,
+            source_binding_id=source_binding_id,
+            triggered_by=triggered_by,
+            scheduled_for=scheduled_for
         )
         self._store.put(task_id, task)
         return task
+
+    def list_by_template(self, template_id: str) -> List[TaskRecord]:
+        """The run history ("Verlauf") of one template - newest first, no second store."""
+        runs = [t for t in self._store.list_all() if t.source_template_id == template_id]
+        runs.sort(key=lambda t: t.created_at, reverse=True)
+        return runs
 
     def get_task(self, task_id: str) -> Optional[TaskRecord]:
         return self._store.get(task_id)

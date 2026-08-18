@@ -717,6 +717,101 @@ function submitSkillVersion(event) {
 }
 
 // ---------------------------------------------------------------------------
+// Task templates: the "everything is a task" foundation, plus the routine and schedule
+// bindings that make one recurring or dated. A template never becomes a different kind of
+// object - see the "Tasks & Routines" concept doc, section A.1.
+// ---------------------------------------------------------------------------
+
+function submitFormWithMethod(event, url, method, failure) {
+  event.preventDefault();
+  postAndReload(url, { method, body: new FormData(event.target) }, failure);
+}
+
+function onTemplatePromptSourceChange() {
+  const isLibrary = document.getElementById("ntt-prompt-source").value === "library";
+  document.getElementById("ntt-custom-group").style.display = isLibrary ? "none" : "block";
+  document.getElementById("ntt-library-group").style.display = isLibrary ? "block" : "none";
+}
+
+function onTemplateLibraryPromptChange() {
+  const promptId = document.getElementById("ntt-prompt-id").value;
+  const versionSelect = document.getElementById("ntt-prompt-version");
+  versionSelect.replaceChildren();
+
+  const prompt = state.prompts.find(p => p.id === promptId);
+  if (!prompt) {
+    versionSelect.disabled = true;
+    versionSelect.appendChild(new Option("Pick a template first", ""));
+    return;
+  }
+
+  versionSelect.disabled = false;
+  prompt.versions.forEach(version => {
+    const option = new Option(`v${version.version_number}`, version.version_number);
+    option.selected = version.version_number === prompt.active_version;
+    versionSelect.appendChild(option);
+  });
+}
+
+function submitNewTaskTemplate(event) {
+  const ids = Array.from(document.querySelectorAll(".ntt-skill-box:checked")).map(box => box.value);
+  document.getElementById("ntt-skill-ids").value = ids.join(",");
+  submitFormWithMethod(event, "/api/task-templates", "POST", "Could not create the task template");
+}
+
+function enqueueTaskTemplate(templateId) {
+  postAndReload(`/api/task-templates/${templateId}/enqueue`, { method: "POST" }, "Could not enqueue the template");
+}
+
+function deleteTaskTemplate(templateId, owner) {
+  if (!confirm("Delete this task template? Remove its routine and schedule bindings first if this fails.")) return;
+  postAndReload(
+    `/api/task-templates/${templateId}?requested_by=${encodeURIComponent(owner)}`,
+    { method: "DELETE" },
+    "Could not delete the template"
+  );
+}
+
+function openRoutineModal(templateId, name) {
+  document.getElementById("rt-template-id").value = templateId;
+  document.getElementById("rt-template-name").textContent = name;
+  onRoutineKindChange();
+  toggleModal("modal-routine");
+}
+
+function onRoutineKindChange() {
+  const kind = document.getElementById("rt-kind").value;
+  document.getElementById("rt-interval-group").style.display = kind === "interval" ? "block" : "none";
+  document.getElementById("rt-daily-group").style.display = kind === "daily" ? "block" : "none";
+  document.getElementById("rt-cron-group").style.display = kind === "cron" ? "block" : "none";
+  document.getElementById("rt-timezone-group").style.display = kind === "interval" ? "none" : "block";
+}
+
+function submitRoutineBinding(event) {
+  const templateId = document.getElementById("rt-template-id").value;
+  submitFormWithMethod(event, `/api/task-templates/${templateId}/routine`, "PUT", "Could not save the routine");
+}
+
+function removeRoutineBinding(templateId) {
+  postAndReload(`/api/task-templates/${templateId}/routine`, { method: "DELETE" }, "Could not remove the routine");
+}
+
+function openScheduleModal(templateId, name) {
+  document.getElementById("sc-template-id").value = templateId;
+  document.getElementById("sc-template-name").textContent = name;
+  toggleModal("modal-schedule");
+}
+
+function submitScheduleBinding(event) {
+  const templateId = document.getElementById("sc-template-id").value;
+  submitFormWithMethod(event, `/api/task-templates/${templateId}/schedule`, "PUT", "Could not save the schedule");
+}
+
+function removeScheduleBinding(templateId) {
+  postAndReload(`/api/task-templates/${templateId}/schedule`, { method: "DELETE" }, "Could not remove the schedule");
+}
+
+// ---------------------------------------------------------------------------
 // Blueprint circuit. Hovering a module isolates the modules it is wired to.
 // ---------------------------------------------------------------------------
 

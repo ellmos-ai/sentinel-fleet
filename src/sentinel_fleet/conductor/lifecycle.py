@@ -39,7 +39,7 @@ class LifecycleManager:
                 name="TaskSolver",
                 role=AgentRole.ORCHESTRATOR,
                 description="Runs complex calculations, RAG research and code synthesis autonomously.",
-                allowed_tools={"query_memory_bank", "execute_calculation", "solve_task"}
+                allowed_tools={"query_memory_bank", "execute_calculation", "solve_task", "execute_template"}
             ),
             AgentIdentity(
                 agent_id="agent:system-auditor",
