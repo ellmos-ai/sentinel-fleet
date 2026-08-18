@@ -226,6 +226,20 @@ async def api_get_spans():
     return [s.model_dump() for s in telemetry.get_recent_spans()]
 
 
+@app.get("/api/telemetry/status")
+async def api_get_telemetry_status():
+    """Reports what the tracing pipeline actually did, so the OpenTelemetry claim is checkable."""
+    exported = telemetry.get_exported_spans()
+    return {
+        "otel_enabled": telemetry.otel_enabled,
+        "cloud_trace_requested": settings.enable_cloud_trace,
+        "exported_span_count": len(exported),
+        "retained_span_records": len(telemetry.spans),
+        "retention_limit": telemetry.spans.maxlen,
+        "last_exported_spans": list(exported[-10:])
+    }
+
+
 @app.get("/api/memory")
 async def api_get_memory():
     return [m.model_dump() for m in memory_bank.list_all()]

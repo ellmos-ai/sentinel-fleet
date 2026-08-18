@@ -41,7 +41,7 @@ class DomainRegistry:
                 name="Google Cloud Infrastructure & Ops",
                 code="CLOUD-OPS",
                 icon="☁️",
-                description="Serverless Orchestrierung auf Google Cloud Run, Cloud Pub/Sub Messaging & Cloud Trace Tracing.",
+                description="Serverless orchestration on Google Cloud Run, in-process event bus with a Pub/Sub-compatible adapter for Cloud Run deployment, and OpenTelemetry tracing.",
                 is_active=True,
                 active_policies=["policy:zero-trust-model-armor", "policy:rate-limiting-circuit-breaker"],
                 bound_agents=["agent:orchestrator", "agent:system-auditor", "agent:task-maintainer"],

@@ -1,8 +1,17 @@
 """OpenTelemetry Tracing, Telemetry Spans & Circuit Breaker."""
 
 import time
-from typing import Any, Dict, List, Optional
+import logging
+import itertools
+from collections import deque
+from typing import Any, Deque, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
+from sentinel_fleet.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+# Ring buffer bound: the dashboard only ever reads the tail, an unbounded list leaks.
+MAX_RETAINED_SPANS = 500
 
 
 class SpanRecord(BaseModel):
@@ -18,16 +27,99 @@ class SpanRecord(BaseModel):
     error_message: Optional[str] = None
 
 
+def _otel_safe_attributes(agent_id: str, attributes: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """OpenTelemetry only accepts primitive attribute values; stringify anything else."""
+    safe: Dict[str, Any] = {"agent.id": agent_id}
+    for key, value in (attributes or {}).items():
+        safe[key] = value if isinstance(value, (str, bool, int, float)) else str(value)
+    return safe
+
+
 class TelemetryService:
+    """Dual-sink tracing: real OpenTelemetry spans plus a bounded record list for the dashboard."""
+
     def __init__(self):
-        self.spans: List[SpanRecord] = []
+        self.spans: Deque[SpanRecord] = deque(maxlen=MAX_RETAINED_SPANS)
         self.active_trace_id: str = f"trace-{int(time.time()*1000)}"
+        self._span_counter = itertools.count(1)
+        self._live_otel_spans: Dict[str, Any] = {}
+        self._tracer = None
+        self._exporter = None
+        self._status_cls = None
+        self._status_code_cls = None
+        self._init_opentelemetry()
+
+    def _init_opentelemetry(self):
+        try:
+            from opentelemetry import trace
+            from opentelemetry.sdk.trace import TracerProvider
+            from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+            from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+            from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+            from opentelemetry.trace import Status, StatusCode
+        except ImportError:
+            logger.warning(
+                "opentelemetry-sdk is not installed - dashboard span records only, no OTel spans emitted"
+            )
+            return
+
+        provider = TracerProvider(
+            resource=Resource.create({SERVICE_NAME: settings.app_name.lower()})
+        )
+        self._exporter = InMemorySpanExporter()
+        provider.add_span_processor(SimpleSpanProcessor(self._exporter))
+
+        if settings.enable_cloud_trace:
+            self._attach_cloud_trace(provider)
+
+        # Register globally so any auto-instrumentation attaches to the same provider.
+        try:
+            trace.set_tracer_provider(provider)
+        except Exception as exc:  # pragma: no cover - only on repeated provider registration
+            logger.warning("Could not register the global tracer provider: %s", exc)
+
+        self._tracer = provider.get_tracer("sentinel_fleet")
+        self._status_cls = Status
+        self._status_code_cls = StatusCode
+
+    def _attach_cloud_trace(self, provider):
+        """Cloud Trace export is optional: never make the app depend on a GCP-only package."""
+        try:
+            from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        except ImportError:
+            logger.warning(
+                "ENABLE_CLOUD_TRACE is set but opentelemetry-exporter-gcp-trace is not installed - "
+                "spans stay local"
+            )
+            return
+        try:
+            provider.add_span_processor(
+                BatchSpanProcessor(CloudTraceSpanExporter(project_id=settings.google_cloud_project))
+            )
+            logger.info("Cloud Trace exporter attached for project %s", settings.google_cloud_project)
+        except Exception as exc:
+            logger.warning("Cloud Trace exporter could not be initialised: %s", exc)
+
+    @property
+    def otel_enabled(self) -> bool:
+        return self._tracer is not None
 
     def start_span(self, name: str, agent_id: str, attributes: Optional[Dict[str, Any]] = None) -> SpanRecord:
-        span_id = f"span-{len(self.spans)+1:04d}"
+        span_id = f"span-{next(self._span_counter):04d}"
+        trace_id = self.active_trace_id
+
+        if self._tracer is not None:
+            otel_span = self._tracer.start_span(
+                name, attributes=_otel_safe_attributes(agent_id, attributes)
+            )
+            self._live_otel_spans[span_id] = otel_span
+            # Surface the real W3C trace id, so dashboard rows match exported traces
+            trace_id = format(otel_span.get_span_context().trace_id, "032x")
+
         record = SpanRecord(
             span_id=span_id,
-            trace_id=self.active_trace_id,
+            trace_id=trace_id,
             name=name,
             agent_id=agent_id,
             start_time=time.time(),
@@ -41,15 +133,36 @@ class TelemetryService:
         span.status = status
         span.error_message = error
 
+        otel_span = self._live_otel_spans.pop(span.span_id, None)
+        if otel_span is None:
+            return
+
+        otel_span.set_attribute("sentinel.status", status)
+        if self._status_cls is not None:
+            if error:
+                otel_span.set_status(self._status_cls(self._status_code_cls.ERROR, error))
+            else:
+                otel_span.set_status(self._status_cls(self._status_code_cls.OK))
+        otel_span.end()
+
     def add_event(self, span: SpanRecord, event_name: str, payload: Optional[Dict[str, Any]] = None):
         span.events.append({
             "name": event_name,
             "timestamp": time.time(),
             "payload": payload or {}
         })
+        otel_span = self._live_otel_spans.get(span.span_id)
+        if otel_span is not None:
+            otel_span.add_event(event_name, attributes=_otel_safe_attributes(span.agent_id, payload))
 
     def get_recent_spans(self, limit: int = 50) -> List[SpanRecord]:
-        return list(reversed(self.spans[-limit:]))
+        return list(reversed(list(self.spans)[-limit:]))
+
+    def get_exported_spans(self) -> Tuple[str, ...]:
+        """Names of the spans the OpenTelemetry exporter actually finished - evidence, not a claim."""
+        if self._exporter is None:
+            return ()
+        return tuple(s.name for s in self._exporter.get_finished_spans())
 
 
 telemetry = TelemetryService()

@@ -59,6 +59,11 @@ class ModelArmor:
         """Sanitize sensitive data and return sanitized text with list of redacted items."""
         redacted = []
 
+        # Redact IBANs
+        if cls.IBAN_PATTERN.search(text):
+            text = cls.IBAN_PATTERN.sub("[REDACTED_IBAN]", text)
+            redacted.append("IBAN")
+
         # Redact API Keys
         if cls.API_KEY_PATTERN.search(text):
             text = cls.API_KEY_PATTERN.sub("[REDACTED_API_KEY]", text)

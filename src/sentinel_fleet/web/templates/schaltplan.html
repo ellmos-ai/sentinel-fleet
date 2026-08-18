@@ -96,12 +96,12 @@
       
       <!-- STEP 1: Ingestion -->
       <div class="flow-step">
-        <div class="flow-title">1. Event Ingestion &amp; Input Channels (Pillar UAS &amp; Google Cloud Pub/Sub)</div>
+        <div class="flow-title">1. Event Ingestion &amp; Input Channels (Pillar UAS)</div>
         <div class="flow-meta">
-          Eingehende Dokumente (PDF-Rechnungen, E-Mail-Anhänge, Scans, API-Payloads) triggern asynchrone Jobs via Google Cloud Pub/Sub oder REST-Endpunkte.
+          Eingehende Dokumente (PDF-Rechnungen, E-Mail-Anhänge, Scans, API-Payloads) werden über REST-Endpunkte angenommen und über einen In-Process Event Bus verteilt (Pub/Sub-kompatibler Adapter für das Cloud-Run-Deployment).
         </div>
         <div class="flow-chips">
-          <span class="chip-item">Google Cloud Pub/Sub</span>
+          <span class="chip-item">In-process event bus (Pub/Sub-compatible adapter)</span>
           <span class="chip-item">connectors (mail-connector)</span>
           <span class="chip-item">ticket-master</span>
         </div>
@@ -111,7 +111,7 @@
       <div class="flow-step">
         <div class="flow-title">2. Zero-Trust Gateway &amp; Model Armor (Pillar Control)</div>
         <div class="flow-meta">
-          Jeder Request durchläuft die Model Armor: Prompt Injection Defense, PII-Maskierung (IBAN, API-Keys) und Zero-Trust Permission Check (LOCK.permissions.json).
+          Jeder Request durchläuft die Model Armor: Prompt Injection Defense, PII-Maskierung (IBAN, API-Keys, Kreditkartennummern) und Zero-Trust Permission Check (LOCK.permissions.json).
         </div>
         <div class="flow-chips">
           <span class="chip-item">lock-master</span>
@@ -143,7 +143,7 @@
         </div>
         <div class="flow-chips">
           <span class="chip-item">USMC Memory Bank</span>
-          <span class="chip-item">GARDENER FTS5 / Vector RAG</span>
+          <span class="chip-item">GARDENER keyword-overlap retrieval</span>
           <span class="chip-item">memory-hooker</span>
         </div>
       </div>
@@ -152,13 +152,13 @@
       <div class="flow-step">
         <div class="flow-title">5. § 14 UStG Compliance Audit &amp; Self-Healing Loop (Pillar Domain: OmniLedger)</div>
         <div class="flow-meta">
-          Gültige Belege werden direkt im Firestore Ledger verbucht. Bei Mängeln (fehlende USt-IdNr, Rechenfehler) generiert der Agent autonom ein Korrekturschreiben und übergibt es an das Human-in-the-Loop Ticket-Gate.
+          Gültige Belege werden direkt im Ledger-Store verbucht (Firestore im Produktivbetrieb, lokaler JSON-Store in der Demo). Bei Mängeln (fehlende USt-IdNr, Rechenfehler) generiert der Agent autonom ein Korrekturschreiben und übergibt es an das Human-in-the-Loop Ticket-Gate.
         </div>
         <div class="flow-chips">
           <span class="chip-item">law-checker (§14 UStG)</span>
           <span class="chip-item">Self-Healing Vendor Dispute</span>
           <span class="chip-item">RechnungsSteller</span>
-          <span class="chip-item">Google Cloud Firestore</span>
+          <span class="chip-item">Firestore (production) / local JSON store (demo)</span>
         </div>
       </div>
 
@@ -166,10 +166,10 @@
       <div class="flow-step">
         <div class="flow-title">6. Observability Mesh &amp; OpenTelemetry Tracing</div>
         <div class="flow-meta">
-          Jeder Gedankenschritt und Tool-Aufruf wird als standardisierter Span in Google Cloud Trace aufgezeichnet. Loop-Detektoren greifen bei Anomalien ein.
+          Jeder Tool-Aufruf wird als OpenTelemetry-Span aufgezeichnet (In-Memory-Exporter; Cloud-Trace-Export zuschaltbar über ENABLE_CLOUD_TRACE). Loop-Detektoren greifen bei Anomalien ein.
         </div>
         <div class="flow-chips">
-          <span class="chip-item">Google Cloud Trace</span>
+          <span class="chip-item">OpenTelemetry SDK (Cloud Trace optional)</span>
           <span class="chip-item">system-auditor</span>
           <span class="chip-item">Circuit Breaker</span>
           <span class="chip-item">Audit Receipts</span>
