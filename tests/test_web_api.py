@@ -213,16 +213,26 @@ async def test_telemetry_status_reports_real_exporter(client):
 
 
 async def test_gate_ledger_shows_newest_span(client):
-    """Regression: the overview gate ledger must include the NEWEST span.
+    """Regression: the overview gate ledger must show the NEWEST spans, not the oldest.
 
-    get_recent_spans() returns newest-first; slicing [-7:] on that list used to
-    surface the seven OLDEST spans and hide every fresh verdict (found while
-    filming the demo video).
+    get_recent_spans() returns newest-first; slicing [-7:] on that list surfaced the
+    seven OLDEST spans, so an operator never saw the verdict of the call they had just
+    triggered - while the card promises "every tool call, every verdict". Found while
+    filming the demo video, where the blocked call simply never appeared.
+
+    The assertion has to be scoped to the ledger markup: the telemetry tab on the same
+    page renders the full span list, so searching the whole document would pass even
+    with the ledger slice broken.
     """
     from sentinel_fleet.core.telemetry import telemetry
 
     for i in range(12):
-        span = telemetry.start_span(f"tool_call:ledger_probe_{i}", "agent:test-ledger")
+        span = telemetry.start_span(f"tool_call:ledger_probe_{i:02d}", "agent:test-ledger")
         telemetry.end_span(span, status="OK")
+
     response = await client.get("/")
-    assert "ledger_probe_11" in response.text, "newest span missing from gate ledger"
+    start = response.text.index('class="ledger-rows"')
+    ledger = response.text[start:response.text.index("</section>", start)]
+
+    assert "ledger_probe_11" in ledger, "newest span missing from the gate ledger"
+    assert "ledger_probe_00" not in ledger, "gate ledger is showing the oldest spans"

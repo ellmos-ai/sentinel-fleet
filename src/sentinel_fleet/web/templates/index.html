@@ -84,7 +84,7 @@
       </div>
       {% else %}
       <div class="ledger-rows">
-        {% for s in spans[-7:]|reverse %}
+        {% for s in spans[:7]|reverse %}
         <div class="ledger-row">
           <span class="ledger-time">{{ s.start_time|clock }}</span>
           <span class="ledger-op">{{ s.name }}</span>
