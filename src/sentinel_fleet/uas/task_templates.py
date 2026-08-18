@@ -18,6 +18,45 @@ from sentinel_fleet.core.storage import get_store
 from sentinel_fleet.core.errors import TemplateNotFoundError, TemplatePermissionError
 
 
+class Step(BaseModel):
+    """One execution node of a TaskTemplate. Embedded on the template (like
+    `PromptVersionRecord` on `PromptItem`, `prompts.py:8-18`), not a separate `get_store()`
+    entity - there is exactly one of these in Phase 1, added here so Phase 2's "add more
+    steps" chains need no schema break or data migration (concept doc, section E.1/E.4).
+    Phase 1 never reads or executes this - `enqueue_template()` still runs off the
+    TaskTemplate's own flat prompt_source/skill_ids/assigned_agent fields below, which
+    `TaskTemplateRegistry.create_template()` mirrors into `steps[0]` at creation time so the
+    field is a faithful snapshot rather than an inert stub.
+    """
+    step_id: str
+    position: int = 0                        # ordering, once there is more than one step
+    agent_id: str = "agent:task-solver"
+    skill_ids: List[str] = Field(default_factory=list)
+    prompt_source: str = "custom"            # "library" | "custom"
+    prompt_id: Optional[str] = None
+    prompt_version: Optional[str] = None
+    custom_prompt_text: Optional[str] = None
+    input_spec: str = "previous_output"      # "previous_output" | "template_input" | "artifact:<step_id>"
+    # Required by the concept (a Phase-2 chain runner enforces every step depositing its
+    # output at a fixed handoff point), but left optional here: Phase 1 has nothing that
+    # reads it yet, and the single default step is never chained into anything.
+    output_artifact_id: Optional[str] = None
+    parallel_group: Optional[str] = None
+    execution_pattern: str = "single"        # "single" | "swarm:<id>" | "operator" | "race"
+    swarm_pattern: Optional[str] = None
+    race_models: List[str] = Field(default_factory=list)
+
+
+class LoopConfig(BaseModel):
+    """Only set when a chain is a circle (concept doc, section E.1). Always None in Phase 1."""
+    max_rounds: Optional[int] = None
+    max_hours: Optional[float] = None
+
+
+def _default_steps() -> List[Step]:
+    return [Step(step_id="step-1", position=0)]
+
+
 class TaskTemplate(BaseModel):
     template_id: str
     name: str
@@ -36,6 +75,12 @@ class TaskTemplate(BaseModel):
     on_failure: Optional[str] = None
     group: Optional[str] = None            # at most one group/tag per template
     fork_of: Optional[str] = None
+    # Chain foundation (concept doc, section E.1/E.4): a single-step task is the special case
+    # of Steps, not a different shape that would need migrating later. Phase 1 builds and
+    # shows only this single-step case - no step editor, no chain runner, no parallel_group
+    # or loop in the UI - but the field exists from day one.
+    steps: List[Step] = Field(default_factory=_default_steps)
+    loop: Optional[LoopConfig] = None      # only set once a chain is a circle - always None here
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
 
@@ -60,21 +105,36 @@ class TaskTemplateRegistry:
         on_success: Optional[str] = None,
         on_failure: Optional[str] = None
     ) -> TaskTemplate:
+        template_id = f"TMPL-{uuid.uuid4().hex[:8].upper()}"
+        resolved_skill_ids = skill_ids or []
         template = TaskTemplate(
-            template_id=f"TMPL-{uuid.uuid4().hex[:8].upper()}",
+            template_id=template_id,
             name=name,
             owner=owner,
             prompt_source=prompt_source,
             prompt_id=prompt_id,
             prompt_version=prompt_version,
             custom_prompt_text=custom_prompt_text,
-            skill_ids=skill_ids or [],
+            skill_ids=resolved_skill_ids,
             assigned_agent=assigned_agent,
             visibility=visibility,
             requires_approval=requires_approval,
             group=group,
             on_success=on_success,
-            on_failure=on_failure
+            on_failure=on_failure,
+            # Mirror the flat fields into the single default step, so `steps[0]` is a real
+            # snapshot of this template's one step rather than an inert, disconnected stub
+            # (concept doc, section E.4: "Convenience-Felder aufs erste Step-Element mappen").
+            steps=[Step(
+                step_id="step-1",
+                position=0,
+                agent_id=assigned_agent,
+                skill_ids=resolved_skill_ids,
+                prompt_source=prompt_source,
+                prompt_id=prompt_id,
+                prompt_version=prompt_version,
+                custom_prompt_text=custom_prompt_text
+            )]
         )
         self._store.put(template.template_id, template)
         return template

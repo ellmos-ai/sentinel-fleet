@@ -276,14 +276,29 @@ approval flag. It describes *what* runs, never *when*. Two independent bindings
 * **`ScheduleBinding`** — a one-off `due_at`, kept around after it fires or is skipped as a
   run-history row.
 
-Neither binding is a stored "template type". The gear/clock badges and the
+Neither binding is a stored "template type" — both the gear/clock badges and the
 running/preparing/idle runtime colour in the dashboard's **Task templates** table are derived on
-every read (`routines.derive_symbols` / `derive_runtime_status`) from the current bindings and
-from `TaskMaster` task state — the same principle the Routinika desktop app uses to derive
-`item_type` from two flags instead of storing it. A template becomes deletable again only once
-both bindings are gone (`routines.delete_template`, `TemplateHasBindingsError` otherwise); only
-its `owner` may delete it at all, while any other viewer can remove it from their own listing
-without touching it for anyone else (`remove_for_viewer`).
+every read, never stored, the same principle the Routinika desktop app uses to derive
+`item_type` from two flags instead of storing it. The two derivations read different sources,
+though: `routines.derive_symbols` reads the current bindings (a routine attached → gear; a
+still-`pending`, not-yet-due `ScheduleBinding` → clock, so the clock disappears on its own once
+`due_at` passes, with nothing to update it), while `routines.derive_runtime_status` reads only
+this template's own `TaskRecord`s — green if any is `IN_PROGRESS`, yellow if any is `QUEUED` or
+`AWAITING_APPROVAL`, otherwise no colour, running always beating preparing. This is deliberately
+not a `next_due_at` lookahead: an immediately "enqueue now" run and a routine- or
+schedule-triggered one go through the identical `QUEUED → IN_PROGRESS → terminal` path on the
+same `TaskRecord`, so the colour rule needs no special case for either origin. A template becomes
+deletable again only once both bindings are gone (`routines.delete_template`,
+`TemplateHasBindingsError` otherwise); only its `owner` may delete it at all, while any other
+viewer can remove it from their own listing without touching it for anyone else
+(`remove_for_viewer`).
+
+`TaskTemplate.steps` (a list, default exactly one `Step`) is Phase 1's forward-compatible schema
+slot for Phase 2 chains — a single-step task is the special case of a chain, not a shape that
+would need migrating later. `TaskTemplateRegistry.create_template()` mirrors the template's flat
+`prompt_source`/`skill_ids`/`assigned_agent` fields into that one `Step` so it is a real snapshot
+rather than an inert stub, but Phase 1's execution path (`enqueue_template`) still reads the flat
+fields directly — no step editor, chain runner, or `parallel_group`/`loop` wiring exists yet.
 
 **Execution** (`routines.enqueue_template`) creates a real `TaskRecord` — not a second, parallel
 run object — carrying `source_template_id`/`source_binding_id`/`triggered_by`, and drives it

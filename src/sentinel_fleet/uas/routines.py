@@ -13,7 +13,7 @@ queue table already IS the view of every run, template-triggered or not.
 
 import time
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
@@ -29,10 +29,6 @@ from sentinel_fleet.uas.task_templates import TaskTemplate, task_template_regist
 from sentinel_fleet.uas.ticket_master import TicketPriority, ticket_master
 
 EXECUTE_TEMPLATE_TOOL = "execute_template"
-
-# How close to "now" a due timestamp has to be before the console paints the yellow
-# "preparing" dot instead of no status at all (concept doc, section A.5).
-PREPARING_WINDOW_SECONDS = 15 * 60
 
 # How far past a one-off ScheduleBinding's due_at counts as "missed" rather than "fired a
 # little late" - the grace window a responsive Cloud Scheduler tick normally lands inside.
@@ -181,22 +177,17 @@ def derive_symbols(routine: Optional[RoutineBinding], schedule: Optional[Schedul
     return {"gear": routine is not None, "clock": clock}
 
 
-def derive_runtime_status(template_id: str, now: Optional[datetime] = None) -> Optional[str]:
-    """Green (running) beats yellow (preparing) beats no status (concept doc, section A.5)."""
-    now = now or _now()
-    if any(r.state == TaskState.IN_PROGRESS for r in task_master.list_by_template(template_id)):
+def derive_runtime_status(template_id: str) -> Optional[str]:
+    """Green (running) beats yellow (preparing) beats no status - purely from this template's
+    own TaskRecords, never from an upcoming-due-time lookahead (concept doc, section A.3/A.5,
+    2026-08-18 correction). A bare "enqueue now" run goes through the exact same
+    QUEUED -> IN_PROGRESS -> terminal path as a routine- or schedule-triggered one, so it is
+    not a special case with its own heuristic - it is covered by this same rule automatically.
+    """
+    runs = task_master.list_by_template(template_id)
+    if any(r.state == TaskState.IN_PROGRESS for r in runs):
         return "running"
-
-    routine = routine_binding_registry.get_for_template(template_id)
-    schedule = schedule_binding_registry.get_pending_for_template(template_id)
-    upcoming = []
-    if routine and routine.enabled and routine.next_due_at:
-        upcoming.append(_parse_iso(routine.next_due_at))
-    if schedule and schedule.status == "pending":
-        upcoming.append(_parse_iso(schedule.due_at))
-
-    window_end = now + timedelta(seconds=PREPARING_WINDOW_SECONDS)
-    if any(now <= due <= window_end for due in upcoming):
+    if any(r.state in (TaskState.QUEUED, TaskState.AWAITING_APPROVAL) for r in runs):
         return "preparing"
     return None
 

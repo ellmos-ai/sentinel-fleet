@@ -76,38 +76,71 @@ def test_running_status_from_an_in_progress_task_record():
 
 
 def test_running_dominates_preparing():
+    """Two runs of the same template at once: one IN_PROGRESS, one still QUEUED. The
+    aggregation rule (concept doc, section A.3) is running-beats-preparing regardless of how
+    many other runs of the same template are still queued alongside it."""
     template = _template(name="Running beats preparing")
-    task = task_master.create_task(
-        name="probe", assigned_agent="agent:task-solver", input_data={}, source_template_id=template.template_id
+    running_task = task_master.create_task(
+        name="running probe", assigned_agent="agent:task-solver", input_data={}, source_template_id=template.template_id
     )
-    task_master.update_task_state(task.task_id, TaskState.IN_PROGRESS)
-    routines.routine_binding_registry.set_binding(template.template_id, {"kind": "interval", "seconds": 30})
+    task_master.update_task_state(running_task.task_id, TaskState.IN_PROGRESS)
+    task_master.create_task(
+        name="queued probe", assigned_agent="agent:task-solver", input_data={}, source_template_id=template.template_id
+    )  # left in state QUEUED
     assert routines.derive_runtime_status(template.template_id) == "running"
 
 
-def test_preparing_window_and_no_status_outside_it():
-    template = _template(name="Preparing window")
-    routine = routines.routine_binding_registry.set_binding(template.template_id, {"kind": "interval", "seconds": 60})
-
-    routine.next_due_at = routines._iso(_now() + timedelta(minutes=5))
-    routines.routine_binding_registry.save(routine)
+def test_preparing_status_from_a_queued_or_awaiting_approval_task_record():
+    """Preparing is derived purely from this template's own TaskRecords - never from a
+    binding's next_due_at lookahead (concept doc, section A.3/A.5, 2026-08-18 correction)."""
+    template = _template(name="Preparing via queued record")
+    task = task_master.create_task(
+        name="probe", assigned_agent="agent:task-solver", input_data={}, source_template_id=template.template_id
+    )
+    assert task.state == TaskState.QUEUED
     assert routines.derive_runtime_status(template.template_id) == "preparing"
 
-    routine.next_due_at = routines._iso(_now() + timedelta(hours=2))
-    routines.routine_binding_registry.save(routine)
+    task_master.update_task_state(task.task_id, TaskState.AWAITING_APPROVAL)
+    assert routines.derive_runtime_status(template.template_id) == "preparing"
+
+    task_master.update_task_state(task.task_id, TaskState.COMPLETED)
     assert routines.derive_runtime_status(template.template_id) is None
 
 
-def test_disabled_routine_carries_no_status():
-    """A paused routine (enabled=False) gets no colour at all - not a warning colour either
-    (concept doc, section A.5: red/paused was dropped, it simply falls into "no status")."""
-    template = _template(name="Paused routine")
-    routine = routines.routine_binding_registry.set_binding(
-        template.template_id, {"kind": "interval", "seconds": 60}, enabled=False
+def test_a_bare_immediate_enqueue_is_not_a_special_case():
+    """"Sofort einreihen" runs through exactly the same QUEUED->IN_PROGRESS->terminal path as
+    a routine- or schedule-triggered run - no separate heuristic for the unbound case."""
+    template = _template(name="Bare immediate enqueue")
+    task = task_master.create_task(
+        name="manual probe", assigned_agent="agent:task-solver", input_data={},
+        source_template_id=template.template_id, triggered_by="manual"
     )
-    routine.next_due_at = routines._iso(_now() + timedelta(minutes=1))
-    routines.routine_binding_registry.save(routine)
-    assert routines.derive_runtime_status(template.template_id) is None
+    assert routines.derive_runtime_status(template.template_id) == "preparing"
+    task_master.update_task_state(task.task_id, TaskState.IN_PROGRESS)
+    assert routines.derive_runtime_status(template.template_id) == "running"
+
+
+def test_bindings_alone_never_produce_a_runtime_status():
+    """A routine or schedule binding with no associated TaskRecord in a non-terminal state
+    carries no colour by itself - true whether the routine is enabled or paused. A paused
+    routine (enabled=False) is not a special case either: it never fires, so it never has a
+    non-terminal TaskRecord, so it falls into "no status" through the same general rule (no
+    dedicated red/paused colour - concept doc, section A.5)."""
+    enabled_template = _template(name="Enabled routine, no runs yet")
+    routines.routine_binding_registry.set_binding(enabled_template.template_id, {"kind": "interval", "seconds": 60})
+    assert routines.derive_runtime_status(enabled_template.template_id) is None
+
+    disabled_template = _template(name="Paused routine")
+    routines.routine_binding_registry.set_binding(
+        disabled_template.template_id, {"kind": "interval", "seconds": 60}, enabled=False
+    )
+    assert routines.derive_runtime_status(disabled_template.template_id) is None
+
+    scheduled_template = _template(name="Pending schedule, no runs yet")
+    routines.schedule_binding_registry.set_binding(
+        scheduled_template.template_id, due_at=(_now() + timedelta(minutes=1)).isoformat()
+    )
+    assert routines.derive_runtime_status(scheduled_template.template_id) is None
 
 
 def test_next_due_summary_picks_the_earliest_of_routine_and_schedule():

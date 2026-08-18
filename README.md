@@ -6,7 +6,7 @@
 [![Gemini 3.5](https://img.shields.io/badge/Gemini-3.5%20Flash%20Vision-orange.svg)](https://deepmind.google/technologies/gemini/)
 [![Zero-Trust Model Armor](https://img.shields.io/badge/Security-Model%20Armor%20%26%20Zero--Trust-green.svg)](#security--governance)
 [![Google GenAI SDK](https://img.shields.io/badge/SDK-google--genai-4285F4.svg)](https://googleapis.github.io/python-genai/)
-[![Pytest](https://img.shields.io/badge/pytest-149%2F149%20passed-brightgreen.svg)](tests/)
+[![Pytest](https://img.shields.io/badge/pytest-150%2F150%20passed-brightgreen.svg)](tests/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
 > Built for the **Google Cloud All Things Agentic Hackathon** (Track 3: The Fortified Enterprise Fleet & Track 1: The Taskmaster).
@@ -97,8 +97,9 @@ plus a skill selection, an assigned agent and an approval flag. A template descr
 should happen, never *when*. Attaching a `RoutineBinding` (recurring: interval / daily / cron)
 or a `ScheduleBinding` (a one-off `due_at`) turns it recurring or dated; removing both bindings
 leaves a bare, deletable template again — a template never migrates between object types. The
-gear/clock badges and the running/preparing/idle status dot in the **Task templates** table
-(Fleet tab) are all derived on every read from the bindings and the task queue, never stored.
+gear/clock badges (from the bindings) and the running/preparing/idle status dot (from this
+template's own `TaskRecord`s, never a next-due lookahead) in the **Task templates** table
+(Fleet tab) are all derived on every read, never stored.
 
 Running a template goes through the same `SovereignGateway` path as the chat console — an agent
 identity, model armor, permission gate — and produces a real `TaskRecord` in the existing Task
@@ -167,5 +168,5 @@ SentinelFleet is licensed under the **GNU Affero General Public License v3.0** (
 ## Scope, Provenance & Data Notes
 
 * **Demo, not advice.** The OmniLedger domain validates demo invoices against German statutory rules (§ 14 UStG, GoBD) as a technical showcase. It is an AI-assisted engineering demo — not tax, accounting or legal advice; whether any concrete use meets statutory requirements depends on the individual case.
-* **Provenance.** Built by Lukas Geiger for the Google Cloud All Things Agentic Hackathon with substantial AI coding assistance (Google Gemini, Anthropic Claude); all AI-generated code was human-directed and is covered by the 149-test suite. Some skill definitions are English rebrands of the author's private skills library.
+* **Provenance.** Built by Lukas Geiger for the Google Cloud All Things Agentic Hackathon with substantial AI coding assistance (Google Gemini, Anthropic Claude); all AI-generated code was human-directed and is covered by the 150-test suite. Some skill definitions are English rebrands of the author's private skills library.
 * **Data.** Chat and document uploads may be sent to the Gemini API when a `GEMINI_API_KEY` is configured; without a key the console runs in a labelled deterministic demo mode and nothing leaves the process. Do not upload real invoices or personal data to a demo deployment, and please do not post case data in issues.
