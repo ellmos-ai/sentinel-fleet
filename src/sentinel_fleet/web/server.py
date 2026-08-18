@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from pydantic import BaseModel
+from pydantic import ValidationError as PydanticValidationError
 
 from sentinel_fleet.chat import export as chat_export
 from sentinel_fleet.chat.backends import SUPPORTED_MODELS
@@ -42,7 +43,7 @@ from sentinel_fleet.core.errors import (
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.uas.ticket_master import ticket_master, TicketStatus, TicketPriority
 from sentinel_fleet.uas.task_master import task_master, TaskState, TaskRecord
-from sentinel_fleet.uas.task_templates import task_template_registry
+from sentinel_fleet.uas.task_templates import Step, task_template_registry
 from sentinel_fleet.uas import routines
 from sentinel_fleet.memory.bank import memory_bank
 from sentinel_fleet.memory.gardener_rag import gardener
@@ -714,21 +715,45 @@ async def api_create_task_template(
     assigned_agent: str = Form("agent:task-solver"),
     visibility: str = Form("own"),
     requires_approval: bool = Form(False),
-    group: str = Form("")
+    group: str = Form(""),
+    # Optional Phase-2 chain shape (concept doc, section E.4): a JSON array of Step objects.
+    # MVP accepts it, but TaskTemplate's own field validator still requires exactly one
+    # element - this is schema future-proofing, not multi-step behaviour. Empty/omitted falls
+    # back to the flat fields above, folded into a single default Step as before.
+    steps: str = Form("")
 ):
-    template = task_template_registry.create_template(
-        name=name,
-        owner=owner,
-        prompt_source=prompt_source,
-        prompt_id=prompt_id or None,
-        prompt_version=prompt_version or None,
-        custom_prompt_text=custom_prompt_text or None,
-        skill_ids=[s.strip() for s in skill_ids.split(",") if s.strip()],
-        assigned_agent=assigned_agent,
-        visibility=visibility,
-        requires_approval=requires_approval,
-        group=group or None
-    )
+    explicit_steps: Optional[List[Step]] = None
+    if steps:
+        try:
+            raw_steps = json.loads(steps)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail=f"'steps' is not valid JSON: {exc}")
+        if not isinstance(raw_steps, list):
+            raise HTTPException(status_code=422, detail="'steps' must be a JSON array of step objects")
+        try:
+            explicit_steps = [Step(**item) for item in raw_steps]
+        except PydanticValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    try:
+        template = task_template_registry.create_template(
+            name=name,
+            owner=owner,
+            prompt_source=prompt_source,
+            prompt_id=prompt_id or None,
+            prompt_version=prompt_version or None,
+            custom_prompt_text=custom_prompt_text or None,
+            skill_ids=[s.strip() for s in skill_ids.split(",") if s.strip()],
+            assigned_agent=assigned_agent,
+            visibility=visibility,
+            requires_approval=requires_approval,
+            group=group or None,
+            steps=explicit_steps
+        )
+    except PydanticValidationError as exc:
+        # Only reachable via the explicit `steps` path above - the flat-field path always
+        # builds exactly one Step, so it can never trip the "exactly one step" validator.
+        raise HTTPException(status_code=422, detail=str(exc))
     return {"status": "created", "template": template.model_dump()}
 
 

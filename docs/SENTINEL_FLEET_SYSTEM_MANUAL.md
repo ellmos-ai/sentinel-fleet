@@ -237,12 +237,20 @@ deletable again only once both bindings are gone (`routines.delete_template`,
 viewer can remove it from their own listing without touching it for anyone else
 (`remove_for_viewer`).
 
-`TaskTemplate.steps` (a list, default exactly one `Step`) is Phase 1's forward-compatible schema
-slot for Phase 2 chains — a single-step task is the special case of a chain, not a shape that
-would need migrating later. `TaskTemplateRegistry.create_template()` mirrors the template's flat
-`prompt_source`/`skill_ids`/`assigned_agent` fields into that one `Step` so it is a real snapshot
-rather than an inert stub, but Phase 1's execution path (`enqueue_template`) still reads the flat
-fields directly — no step editor, chain runner, or `parallel_group`/`loop` wiring exists yet.
+`TaskTemplate.steps` (a list, validated to hold exactly one `Step` in this deployment) is Phase
+1's forward-compatible schema slot for Phase 2 chains — a single-step task is the special case
+of a chain, not a shape that would need migrating later, and `steps[0]` is the one place that
+step's configuration actually lives: `TaskTemplate.assigned_agent`/`prompt_source`/`prompt_id`/
+`prompt_version`/`custom_prompt_text`/`skill_ids` are `@computed_field` properties reading and
+writing straight through to it, not a second, independently stored copy. That keeps every
+existing call site, API response shape and Jinja template that expects the old flat attribute
+names working unchanged — `enqueue_template()` still reads `template.assigned_agent` etc.
+directly and has needed no code change. `POST /api/task-templates` accepts either the flat form
+fields (folded into a single default `Step`, the common path) or an explicit `steps` JSON array
+with one element (the Phase 2 chain shape, already valid against this schema); either way,
+`TaskTemplate`'s own field validator rejects anything but exactly one step with a 422, so the
+"exactly one" rule lives in a single place rather than being re-checked at each call site. No
+step editor, chain runner, or `parallel_group`/`loop` wiring exists yet.
 
 **Execution** (`routines.enqueue_template`) creates a real `TaskRecord` — not a second, parallel
 run object — carrying `source_template_id`/`source_binding_id`/`triggered_by`, and drives it
