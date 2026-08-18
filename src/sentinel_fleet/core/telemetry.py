@@ -13,6 +13,45 @@ logger = logging.getLogger(__name__)
 # Ring buffer bound: the dashboard only ever reads the tail, an unbounded list leaks.
 MAX_RETAINED_SPANS = 500
 
+try:
+    from opentelemetry import trace as otel_trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
+    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+    from opentelemetry.trace import Status, StatusCode
+    OTEL_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised only in installs without the SDK
+    OTEL_AVAILABLE = False
+
+
+if OTEL_AVAILABLE:
+
+    class BoundedSpanExporter(SpanExporter):
+        """Collects exported spans in a ring buffer and counts everything it ever saw.
+
+        The stock InMemorySpanExporter keeps every span forever, which is the same leak the
+        dashboard buffer was fixed for. Retention is bounded; the total stays exact.
+        """
+
+        def __init__(self, max_spans: int = MAX_RETAINED_SPANS):
+            self._spans = deque(maxlen=max_spans)
+            self.exported_total = 0
+
+        def export(self, spans):
+            for span in spans:
+                self._spans.append(span)
+                self.exported_total += 1
+            return SpanExportResult.SUCCESS
+
+        def get_finished_spans(self):
+            return tuple(self._spans)
+
+        def force_flush(self, timeout_millis: int = 30_000) -> bool:
+            return True
+
+        def shutdown(self):
+            self._spans.clear()
+
 
 class SpanRecord(BaseModel):
     span_id: str
@@ -50,14 +89,7 @@ class TelemetryService:
         self._init_opentelemetry()
 
     def _init_opentelemetry(self):
-        try:
-            from opentelemetry import trace
-            from opentelemetry.sdk.trace import TracerProvider
-            from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-            from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-            from opentelemetry.sdk.resources import Resource, SERVICE_NAME
-            from opentelemetry.trace import Status, StatusCode
-        except ImportError:
+        if not OTEL_AVAILABLE:
             logger.warning(
                 "opentelemetry-sdk is not installed - dashboard span records only, no OTel spans emitted"
             )
@@ -66,7 +98,7 @@ class TelemetryService:
         provider = TracerProvider(
             resource=Resource.create({SERVICE_NAME: settings.app_name.lower()})
         )
-        self._exporter = InMemorySpanExporter()
+        self._exporter = BoundedSpanExporter()
         provider.add_span_processor(SimpleSpanProcessor(self._exporter))
 
         if settings.enable_cloud_trace:
@@ -74,7 +106,7 @@ class TelemetryService:
 
         # Register globally so any auto-instrumentation attaches to the same provider.
         try:
-            trace.set_tracer_provider(provider)
+            otel_trace.set_tracer_provider(provider)
         except Exception as exc:  # pragma: no cover - only on repeated provider registration
             logger.warning("Could not register the global tracer provider: %s", exc)
 
@@ -159,10 +191,16 @@ class TelemetryService:
         return list(reversed(list(self.spans)[-limit:]))
 
     def get_exported_spans(self) -> Tuple[str, ...]:
-        """Names of the spans the OpenTelemetry exporter actually finished - evidence, not a claim."""
+        """Names of the retained exported spans - evidence, not a claim (bounded, see exporter)."""
         if self._exporter is None:
             return ()
         return tuple(s.name for s in self._exporter.get_finished_spans())
+
+    def get_exported_span_total(self) -> int:
+        """Every span the exporter ever received, including the ones the ring buffer dropped."""
+        if self._exporter is None:
+            return 0
+        return self._exporter.exported_total
 
 
 telemetry = TelemetryService()

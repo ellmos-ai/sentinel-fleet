@@ -31,7 +31,7 @@ from sentinel_fleet.core.errors import (
 )
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.uas.ticket_master import ticket_master, TicketStatus, TicketPriority
-from sentinel_fleet.uas.task_master import task_master, TaskState
+from sentinel_fleet.uas.task_master import task_master, TaskState, TaskRecord
 from sentinel_fleet.memory.bank import memory_bank
 from sentinel_fleet.memory.gardener_rag import gardener
 from sentinel_fleet.core.telemetry import telemetry
@@ -48,6 +48,9 @@ logger = logging.getLogger("sentinel_fleet")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Emit the resolved runtime configuration once, so deployments are auditable from logs."""
+    # Also visible when started through `uvicorn sentinel_fleet.web.server:app` instead of app.py
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     logging.info("SentinelFleet model: %s", settings.gemini_default_model)
     logging.info(
         "SentinelFleet extraction backend: %s",
@@ -260,7 +263,8 @@ async def api_get_telemetry_status():
     return {
         "otel_enabled": telemetry.otel_enabled,
         "cloud_trace_requested": settings.enable_cloud_trace,
-        "exported_span_count": len(exported),
+        "exported_span_count": telemetry.get_exported_span_total(),
+        "retained_exported_spans": len(exported),
         "retained_span_records": len(telemetry.spans),
         "retention_limit": telemetry.spans.maxlen,
         "last_exported_spans": list(exported[-10:])
@@ -591,7 +595,22 @@ async def api_process_invoice(
                 "agent_status": agent_extractor.status.value if agent_extractor else "unknown"
             })
 
-    # 3. Extraction — executed by the extractor agent under its own tool scope
+    # 3. Run the governed workflow. A gateway security verdict aborts the request, so the
+    #    task must be closed out here instead of being left IN_PROGRESS forever.
+    try:
+        return await run_omniledger_workflow(task, filename, upload_bytes, upload_text)
+    except (SecurityViolationError, QuarantineLockError) as exc:
+        task_master.update_task_state(task.task_id, TaskState.FAILED, error=exc.message)
+        raise
+
+
+async def run_omniledger_workflow(
+    task: TaskRecord,
+    filename: str,
+    upload_bytes: Optional[bytes],
+    upload_text: Optional[str]
+):
+    """Extraction, compliance audit and either booking or the dispute loop, all via the gateway."""
     extraction = await execute_via_gateway(
         "agent:invoice-extractor",
         "extract_invoice_multimodal",

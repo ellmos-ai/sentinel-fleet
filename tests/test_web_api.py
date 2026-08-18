@@ -168,5 +168,6 @@ async def test_telemetry_status_reports_real_exporter(client):
     status = response.json()
     assert status["otel_enabled"] is True
     assert status["exported_span_count"] >= 1
-    # Mi2: the dashboard buffer is bounded
+    # Mi2: both the dashboard buffer and the exporter retention are bounded
     assert status["retained_span_records"] <= status["retention_limit"] == 500
+    assert status["retained_exported_spans"] <= status["retention_limit"]

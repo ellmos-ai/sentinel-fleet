@@ -52,7 +52,7 @@ SentinelFleet unifies and hardens codebases, patterns, and research from several
 | **`.MEMORY`** (`.bank`, `.gardener`, `.hooker`) | `OneDrive/.TOPICS/.AI/.MEMORY` | Curated USMC Memory Bank (`fact`, `lesson`, `policy`, `entity`), GARDENER RAG vector search, Just-in-Time Context Injector (`letter-hooker`). |
 | **`.UMBRUCH` Mail** | `OneDrive/.TOPICS/.UMBRUCH/.UmbruchMail` | GDPR protection level model (S1-S4), statutory retention periods (§ 147 AO), automated deletion and deadline checks (`dsgvo-check`). |
 | **`DEV_PrivacyMailDesk_SOCIAL`** | `OneDrive/.TOPICS/.SOFTWARE/MAIL/...` | Local-first zero-cloud CRM architecture, **tombstone principle** (locked deletion markers prevent re-ingestion and unauthorised mail dispatch). |
-| **`.SKILLS` Repository** | `OneDrive/.TOPICS/.AI/.SKILLS/skills` | 32 standardisierte, bilinguale und Google-Cloud-gebrandete Enterprise-Skills nach dem **Component-v1**-Schema. |
+| **`.SKILLS` Repository** | `OneDrive/.TOPICS/.AI/.SKILLS/skills` | 32 standardised, bilingual, Google-Cloud-branded enterprise skills following the **Component-v1** schema. |
 | **`ProfiPrompt` Library** | `OneDrive/.TOPICS/.AI/.PROMPTS` | ProfiPrompt v1 schema with SemVer versioning, change history and role-based visibility (`organization`, `restricted`, `public`). |
 
 ---
@@ -65,7 +65,7 @@ SentinelFleet unifies and hardens codebases, patterns, and research from several
 * **PII & Secrets Redaction (`model_armor.py`):** Replaces IBANs, credit card numbers and API keys in tool arguments with fixed redaction markers (`[REDACTED_IBAN]`, `[REDACTED_CREDIT_CARD]`, `[REDACTED_API_KEY]`) before the call is executed or traced.
 
 ### Pillar 2: UAS (Universal Autonomous System & Taskmaster)
-* **Lifecycle Manager (`lifecycle.py`):** Controls the state machine of 9 fleet agents (`IDLE`, `BUSY`, `WAITING_APPROVAL`, `QUARANTINED`, `OFFLINE`).
+* **Lifecycle Manager (`lifecycle.py`):** Controls the state machine of 9 fleet agents (`IDLE`, `ACTIVE`, `WAITING_APPROVAL`, `QUARANTINED`, `ERROR`).
 * **TaskMaster (`task_master.py`):** Manages task records and guards their state machine (`QUEUED` ➔ `IN_PROGRESS` ➔ `AWAITING_APPROVAL` ➔ `COMPLETED` / `FAILED`); terminal states are final. Operator-created tasks are queued — no worker executes them in this build.
 * **TicketMaster (`ticket_master.py`):** The Human-in-the-Loop (HITL) gatekeeper. Whenever an agent requires permission, an immutable ticket with priority (`NORMAL`, `HIGH`, `CRITICAL`) and structured payload is created for the operator.
 * **Swarm Conductor (`swarm.py`):** Scaffold for multi-agent fan-out on Cloud Run. The current build dispatches the OmniLedger workflow sequentially through the gateway and traces every step; parallel Pub/Sub distribution is designed for, not yet implemented.
@@ -76,7 +76,7 @@ SentinelFleet unifies and hardens codebases, patterns, and research from several
   * `lesson`: Learnings from past runs (e.g., supplier payment terms, discount habits).
   * `policy`: Statutory rules (e.g., § 14 UStG, GoBD requirements).
   * `entity`: Vendor and customer master profiles.
-* **GARDENER RAG (`gardener_rag.py`):** In-memory and vector-ready retrieval engine providing semantic search over tax laws and accounting guidelines.
+* **GARDENER RAG (`gardener_rag.py`):** In-memory retrieval engine over tax law and accounting guideline chunks. The shipped implementation ranks by keyword overlap; the chunk model is prepared for a vector index but no embeddings are computed in this build.
 * **Dynamic Context Injector (`hooker.py`):** Injects matching policies and memory clues directly into agent system prompts just-in-time before inference.
 
 ### Pillar 4: Domain (OmniLedger AP Finance Taskmaster)
@@ -177,9 +177,9 @@ The entire codebase is validated by a rigorous Pytest test suite covering unit l
 python -m pytest tests -v
 ```
 
-### Test Results (59/59 Passed — 100% Green):
+### Test Results (62/62 Passed — 100% Green):
 
-The roster below lists 53 test functions; the seven parametrised cases of
+The roster below lists 56 test functions; the seven parametrised cases of
 `test_settings_read_environment_overrides` are named once and counted individually above.
 
 * `test_gateway_enforces_tool_scoping` — PASSED
@@ -225,6 +225,9 @@ The roster below lists 53 test functions; the seven parametrised cases of
 * `test_firestore_store_uses_the_cloud_client` — PASSED
 * `test_firestore_store_falls_back_when_the_client_is_unavailable` — PASSED
 * `test_firestore_store_survives_a_failing_client` — PASSED
+* `test_spans_reach_the_opentelemetry_exporter` — PASSED
+* `test_error_status_is_propagated_to_the_span` — PASSED
+* `test_both_buffers_are_bounded_and_ids_stay_unique` — PASSED
 * `test_health_endpoint` — PASSED
 * `test_blueprint_renders_html` — PASSED
 * `test_omniledger_process_api` — PASSED
