@@ -6,12 +6,13 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from pydantic import BaseModel
 
+from sentinel_fleet.chat import export as chat_export
 from sentinel_fleet.chat.backends import SUPPORTED_MODELS
 from sentinel_fleet.chat.service import chat_service
 from sentinel_fleet.core.config import settings
@@ -655,6 +656,27 @@ async def api_chat_session(session_id: str):
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
     return session.model_dump()
+
+
+@app.get("/api/chat/sessions/{session_id}/export")
+async def api_chat_export(session_id: str, format: str = "md"):
+    session = chat_service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+    try:
+        body, media_type, filename = chat_export.render(session, format.lower())
+    except chat_export.PdfExportUnavailable as exc:
+        # A missing optional dependency is a capability gap, not a bad request or a crash.
+        raise HTTPException(status_code=501, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 @app.post("/api/chat/send")
