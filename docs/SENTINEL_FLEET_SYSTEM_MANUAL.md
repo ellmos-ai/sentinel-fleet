@@ -259,3 +259,65 @@ python app.py
 # 4. Open Control Center in Browser
 # http://localhost:8080
 ```
+
+---
+
+## 9. Task Templates, Routines & the Cloud Scheduler Trigger
+
+A `TaskTemplate` (`uas/task_templates.py`) is the "everything is a task" foundation: a prompt
+(custom text, or a pinned `PromptItem` version), a skill selection, an assigned agent and an
+approval flag. It describes *what* runs, never *when*. Two independent bindings
+(`uas/routines.py`) can be attached to make it recurring or dated:
+
+* **`RoutineBinding`** — `schedule_spec` in the interval/daily/cron format (`{"kind": "interval",
+  "seconds": 3600}`, `{"kind": "daily", "time": "04:00", "timezone": "Europe/Berlin"}`,
+  `{"kind": "cron", "expression": "*/15 * * * *"}`), an `enabled` flag, and a `miss_policy` of
+  `skip` or `catch_up` for occurrences missed while Cloud Run was scaled to zero.
+* **`ScheduleBinding`** — a one-off `due_at`, kept around after it fires or is skipped as a
+  run-history row.
+
+Neither binding is a stored "template type". The gear/clock badges and the
+running/preparing/idle runtime colour in the dashboard's **Task templates** table are derived on
+every read (`routines.derive_symbols` / `derive_runtime_status`) from the current bindings and
+from `TaskMaster` task state — the same principle the Routinika desktop app uses to derive
+`item_type` from two flags instead of storing it. A template becomes deletable again only once
+both bindings are gone (`routines.delete_template`, `TemplateHasBindingsError` otherwise); only
+its `owner` may delete it at all, while any other viewer can remove it from their own listing
+without touching it for anyone else (`remove_for_viewer`).
+
+**Execution** (`routines.enqueue_template`) creates a real `TaskRecord` — not a second, parallel
+run object — carrying `source_template_id`/`source_binding_id`/`triggered_by`, and drives it
+through the same `SovereignGateway.execute_tool_call` path the chat console uses: an agent
+identity, Model Armor, the permission registry, and the same `chat_service` backend seam, tagged
+with the tool name `execute_template`. Without `GEMINI_API_KEY` it answers in the same
+deterministic-demo mode as every other model call in this app. A template with
+`requires_approval=True` is queued straight into `AWAITING_APPROVAL` and opens a
+`ticket_master` approval ticket instead of calling a model — the same Human-in-the-Loop gate
+`send_external_email` uses, applied per-template rather than per tool name.
+
+**`POST /api/routines/fire`** (`web/server.py`) is the trigger endpoint for **Google Cloud
+Scheduler**. SentinelFleet runs on Cloud Run with scale-to-zero (`core/storage.py` reads
+`K_SERVICE` as its production signal), so an in-process tick loop would lose its state on every
+scale-down and would need an external wakeup anyway — Cloud Scheduler's HTTP trigger is that
+wakeup and the trigger source at once. Each call enqueues every `RoutineBinding` whose
+`next_due_at` has passed and every `pending` `ScheduleBinding` whose `due_at` has passed, then
+recomputes `next_due_at` strictly forward, which is what makes the endpoint idempotent by
+construction rather than by a dedupe table: firing twice for the same tick enqueues once. A
+`ScheduleBinding` more than 15 minutes past due is treated as missed and follows its
+`miss_policy` (`skip` marks it `skipped` without a run, `catch_up` still fires it late); a
+`RoutineBinding`'s backlog is drained one run per `/fire` call under `catch_up`, or dropped
+entirely (resuming from "now") under `skip`. The date math itself (`core/schedule_math.py`) is a
+small, dependency-free `next_after()` implementing the same `interval`/`daily`/`cron` contract as
+`ellmos_scheduler.schedules` — that package is internal and not published to PyPI, so this is a
+vendored copy of the pure date-math function, not an import of its SQLite job store or tick loop.
+
+For a local demo the endpoint stays open (with a logged warning) when `ROUTINES_FIRE_TOKEN` is
+unset; setting it requires callers to send the same value as the `X-Fire-Token` header. A real
+deployment should either set that token in the Cloud Scheduler job's HTTP target, or invoke the
+endpoint through an OIDC-authenticated Cloud Run service-to-service call instead.
+
+**Not in this MVP** (see the "Tasks & Routines" concept doc, Phase 2/3): a guided wizard for
+composing a template from the chat tab's current prompt/skill selection, a dedicated run-history
+("Verlauf") view with a one-click "promote to routine" action, the `idle_window` trigger kind
+(no load signal is available to a stateless Cloud Scheduler call), and a console/COMA execution
+path as an alternative to the Gemini chat backend.
