@@ -78,6 +78,30 @@ def test_every_referenced_icon_exists_in_the_sprite():
 
 
 @pytest.mark.asyncio
+async def test_copy_affordances_exist_on_prompts_skills_and_messages():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    # A prompt card copies the version the operator selected, not just the active one.
+    assert "copySelectedPromptVersion(" in body
+    assert 'data-prompt-id=' in body
+    assert "copySkill(" in body
+
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert "navigator.clipboard" in app_js
+    assert "execCommand(\"copy\")" in app_js, "the insecure-context fallback was removed"
+    assert "copyText(message.content" in app_js, "chat turns lost their copy button"
+    assert "copyText(lane.content" in app_js, "race lanes lost their copy button"
+
+
+def test_transcript_children_keep_their_height():
+    """Regression guard: without this rule a race block collapses once the transcript overflows."""
+    css = (STATIC_DIR / "style.css").read_text(encoding="utf-8")
+    assert ".chat-transcript > * { flex: 0 0 auto; }" in css
+
+
+@pytest.mark.asyncio
 async def test_dashboard_tables_render_a_bounded_tail():
     """An unbounded table turns a long-running deployment's entry page into a huge document."""
     transport = ASGITransport(app=app)

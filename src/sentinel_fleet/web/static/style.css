@@ -328,6 +328,16 @@ a { color: var(--accent); }
 
 .ledger-rows { display: block; }
 
+/* An empty hero states its condition in one line rather than reserving a screenful. */
+.ledger-idle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
 .ledger-row {
   display: grid;
   grid-template-columns: 92px 1fr auto auto;
@@ -675,7 +685,7 @@ a { color: var(--accent); }
 
 .picker-option {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--s-2);
   padding: 6px var(--s-2);
   border-bottom: 1px solid var(--rule);
@@ -686,7 +696,14 @@ a { color: var(--accent); }
 .picker-option:last-child { border-bottom: none; }
 .picker-option:hover { background: var(--surface-sunk); }
 .picker-option input { margin-top: 3px; }
-.picker-option .picker-pillar { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+.picker-option .picker-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-option .picker-pillar {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
 
 /* ---------- Tables ---------- */
 
@@ -844,6 +861,10 @@ a { color: var(--accent); }
   max-height: 52vh;
 }
 
+/* Without this the column's children shrink once the transcript overflows, and the tallest
+   item - a race block - collapses to a hairline instead of the container scrolling. */
+.chat-transcript > * { flex: 0 0 auto; }
+
 .turn { max-width: 74ch; }
 .turn-user { align-self: flex-end; }
 .turn-assistant { align-self: flex-start; width: 100%; }
@@ -887,10 +908,13 @@ a { color: var(--accent); }
 
 .composer-controls {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: var(--s-3);
   margin-bottom: var(--s-3);
 }
+
+.composer-skills { margin-bottom: var(--s-3); }
+.composer-skills .picker { margin-top: var(--s-1); max-height: 132px; }
 
 .composer-send {
   display: flex;

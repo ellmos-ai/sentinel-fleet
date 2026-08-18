@@ -183,15 +183,15 @@ function renderSkillPicker() {
       else state.selectedSkills.delete(skill.skill_id);
     });
 
-    const label = document.createElement("span");
     const name = document.createElement("span");
+    name.className = "picker-name";
     name.textContent = skill.name;
+
     const pillar = document.createElement("span");
     pillar.className = "picker-pillar";
-    pillar.textContent = ` ${skill.pillar} v${skill.version}`;
-    label.append(name, pillar);
+    pillar.textContent = `${skill.pillar} v${skill.version}`;
 
-    row.append(box, label);
+    row.append(box, name, pillar);
     picker.appendChild(row);
   });
 }
@@ -269,7 +269,17 @@ function renderSessionList() {
 function startNewSession() {
   state.sessionId = "";
   document.getElementById("chat-title").textContent = "New conversation";
-  document.getElementById("chat-transcript").replaceChildren();
+  const transcript = document.getElementById("chat-transcript");
+  transcript.replaceChildren();
+  const empty = document.createElement("div");
+  empty.className = "empty-state";
+  empty.id = "chat-empty";
+  const heading = document.createElement("h4");
+  heading.textContent = "Nothing sent yet";
+  const hint = document.createElement("p");
+  hint.textContent = "Pick the skills and prompt version that should govern the answer, then send a message.";
+  empty.append(heading, hint);
+  transcript.appendChild(empty);
   renderSessionList();
   document.getElementById("chat-input").focus();
 }
@@ -302,6 +312,10 @@ function modeStamp(mode) {
       ? "Model Armor refused this message; no model was called"
       : "Produced without calling a model";
   return stamp;
+}
+
+function clearChatPlaceholder() {
+  document.getElementById("chat-empty")?.remove();
 }
 
 function renderTurn(message) {
@@ -485,6 +499,7 @@ async function sendChat() {
   setChatError("");
   sendButton.disabled = true;
 
+  clearChatPlaceholder();
   transcript.appendChild(renderTurn({ role: "user", content: message }));
   const isRace = state.chatMode === "race";
   transcript.appendChild(pendingTurn(isRace ? "Running the lanes" : "Routing through the gateway"));

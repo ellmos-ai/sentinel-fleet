@@ -31,6 +31,11 @@ ROW_GAP = 46
 MARGIN_X = 18
 MARGIN_Y = 26
 
+# Vertical trunk lanes in the gutter between two columns.
+TRUNK_LANES = 5
+TRUNK_PITCH = 8
+TRUNK_INSET = 9
+
 
 def _package_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -159,6 +164,11 @@ def build_circuit(root: Optional[str] = None) -> Dict[str, object]:
                 "imported_by": [],
             }
 
+    # Every edge leaving a module turns down the same vertical trunk, and neighbouring modules
+    # get different trunks. Without that, parallel runs sit on top of each other and the eye
+    # cannot tell which trace belongs to which module.
+    trunk_lane = {module: index % TRUNK_LANES for index, module in enumerate(sorted(nodes))}
+
     wires = []
     for source, target in sorted(edges):
         a, b = nodes[source], nodes[target]
@@ -171,8 +181,10 @@ def build_circuit(root: Optional[str] = None) -> Dict[str, object]:
         end_y = b["y"] + NODE_HEIGHT / 2
 
         if end_x > start_x:
-            # Orthogonal elbow: out to the right, across, then in. Leaderboard traces, not curves.
-            elbow = start_x + (end_x - start_x) / 2
+            # Orthogonal elbow: out to the trunk, down or up, then in. Traces, not curves.
+            elbow = start_x + TRUNK_INSET + trunk_lane[source] * TRUNK_PITCH
+            elbow = min(elbow, end_x - TRUNK_INSET)
+            elbow = max(elbow, start_x + 6)
             path = f"M {start_x} {start_y} H {elbow} V {end_y} H {end_x}"
         else:
             # Only reachable if an import cycle collapses two modules into one column.

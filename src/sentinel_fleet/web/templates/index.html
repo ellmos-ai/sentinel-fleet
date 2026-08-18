@@ -36,40 +36,6 @@
 
   <div class="container">
 
-    <!-- The gate ledger is the console's thesis: nothing runs without a recorded verdict. -->
-    <section class="ledger">
-      <div class="ledger-head">
-        <div class="ledger-title">
-          <h2>Gate ledger</h2>
-          <span class="eyebrow">every tool call, every verdict</span>
-        </div>
-        <span class="badge-status badge-info numeric">{{ spans|length }} spans retained</span>
-      </div>
-      {% if not spans %}
-      <div style="padding: var(--s-5)">
-        <div class="empty-state">
-          <svg class="icon icon-lg"><use href="#i-empty"/></svg>
-          <h4>No governed calls yet</h4>
-          <p>Run one of the document scenarios below. Every tool call the fleet makes lands here with the verdict the gateway gave it.</p>
-        </div>
-      </div>
-      {% else %}
-      <div class="ledger-rows">
-        {% for s in spans[-7:]|reverse %}
-        <div class="ledger-row">
-          <span class="ledger-time">{{ s.start_time|round(1) }}</span>
-          <span class="ledger-op">{{ s.name }}</span>
-          <span class="ledger-actor item-meta">{{ s.agent_id }}</span>
-          <span>
-            <span class="badge-status {% if s.status == 'OK' %}badge-ok{% elif s.status in ('BLOCKED', 'DENIED', 'SECURITY_VIOLATION', 'ERROR') %}badge-danger{% else %}badge-warn{% endif %}">{{ s.status }}</span>
-            <span class="ledger-duration">{{ "%.3f"|format((s.end_time or s.start_time) - s.start_time) }}s</span>
-          </span>
-        </div>
-        {% endfor %}
-      </div>
-      {% endif %}
-    </section>
-
     <nav class="tab-rail" role="tablist">
       <button id="btn-tab-overview" class="tab-btn active" onclick="switchTab('tab-overview')">
         <svg class="icon"><use href="#i-grid"/></svg> Overview
@@ -102,6 +68,37 @@
 
     <!-- OVERVIEW -->
     <section id="tab-overview" class="tab-pane">
+      <!-- The gate ledger leads the console: nothing runs without a recorded verdict. -->
+    <section class="ledger">
+      <div class="ledger-head">
+        <div class="ledger-title">
+          <h2>Gate ledger</h2>
+          <span class="eyebrow">every tool call, every verdict</span>
+        </div>
+        <span class="badge-status badge-info numeric">{{ spans|length }} spans retained</span>
+      </div>
+      {% if not spans %}
+      <div class="ledger-idle">
+        <svg class="icon"><use href="#i-empty"/></svg>
+        <span>No governed calls yet. Run a scenario below and every tool call lands here with its verdict.</span>
+      </div>
+      {% else %}
+      <div class="ledger-rows">
+        {% for s in spans[-7:]|reverse %}
+        <div class="ledger-row">
+          <span class="ledger-time">{{ s.start_time|round(1) }}</span>
+          <span class="ledger-op">{{ s.name }}</span>
+          <span class="ledger-actor item-meta">{{ s.agent_id }}</span>
+          <span>
+            <span class="badge-status {% if s.status == 'OK' %}badge-ok{% elif s.status in ('BLOCKED', 'DENIED', 'SECURITY_VIOLATION', 'ERROR') %}badge-danger{% else %}badge-warn{% endif %}">{{ s.status }}</span>
+            <span class="ledger-duration">{{ "%.3f"|format((s.end_time or s.start_time) - s.start_time) }}s</span>
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+
       <div class="card" style="margin-bottom: var(--s-4)">
         <div class="card-header">
           <h3><svg class="icon"><use href="#i-upload"/></svg> Run a document through the fleet</h3>
@@ -287,7 +284,13 @@
             </div>
           </div>
 
-          <div id="chat-transcript" class="chat-transcript"></div>
+          <div id="chat-transcript" class="chat-transcript">
+            <div class="empty-state" id="chat-empty">
+              <svg class="icon icon-lg"><use href="#i-chat"/></svg>
+              <h4>Nothing sent yet</h4>
+              <p>Pick the skills and prompt version that should govern the answer, then send a message. Switch to race mode to put two models on the same prompt.</p>
+            </div>
+          </div>
 
           <div class="composer">
             <div class="composer-controls">
@@ -310,11 +313,12 @@
                   <option value="">Pick a template first</option>
                 </select>
               </div>
-              <div>
-                <label class="field-label" for="skill-filter">Skills in force</label>
-                <input type="text" id="skill-filter" class="text-input" placeholder="Filter skills" oninput="renderSkillPicker()">
-                <div id="skill-picker" class="picker" style="margin-top: var(--s-1)"></div>
-              </div>
+            </div>
+
+            <div class="composer-skills">
+              <label class="field-label" for="skill-filter">Skills in force</label>
+              <input type="text" id="skill-filter" class="text-input" placeholder="Filter by name or pillar" oninput="renderSkillPicker()">
+              <div id="skill-picker" class="picker"></div>
             </div>
 
             <div class="composer-modes">
