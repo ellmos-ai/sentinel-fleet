@@ -269,6 +269,11 @@ def _routine_catalog(viewer: Optional[str] = None) -> List[Dict[str, Any]]:
             "assigned_agent": template.assigned_agent,
             "prompt_source": template.prompt_source,
             "requires_approval": template.requires_approval,
+            # Steps sorted by position, for the step editor and the step-count badge (concept
+            # doc, section E.4). A single-step template still carries this - `step_count == 1`
+            # is the ordinary case, not a special one.
+            "steps": [s.model_dump() for s in sorted(template.steps, key=lambda s: s.position)],
+            "step_count": len(template.steps),
             "symbols": e["symbols"],
             "runtime_status": e["runtime_status"],
             "next_due_at": e["next_due_at"],
@@ -777,6 +782,49 @@ async def api_get_task_template(template_id: str):
         # The "Verlauf" (run history): no second store, just this template's own TaskRecords.
         "runs": [r.model_dump() for r in task_master.list_by_template(template_id)]
     }
+
+
+@app.put("/api/task-templates/{template_id}/steps")
+async def api_update_task_template_steps(template_id: str, steps: str = Form(...)):
+    """Replaces a template's whole step list in one call - add, change, remove and reorder a
+    step are all the same operation here (concept doc, section E.4): the client submits the
+    edited array, with each step's `position` set to its index in that array. Validation
+    (gapless positions, unique step ids, supported execution_pattern/race_models shape - see
+    `uas/task_templates.py`) happens on the model itself; this endpoint only translates its
+    ValidationError into a 422 instead of a 500, the same way `api_create_task_template` does.
+    """
+    if not task_template_registry.get_template(template_id):
+        raise TemplateNotFoundError(template_id)
+
+    try:
+        raw_steps = json.loads(steps)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"'steps' is not valid JSON: {exc}")
+    if not isinstance(raw_steps, list) or not raw_steps:
+        raise HTTPException(status_code=422, detail="'steps' must be a non-empty JSON array of step objects")
+
+    try:
+        parsed_steps = [Step(**item) for item in raw_steps]
+    except PydanticValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    # A race step's model *count* is validated on Step itself; whether those models are ones
+    # this deployment actually supports is a deployment-level fact Step cannot know about.
+    # `_reject_unsupported_models` (chat race) raises 400 for the same check - deliberately not
+    # reused here, so every rejection on this endpoint is a 422, as the caller expects.
+    unsupported = {m for step in parsed_steps for m in step.race_models if m not in SUPPORTED_MODELS}
+    if unsupported:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported model(s) in a race step: {', '.join(sorted(unsupported))}. "
+                   f"Choose from {', '.join(SUPPORTED_MODELS)}."
+        )
+
+    try:
+        updated = task_template_registry.update_template(template_id, steps=parsed_steps)
+    except PydanticValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"status": "updated", "template": updated.model_dump()}
 
 
 @app.delete("/api/task-templates/{template_id}")

@@ -368,3 +368,84 @@ async def test_create_task_template_rejects_malformed_steps_json(client):
         "steps": "not json"
     })
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/task-templates/{id}/steps: add/change/remove/reorder are all the same operation -
+# submit the whole edited array, position = index order (concept doc, section E.4).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_update_steps_endpoint_replaces_the_whole_list(client):
+    template = task_template_registry.create_template(name="Editable steps", owner="petra")
+
+    response = await client.put(f"/api/task-templates/{template.template_id}/steps", data={
+        "steps": '[{"step_id": "a", "position": 0, "custom_prompt_text": "First."}, '
+                 '{"step_id": "b", "position": 1, "custom_prompt_text": "Second."}]'
+    })
+    assert response.status_code == 200
+    updated = response.json()["template"]
+    assert [s["step_id"] for s in updated["steps"]] == ["a", "b"]
+
+    fetched = task_template_registry.get_template(template.template_id)
+    assert len(fetched.steps) == 2
+
+
+@pytest.mark.asyncio
+async def test_update_steps_endpoint_reorders_by_resubmitting_positions(client):
+    """"Umordnen" is the same call as add/change/remove: the client re-sends every step with
+    its new position - here a→1, b→0 swaps the execution order."""
+    template = task_template_registry.create_template(
+        name="Reorder probe", owner="quinn",
+        steps=[Step(step_id="a", position=0), Step(step_id="b", position=1)]
+    )
+
+    response = await client.put(f"/api/task-templates/{template.template_id}/steps", data={
+        "steps": '[{"step_id": "a", "position": 1}, {"step_id": "b", "position": 0}]'
+    })
+    assert response.status_code == 200
+    fetched = task_template_registry.get_template(template.template_id)
+    assert [s.step_id for s in sorted(fetched.steps, key=lambda s: s.position)] == ["b", "a"]
+
+
+@pytest.mark.asyncio
+async def test_update_steps_endpoint_returns_404_for_a_missing_template(client):
+    response = await client.put("/api/task-templates/TMPL-DOES-NOT-EXIST/steps", data={
+        "steps": '[{"step_id": "a", "position": 0}]'
+    })
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_steps_endpoint_rejects_malformed_json(client):
+    template = task_template_registry.create_template(name="Bad JSON target", owner="rio")
+    response = await client.put(f"/api/task-templates/{template.template_id}/steps", data={"steps": "not json"})
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_steps_endpoint_rejects_an_empty_array(client):
+    template = task_template_registry.create_template(name="Empty array target", owner="sana")
+    response = await client.put(f"/api/task-templates/{template.template_id}/steps", data={"steps": "[]"})
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_steps_endpoint_rejects_gappy_positions(client):
+    template = task_template_registry.create_template(name="Gap target", owner="tariq")
+    response = await client.put(f"/api/task-templates/{template.template_id}/steps", data={
+        "steps": '[{"step_id": "a", "position": 0}, {"step_id": "b", "position": 5}]'
+    })
+    assert response.status_code == 422
+    assert "gapless" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_steps_endpoint_rejects_an_unsupported_race_model(client):
+    template = task_template_registry.create_template(name="Bad race model target", owner="uma")
+    response = await client.put(f"/api/task-templates/{template.template_id}/steps", data={
+        "steps": '[{"step_id": "a", "position": 0, "execution_pattern": "race", '
+                 '"race_models": ["gemini-3.5-flash", "made-up-model"]}]'
+    })
+    assert response.status_code == 422
+    assert "made-up-model" in response.json()["detail"]
