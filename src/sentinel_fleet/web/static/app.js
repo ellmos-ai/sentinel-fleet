@@ -347,7 +347,7 @@ function updateComposerSetupSummary() {
     parts.push(entry ? entry.title : prompt.value);
   }
 
-  if (state.mode === "race") parts.push("race mode");
+  if (state.chatMode === "race") parts.push("race mode");
 
   summary.textContent = parts.join(" / ");
 }

@@ -419,7 +419,11 @@ def test_the_collapsed_setup_cannot_hide_what_is_in_force():
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
     assert "updateComposerSetupSummary" in script
     summary = script.split("function updateComposerSetupSummary(")[1].split("\n}")[0]
-    assert 'state.mode === "race"' in summary, "an active race mode must show while collapsed"
+    # The field is state.chatMode; reading a state.mode that never existed made this line a
+    # silent no-op - the collapsed panel would have hidden an active race mode after all.
+    assert 'state.chatMode === "race"' in summary, "an active race mode must show while collapsed"
+    setter = script.split("function setChatMode(")[1].split("\n}")[0]
+    assert "state.chatMode" in setter, "the summary reads a field setChatMode does not write"
     assert "state.selectedSkills.size" in summary
     # The collapse is deliberately not remembered: a fresh visit opens on the message.
     assert "composer_setup" not in script and "sentinel_setup" not in script
@@ -536,3 +540,12 @@ def test_readme_documents_the_demo_reset():
     readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
     assert "Reset the demo data" in readme
     assert "rm data/*.json" in readme
+
+
+def test_the_row_overflow_menu_cannot_be_clipped_away():
+    """The template table scrolls, and a scroll container clips absolutely positioned
+    descendants - an absolutely positioned menu on the last row would open into nothing."""
+    css = (STATIC_DIR / "style.css").read_text(encoding="utf-8")
+    menu = css.split(".row-more-menu {")[1].split("}")[0]
+    assert "position: absolute" not in menu, \
+        "the overflow menu must stay in flow inside the scrolling table"

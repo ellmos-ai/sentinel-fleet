@@ -914,26 +914,27 @@ a { color: var(--accent); }
 
 /* Eight buttons per row is a wall, not a set of choices. Two stay out, the rest fold behind a
    disclosure - <details> so it closes on Escape and needs no script. */
-.row-more { position: relative; display: inline-block; }
+.row-more { display: inline-block; }
 .row-more > summary { list-style: none; cursor: pointer; display: inline-flex; }
 .row-more > summary::-webkit-details-marker { display: none; }
 .row-more[open] > summary { border-color: var(--accent); color: var(--accent); }
 
+/* Deliberately in flow rather than absolutely positioned: the table scrolls
+   (.table-wrap { overflow-x: auto }), and a scroll container clips absolutely positioned
+   descendants - the menu on the last row would have opened into nothing. Letting the cell grow
+   costs a taller row while it is open and cannot be cut off. */
 .row-more-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 40;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: var(--s-1);
   min-width: 170px;
+  margin-top: var(--s-2);
   padding: var(--s-2);
   background: var(--surface);
   border: 1px solid var(--rule-strong);
   border-radius: var(--r-1);
-  box-shadow: var(--lift-high);
+  box-shadow: var(--lift);
 }
 
 .row-more-menu .btn { justify-content: flex-start; }
