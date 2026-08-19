@@ -553,7 +553,7 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>Name</th><th>Email</th><th>Category</th><th>Level</th>
+                <th>Name</th><th>Email</th><th>Postal address</th><th>Category</th><th>Level</th>
                 <th>Consent</th><th>Retention reason</th><th>Action</th>
               </tr>
             </thead>
@@ -562,6 +562,7 @@
               <tr>
                 <td><b>{{ c.name }}</b><div class="item-meta">{{ c.organization or '-' }}</div></td>
                 <td><code>{{ c.email }}</code></td>
+                <td class="item-meta">{% if c.postal_address %}{{ c.postal_address }}{% else %}-{% endif %}</td>
                 <td><span class="badge-status">{{ c.category }}</span></td>
                 <td><span class="badge-status badge-purple">{{ c.protection_level }}</span></td>
                 <td><span class="badge-status {% if c.opt_in_status == 'confirmed' %}badge-ok{% else %}badge-danger{% endif %}">{{ c.opt_in_status }}</span></td>
@@ -1530,6 +1531,15 @@
         <div class="form-group">
           <label>Organisation</label>
           <input type="text" name="organization" class="text-input" placeholder="Acme International">
+        </div>
+        <div class="form-group">
+          <label>Postal address (optional)</label>
+          <textarea name="postal_address" class="textarea-input" rows="3"
+                    placeholder="Acme International&#10;12 Example Street&#10;10115 Berlin&#10;Germany"></textarea>
+          <p class="item-desc" style="margin: var(--s-1) 0 0">
+            Personal data of the same rank as the email: it is held under the retention level
+            chosen below and erased when this contact objects.
+          </p>
         </div>
         <div class="form-group">
           <label>Category</label>

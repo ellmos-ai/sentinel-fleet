@@ -12,6 +12,11 @@ class PrivacyContact(BaseModel):
     name: str
     email: str
     organization: Optional[str] = None
+    # A company writes letters, not only mail. The address is personal data of the same rank as
+    # the email: it enters under the same protection level, is screened by the same amber rule
+    # in privacy_screen ("postal address" sits beside "email address" there), and is erased on
+    # opt-out. Optional with a default so records persisted before this field still load.
+    postal_address: Optional[str] = None
     category: str = "vendor"  # vendor | institution | personal | subscriber
     # DSGVO / GDPR Protection Level
     # S1 = 6 months, S2 = 12 months, S3 = 36 months (Tax relevant), S4 = Permanent until revocation
@@ -105,7 +110,8 @@ class PrivacyContactHub:
         email: str,
         organization: str,
         category: str = "vendor",
-        protection_level: str = "S3"
+        protection_level: str = "S3",
+        postal_address: str = ""
     ) -> PrivacyContact:
         contact_id = f"cnt-{int(time.time()*1000)}"
         contact = PrivacyContact(
@@ -113,6 +119,7 @@ class PrivacyContactHub:
             name=name,
             email=email,
             organization=organization,
+            postal_address=postal_address or None,
             category=category,
             protection_level=protection_level,
             opt_in_status="confirmed"
@@ -127,6 +134,10 @@ class PrivacyContactHub:
 
         contact.opt_in_status = "unsubscribed"
         contact.is_tombstone = True
+        # The tombstone keeps the email on purpose: blocking future contact needs the address
+        # that would be written to. Nothing blocks on the postal address, so holding it after an
+        # objection would be storage without a purpose - it goes.
+        contact.postal_address = None
         contact.dsgvo_notes = f"Objection recorded {time.strftime('%Y-%m-%d')}: {reason}"
         contact.updated_at = time.time()
         self._store.put(contact_id, contact)

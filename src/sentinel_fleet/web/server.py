@@ -524,14 +524,16 @@ async def api_create_contact(
     email: str = Form(...),
     organization: str = Form(""),
     category: str = Form("vendor"),
-    protection_level: str = Form("S3")
+    protection_level: str = Form("S3"),
+    postal_address: str = Form("")
 ):
     contact = privacy_contact_hub.add_contact(
         name=name,
         email=email,
         organization=organization,
         category=category,
-        protection_level=protection_level
+        protection_level=protection_level,
+        postal_address=postal_address
     )
     return {"status": "created", "contact": contact.model_dump()}
 

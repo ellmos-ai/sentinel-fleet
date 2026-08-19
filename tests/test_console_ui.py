@@ -436,3 +436,54 @@ def test_the_web_reader_hint_survives_the_collapse():
     focus = script.split("function focusWebReader(")[1].split("\n}")[0]
     assert "setComposerSetupOpen(true)" in focus, \
         "focusing a field inside a collapsed panel would do nothing"
+
+
+@pytest.mark.asyncio
+async def test_a_contact_can_carry_a_postal_address_under_the_same_retention():
+    """A company writes letters, not only mail. The address is personal data of the same rank as
+    the email, so it enters under the chosen retention level rather than beside it."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/contacts/create", data={
+            "name": "Accounts payable, Letterpress Ltd",
+            "email": "ap@letterpress.example",
+            "organization": "Letterpress Ltd",
+            "postal_address": "Letterpress Ltd\n12 Example Street\n10115 Berlin",
+            "protection_level": "S2",
+        })
+        assert response.status_code == 200
+        contact = response.json()["contact"]
+        assert "12 Example Street" in contact["postal_address"]
+        assert contact["protection_level"] == "S2", "the address is held under the record's level"
+
+        body = (await client.get("/")).text
+        assert "<th>Postal address</th>" in body
+        assert 'name="postal_address"' in body, "the form must offer the field"
+
+        # An objection erases the address: nothing blocks on it, so keeping it would be storage
+        # without a purpose. The email stays, because the block itself needs it.
+        opt_out = await client.post(f"/api/contacts/{contact['contact_id']}/opt-out",
+                                    data={"reason": "Requested erasure"})
+        assert opt_out.status_code == 200
+        after = opt_out.json()["contact"]
+        assert after["postal_address"] is None, "an objection must erase the postal address"
+        assert after["email"] == "ap@letterpress.example", "the tombstone needs the email to block on"
+
+
+def test_the_postal_address_is_screened_like_an_email():
+    """Equal rank has to hold where it matters: before anything reaches a model."""
+    from sentinel_fleet.core.privacy_screen import AMBER_PATTERNS
+
+    assert "postal address" in AMBER_PATTERNS
+    assert "email address" in AMBER_PATTERNS
+
+
+@pytest.mark.asyncio
+async def test_the_contacts_tab_says_whose_contacts_these_are():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert "counterparties your fleet writes to" in body
+    # S2 and S3 were named nowhere but the dropdown; the live test asked what they meant.
+    assert "S2 twelve months" in body and "S3 thirty-six months" in body
