@@ -4,6 +4,12 @@ import os
 import re
 import time
 from typing import Dict, List, Optional
+# Deliberately a top-level import, not a lazy one inside the parser: when pyyaml is
+# missing, the old in-function `import yaml` raised inside the parser's broad
+# `except Exception`, every SKILL.md silently became None and the registry degraded to
+# its 3 seed skills without a trace. A missing dependency should fail the process at
+# import time, loudly.
+import yaml
 from pydantic import BaseModel, Field
 from sentinel_fleet.core.errors import SkillNotFoundError, SkillSchemaValidationError
 
@@ -62,7 +68,6 @@ class ComponentV1SkillLoader:
                 return None
 
             yaml_text = frontmatter_match.group(1)
-            import yaml
             data = yaml.safe_load(yaml_text)
             if not isinstance(data, dict):
                 return None

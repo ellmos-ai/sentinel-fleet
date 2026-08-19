@@ -28,6 +28,10 @@ dependencies = [
     # implementation to hand it off to - uvicorn (the Dockerfile's actual server) needs this
     # installed explicitly, since it is declared here as plain "uvicorn", not "uvicorn[standard]".
     "websockets>=13.0",
+    # component-v1 skill frontmatter parsing (core/skills.py). Was only ever available
+    # transitively in dev environments - the slim container missed it, every SKILL.md
+    # silently failed to parse and Cloud Run served the 3 seed skills instead of 32.
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
