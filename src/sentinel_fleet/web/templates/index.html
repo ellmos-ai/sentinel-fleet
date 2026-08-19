@@ -109,23 +109,28 @@
           <div id="process-status"></div>
         </div>
         <p class="item-desc">
-          Each scenario runs the full pipeline: guardrail scan, gateway, extraction, § 14 UStG audit,
-          then either a booking or a drafted correction letter held at the approval gate.
+          Pick a scenario below: one click runs the entire pipeline end to end — guardrail scan,
+          gateway, extraction, § 14 UStG audit, then either a booking or a drafted correction
+          letter held at the approval gate. Every call it makes lands in the gate ledger above.
         </p>
         <div class="trigger-grid">
           <button class="trigger-btn on-valid" onclick="processInvoicePreset('valid')">
+            <span class="trigger-run eyebrow"><svg class="icon"><use href="#i-play"/></svg> Run scenario</span>
             <b>Clean invoice</b>
             <span>Books straight into the ledger store</span>
           </button>
           <button class="trigger-btn on-vat" onclick="processInvoicePreset('missing_vat')">
+            <span class="trigger-run eyebrow"><svg class="icon"><use href="#i-play"/></svg> Run scenario</span>
             <b>Missing VAT ID</b>
             <span>Opens the dispute loop and an approval ticket</span>
           </button>
           <button class="trigger-btn on-math" onclick="processInvoicePreset('math_error')">
+            <span class="trigger-run eyebrow"><svg class="icon"><use href="#i-play"/></svg> Run scenario</span>
             <b>Net and gross disagree</b>
             <span>Arithmetic check blocks the booking</span>
           </button>
           <button class="trigger-btn on-attack" onclick="processInvoicePreset('injection_attack')">
+            <span class="trigger-run eyebrow"><svg class="icon"><use href="#i-play"/></svg> Run scenario</span>
             <b>Prompt injection</b>
             <span>Model Armor intercepts and quarantines the agent</span>
           </button>
@@ -145,6 +150,11 @@
             <h3><svg class="icon"><use href="#i-shield"/></svg> Control: fleet and armor</h3>
             <span class="badge-status badge-info numeric">{{ agents|length }} agents</span>
           </div>
+          <p class="card-note">
+            Who is on duty, and who Model Armor has pulled off it. A preview of the Fleet tab,
+            where every agent carries its scopes and its history.
+            {% if agents|length > 4 %}<span class="card-scope numeric">Showing 4 of {{ agents|length }}.</span>{% endif %}
+          </p>
           <div class="card-body">
             {% for agent in agents[:4] %}
             <div class="record pillar-control {% if agent.status.value == 'quarantined' %}is-quarantined{% endif %}">
@@ -165,13 +175,25 @@
             </div>
             {% endfor %}
           </div>
+          <div class="card-foot">
+            <button class="btn btn-sm card-link" onclick="switchTab('tab-fleet')">
+              <span>View all {{ agents|length }} agents in Fleet</span>
+              <svg class="icon"><use href="#i-arrow-right"/></svg>
+            </button>
+          </div>
         </div>
 
         <div class="card">
           <div class="card-header">
-            <h3><svg class="icon"><use href="#i-inbox"/></svg> UAS: approvals you owe</h3>
+            <h3><svg class="icon"><use href="#i-inbox"/></svg> Autonomy (UAS): approvals you owe</h3>
             <span class="badge-status {% if pending_tickets %}badge-warn{% else %}badge-ok{% endif %} numeric">{{ pending_tickets|length }} pending</span>
           </div>
+          <p class="card-note">
+            UAS is the Universal Autonomous System: it runs tasks unattended and stops at an ask
+            gate whenever the decision is yours. A preview of the Approvals tab, where you act on
+            the full queue.
+            {% if tickets|length > 3 %}<span class="card-scope numeric">Showing the 3 most recent of {{ tickets|length }}.</span>{% endif %}
+          </p>
           <div class="card-body">
             {% if not tickets %}
             <div class="empty-state">
@@ -180,7 +202,7 @@
               <p>When an agent hits an ask gate, the request appears here before anything leaves the building.</p>
             </div>
             {% endif %}
-            {% for ticket in tickets[:3] %}
+            {% for ticket in tickets[-3:]|reverse %}
             <div class="record pillar-uas">
               <div class="item-top">
                 <span class="item-title">{{ ticket.title }}</span>
@@ -202,6 +224,12 @@
             </div>
             {% endfor %}
           </div>
+          <div class="card-foot">
+            <button class="btn btn-sm card-link" onclick="switchTab('tab-tickets')">
+              <span>View all {{ tickets|length }} requests in Approvals</span>
+              <svg class="icon"><use href="#i-arrow-right"/></svg>
+            </button>
+          </div>
         </div>
 
         <div class="card">
@@ -209,6 +237,12 @@
             <h3><svg class="icon"><use href="#i-document"/></svg> Domain: OmniLedger</h3>
             <span class="badge-status badge-ok numeric">{{ invoices|length }} processed</span>
           </div>
+          <p class="card-note">
+            OmniLedger is the accounting domain: it extracts an invoice, audits it against
+            § 14 UStG, then books it or opens a dispute. The Domains tab shows which policies,
+            agents and skills it is bound to.
+            {% if invoices|length > 3 %}<span class="card-scope numeric">Showing the 3 most recent of {{ invoices|length }}.</span>{% endif %}
+          </p>
           <div class="card-body">
             {% if not invoices %}
             <div class="empty-state">
@@ -217,7 +251,7 @@
               <p>Pick a scenario above to see extraction, audit and booking run end to end.</p>
             </div>
             {% endif %}
-            {% for inv in invoices[:3] %}
+            {% for inv in invoices[-3:]|reverse %}
             <div class="record pillar-domain">
               <div class="item-top">
                 <span class="item-title">{{ inv.vendor_name }}</span>
@@ -245,6 +279,12 @@
             </div>
             {% endfor %}
           </div>
+          <div class="card-foot">
+            <button class="btn btn-sm card-link" onclick="switchTab('tab-domains')">
+              <span>Open the OmniLedger domain in Domains</span>
+              <svg class="icon"><use href="#i-arrow-right"/></svg>
+            </button>
+          </div>
         </div>
 
         <div class="card">
@@ -252,6 +292,11 @@
             <h3><svg class="icon"><use href="#i-memory"/></svg> Memory: state and traces</h3>
             <span class="badge-status badge-purple numeric">{{ memories|length }} entries</span>
           </div>
+          <p class="card-note">
+            The facts, lessons and policies agents retrieve from before they act. A preview of the
+            Memory tab, which lists every entry with its metadata.
+            {% if memories|length > 4 %}<span class="card-scope numeric">Showing 4 of {{ memories|length }}.</span>{% endif %}
+          </p>
           <div class="card-body">
             {% for m in memories[:4] %}
             <div class="record pillar-memory">
@@ -262,6 +307,12 @@
               <div class="item-desc">{{ m.content }}</div>
             </div>
             {% endfor %}
+          </div>
+          <div class="card-foot">
+            <button class="btn btn-sm card-link" onclick="switchTab('tab-memory')">
+              <span>View all {{ memories|length }} memory entries</span>
+              <svg class="icon"><use href="#i-arrow-right"/></svg>
+            </button>
           </div>
         </div>
       </div>

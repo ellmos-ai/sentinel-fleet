@@ -482,6 +482,39 @@ a { color: var(--accent); }
 
 .card-body { display: block; }
 
+/* Every overview card is a slice of a full tab. The note says what the card is and how much of
+   the whole it shows; the foot is the way through to the rest. Without both, a truncated list
+   reads as the entire system and the console feels like something you can only watch. */
+.card-note {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  margin: calc(-1 * var(--s-2)) 0 var(--s-3);
+}
+
+.card-scope {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: var(--s-1);
+}
+
+.card-foot {
+  margin-top: auto;
+  padding-top: var(--s-3);
+}
+
+.card-link {
+  width: 100%;
+  justify-content: space-between;
+  background: transparent;
+  border-color: var(--rule);
+  color: var(--ink-2);
+}
+
+.card-link:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-wash); }
+.card-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* A record is any governed row: agent, ticket, invoice, prompt, skill, memory entry.
    The 2px left spine carries the pillar index. */
 .record {
@@ -821,9 +854,38 @@ a { color: var(--accent); }
   display: block;
 }
 
-.trigger-btn:hover { border-color: var(--accent); border-left-color: var(--accent); background: var(--surface); }
+.trigger-btn:hover {
+  border-color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--surface);
+  box-shadow: var(--lift);
+}
+
+.trigger-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.trigger-btn:active { background: var(--accent-wash); }
 .trigger-btn b { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 2px; }
 .trigger-btn span { display: block; font-size: 11.5px; color: var(--ink-2); }
+
+/* These tiles start the whole pipeline, so they have to read as controls before the pointer
+   ever reaches them - as plain cards they were mistaken for a read-out of what had already
+   run. The run label and the solid play mark carry that affordance at rest. */
+.trigger-btn .trigger-run {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--accent);
+  margin-bottom: var(--s-2);
+}
+
+.trigger-btn .trigger-run .icon {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+  stroke: none;
+}
+
+.trigger-btn:hover .trigger-run { color: var(--accent-hover); }
 
 .trigger-btn.on-valid { border-left-color: var(--ok); }
 .trigger-btn.on-vat { border-left-color: var(--warn); }

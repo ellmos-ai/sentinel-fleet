@@ -181,3 +181,51 @@ def test_skill_bodies_are_loaded_from_disk():
     assert sentry is not None
     assert sentry.body, "SKILL.md body was not captured by the loader"
     assert "Purpose" in sentry.body
+
+
+# ---------------------------------------------------------------------------
+# Overview cards as signposts. The first live walkthrough stalled here: the
+# scenario tiles read as information cards rather than controls, and each pillar
+# card showed a truncated list with no way out of it ("I cannot see the others,
+# I cannot click, I cannot do anything with it"). These guard the fix.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_scenario_tiles_announce_that_they_run_something():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert body.count("trigger-run") == 4, "every scenario tile needs its run label"
+    assert body.count('<use href="#i-play"/>') == 4, "every scenario tile needs the play mark"
+    assert 'id="i-play"' in body, "the play glyph must ship with the sprite"
+    assert "one click runs the entire pipeline" in body, \
+        "the card heading must say that a single click runs the whole thing"
+
+
+@pytest.mark.asyncio
+async def test_every_overview_pillar_card_leads_into_its_tab():
+    """A preview that cannot be opened is a dead end, which is how all four cards read."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    overview = body.split('id="tab-overview"')[1].split('id="tab-chat"')[0]
+    for tab in ("tab-fleet", "tab-tickets", "tab-domains", "tab-memory"):
+        assert f"switchTab('{tab}')" in overview, f"no way from the overview into {tab}"
+    assert overview.count("card-foot") == 4, "each pillar card carries exactly one exit"
+    assert overview.count("card-note") == 4, "each pillar card explains what it is"
+
+
+@pytest.mark.asyncio
+async def test_overview_cards_name_their_jargon_and_their_scope():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert "Universal Autonomous System" in body, "UAS must be spelled out where it is used"
+    assert "Autonomy (UAS): approvals you owe" in body
+    assert "OmniLedger is the accounting domain" in body, "OmniLedger must explain itself"
+    # 15 agents ship with the demo fleet, so this card is always a slice and must say so.
+    assert "Showing 4 of" in body, "a truncated card must declare that it is truncated"
