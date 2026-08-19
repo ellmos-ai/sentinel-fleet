@@ -12,14 +12,20 @@ import asyncio
 import hashlib
 import logging
 import time
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
 from sentinel_fleet.chat.models import ChatMode
 from sentinel_fleet.core.config import settings
+from sentinel_fleet.core.telemetry import telemetry
 
 logger = logging.getLogger(__name__)
+
+# Span event a live model call leaves behind so the governance board can meter token spend.
+# Only a real provider response ever emits it: the demo backend has no token counts, and a
+# plausible-looking number invented next to a cost figure is worse than an empty column.
+MODEL_USAGE_EVENT = "model_usage"
 
 # Models the operator may pick in the console. Anything else is rejected before the gateway,
 # so an unknown identifier can never reach a provider SDK.
@@ -37,6 +43,11 @@ class BackendReply(BaseModel):
     latency_s: float = 0.0
     latency_simulated: bool = False
     error: str = ""
+    # Token counts as the provider reported them, or None when nothing was metered - a demo
+    # reply and a live reply whose response carried no usage block are both honestly empty here.
+    prompt_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
 
 
 class ModelBackend(abc.ABC):
@@ -112,6 +123,46 @@ class DeterministicDemoBackend(ModelBackend):
         )
 
 
+def read_usage(response: Any) -> Dict[str, Optional[int]]:
+    """Token counts out of a provider response, defensively.
+
+    `usage_metadata` is absent on some responses and carries None fields on others, so every
+    hop is a getattr with a default rather than an attribute walk that would turn a metering
+    detail into a failed model call.
+    """
+    usage = getattr(response, "usage_metadata", None)
+    if usage is None:
+        return {"prompt_tokens": None, "output_tokens": None, "total_tokens": None}
+
+    def _count(*names: str) -> Optional[int]:
+        for name in names:
+            value = getattr(usage, name, None)
+            if isinstance(value, int):
+                return value
+        return None
+
+    return {
+        "prompt_tokens": _count("prompt_token_count", "input_token_count"),
+        "output_tokens": _count("candidates_token_count", "output_token_count"),
+        "total_tokens": _count("total_token_count"),
+    }
+
+
+def record_usage(model: str, usage: Dict[str, Optional[int]]) -> bool:
+    """Put a metered call on the gate-ledger row it ran under, if it ran under one.
+
+    Lands on the span the Sovereign Gateway bound around this tool call, so token spend is
+    attributed to the very verdict row an operator is already reading, without this module
+    knowing which agent made the call. Returns False outside the gateway (direct backend use in
+    tests) - the same deliberate no-op `telemetry.record_on_active_span` documents.
+    """
+    if all(value is None for value in usage.values()):
+        return False
+    payload: Dict[str, Any] = {"model": model}
+    payload.update({key: value for key, value in usage.items() if value is not None})
+    return telemetry.record_on_active_span(MODEL_USAGE_EVENT, payload)
+
+
 class GeminiBackend(ModelBackend):
     """Calls Gemini through the google-genai SDK, off the event loop.
 
@@ -152,11 +203,14 @@ class GeminiBackend(ModelBackend):
             if not text:
                 raise ValueError("model returned an empty response")
 
+            usage = read_usage(response)
+            record_usage(model, usage)
             return BackendReply(
                 content=text,
                 model=model,
                 mode=ChatMode.GEMINI_LIVE,
-                latency_s=round(time.perf_counter() - started, 3)
+                latency_s=round(time.perf_counter() - started, 3),
+                **usage
             )
         except Exception as exc:
             reason = f"{type(exc).__name__}: {exc}"
