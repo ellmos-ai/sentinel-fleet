@@ -46,7 +46,7 @@ from sentinel_fleet.core.errors import (
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.uas.ticket_master import ticket_master, TicketStatus, TicketPriority
 from sentinel_fleet.uas.task_master import task_master, TaskState, TaskRecord
-from sentinel_fleet.uas.task_templates import Step, task_template_registry
+from sentinel_fleet.uas.task_templates import EXECUTE_TEMPLATE_TOOL, Step, task_template_registry
 from sentinel_fleet.uas import routines
 from sentinel_fleet.memory.bank import memory_bank
 from sentinel_fleet.memory.gardener_rag import gardener
@@ -296,8 +296,23 @@ def _agent_catalog() -> List[Dict[str, Any]]:
     other per-agent selects on this page are rendered server-side with Jinja because their
     surrounding form is static; a step row is added/removed/reordered client-side, so its
     agent select needs this list in JS instead.
+
+    `can_execute_template` is the least-privilege question the gateway will ask when this step
+    actually runs: `chain_runner._run_single_step` calls under `execute_template`, so an agent
+    without that tool in scope is refused there and quarantined for having tried. The editor
+    still offers such an agent - the narrow scope is the fleet's design, not a bug to hide - but
+    marks it at the point of choosing instead of letting the operator discover it at run time.
+    Derived per request from the identity's own scope, never stored.
     """
-    return [{"agent_id": a.agent_id, "name": a.name} for a in lifecycle_manager.list_fleet()]
+    return [
+        {
+            "agent_id": a.agent_id,
+            "name": a.name,
+            "role": a.role.value,
+            "can_execute_template": a.is_tool_scoped(EXECUTE_TEMPLATE_TOOL)
+        }
+        for a in lifecycle_manager.list_fleet()
+    ]
 
 
 def _routine_catalog(viewer: Optional[str] = None) -> List[Dict[str, Any]]:

@@ -1674,9 +1674,15 @@
       <div id="wizard-pane-3" class="wizard-pane">
         <div class="form-group">
           <label>Assigned agent</label>
+          {# Rendered from agent_catalog, the same source the step editor's select uses, so the
+             execute_template scope mark reads identically in both places. #}
           <select id="wz-agent" class="select-input">
-            {% for a in agents %}<option value="{{ a.agent_id }}" {% if a.agent_id == 'agent:task-solver' %}selected{% endif %}>{{ a.name }} ({{ a.role.value }})</option>{% endfor %}
+            {% for a in agent_catalog %}<option value="{{ a.agent_id }}" {% if a.agent_id == 'agent:task-solver' %}selected{% endif %}>{{ a.name }} ({{ a.role }}){% if not a.can_execute_template %} — no execute_template scope{% endif %}</option>{% endfor %}
           </select>
+          <div class="item-meta">
+            An agent without <code>execute_template</code> in scope is refused by the gateway when
+            a single-agent step runs as it — least privilege working as designed, not a fault.
+          </div>
         </div>
         <div class="form-group">
           <label>Execution pattern</label>

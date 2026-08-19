@@ -8,7 +8,9 @@ singletons would pass or fail depending on test order. `build_board()` is the on
 touches them, and it is checked for shape rather than for numbers.
 """
 
+import json
 import time
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -475,6 +477,37 @@ async def test_usage_section_says_why_it_is_empty_in_demo_mode(client):
     body = (await client.get("/")).text
     assert "Nothing metered yet" in body
     assert "reports no" in body and "token usage" in body
+
+
+# ---------------------------------------------------------------------------
+# Step editor: the scope a step will actually run under
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_agent_catalog_carries_the_execute_template_scope(client):
+    """The step editor builds its agent select in JS from this catalog, so the scope flag has to
+    travel with it. The seeded fleet splits cleanly: TaskSolver carries execute_template, the
+    invoice extractor does not - picking the latter for a single step is a run that the gateway
+    will refuse."""
+    body = (await client.get("/")).text
+    catalog_json = body.split('id="agent-catalog"', 1)[1].split(">", 1)[1].split("</script>", 1)[0]
+    catalog = {entry["agent_id"]: entry for entry in json.loads(catalog_json)}
+
+    assert catalog["agent:task-solver"]["can_execute_template"] is True
+    assert catalog["agent:invoice-extractor"]["can_execute_template"] is False
+
+
+@pytest.mark.asyncio
+async def test_both_agent_pickers_mark_a_missing_execute_template_scope(client):
+    body = (await client.get("/")).text
+    # The wizard's select is server-rendered from the same catalog...
+    assert "no execute_template scope" in body
+    # ...and the step editor's JS-built select applies the same label and note.
+    with open(Path(__file__).resolve().parents[1] / "src/sentinel_fleet/web/static/app.js",
+              encoding="utf-8") as handle:
+        script = handle.read()
+    assert "can_execute_template === false" in script
+    assert "refreshScopeNote" in script
 
 
 @pytest.mark.asyncio

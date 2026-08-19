@@ -1152,12 +1152,38 @@ function buildStepRow(step, index) {
   const agentSelect = document.createElement("select");
   agentSelect.className = "select-input";
   state.agents.forEach(agent => {
-    const option = new Option(`${agent.name} (${agent.agent_id})`, agent.agent_id);
+    // Every identity carries an explicit tool scope, and a single-agent step is executed under
+    // `execute_template` - an agent without it in scope is refused at the gateway and
+    // quarantined for having tried. The choice stays open (the narrow scope is the design, and
+    // the Governance tab shows the whole matrix); it is only labelled, so the operator learns it
+    // here rather than from a failed run.
+    const label = agent.can_execute_template === false
+      ? `${agent.name} (${agent.agent_id}) — no execute_template scope`
+      : `${agent.name} (${agent.agent_id})`;
+    const option = new Option(label, agent.agent_id);
     option.selected = agent.agent_id === step.assigned_agent;
     agentSelect.appendChild(option);
   });
-  agentSelect.addEventListener("change", event => { step.assigned_agent = event.target.value; });
   agentGroup.appendChild(agentSelect);
+
+  const scopeNote = document.createElement("div");
+  scopeNote.className = "item-meta";
+  const refreshScopeNote = () => {
+    const agent = state.agents.find(a => a.agent_id === step.assigned_agent);
+    // A race step never runs as this agent: chain_runner hands it to the race lanes, which carry
+    // chat_completion instead. So the warning applies to single-agent steps only.
+    const blocked = agent && agent.can_execute_template === false && step.execution_pattern !== "race";
+    scopeNote.textContent = blocked
+      ? "This agent has no execute_template scope. The gateway will refuse a single-agent step "
+        + "that runs as it, and quarantine the agent. Choose an agent that carries the tool, or "
+        + "run this step as a race."
+      : "";
+  };
+  agentSelect.addEventListener("change", event => {
+    step.assigned_agent = event.target.value;
+    refreshScopeNote();
+  });
+  agentGroup.appendChild(scopeNote);
   row.appendChild(agentGroup);
 
   const promptGroup = document.createElement("div");
@@ -1183,7 +1209,11 @@ function buildStepRow(step, index) {
   patternSelect.appendChild(new Option(`Race (all ${state.models.length} supported models)`, "race"));
   patternSelect.value = step.execution_pattern === "race" ? "race" : "single";
   patternSelect.disabled = state.models.length < 2;
-  patternSelect.addEventListener("change", event => { step.execution_pattern = event.target.value; });
+  patternSelect.addEventListener("change", event => {
+    step.execution_pattern = event.target.value;
+    // Switching to a race takes the step off this agent entirely, so the scope note follows.
+    refreshScopeNote();
+  });
   patternGroup.appendChild(patternSelect);
   if (state.models.length < 2) {
     const note = document.createElement("div");
@@ -1193,6 +1223,8 @@ function buildStepRow(step, index) {
   }
   row.appendChild(patternGroup);
 
+  // Both controls are in place now, so the note can be filled for the step as loaded.
+  refreshScopeNote();
   return row;
 }
 
