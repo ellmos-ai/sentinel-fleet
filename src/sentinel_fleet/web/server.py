@@ -1,12 +1,13 @@
 """FastAPI Web Server for SentinelFleet & OmniLedger Operator Dashboard."""
 
+import asyncio
 import os
 import json
 import logging
 import time
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional
-from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -47,6 +48,7 @@ from sentinel_fleet.uas.task_templates import Step, task_template_registry
 from sentinel_fleet.uas import routines
 from sentinel_fleet.memory.bank import memory_bank
 from sentinel_fleet.memory.gardener_rag import gardener
+from sentinel_fleet.core.run_log import RUN_CLOSED, run_log_bus
 from sentinel_fleet.core.telemetry import telemetry
 from sentinel_fleet.domains.omniledger.models import InvoiceDocument
 from sentinel_fleet.domains.omniledger.extractor import extractor
@@ -924,6 +926,81 @@ async def api_fire_routines(request: Request):
             "switch to an OIDC-authenticated Cloud Run invocation) before a real deployment."
         )
     return await routines.fire_due()
+
+
+# Terminal `TaskState`s, for the purposes of the run console below: once a run is here, nothing
+# in this deployment resumes it automatically (an approved ticket releases the *agent* from
+# WAITING_APPROVAL, `api_approve_ticket` above, but never re-enters `routines.enqueue_template()`
+# for the same task) - so `run_log_bus` for it is done, even on a run whose emitter code happens
+# not to have called `close()` yet.
+_RUN_CONSOLE_TERMINAL_STATES = (TaskState.COMPLETED, TaskState.FAILED, TaskState.AWAITING_APPROVAL)
+
+
+@app.websocket("/ws/run/{run_id}")
+async def ws_run_console(websocket: WebSocket, run_id: str):
+    """Live console for one run (concept doc, section C.7, variant (b), the web console), stage 1
+    "read along" only - `run_id` is a `TaskRecord.task_id`.
+
+    Security boundary, not just a scope boundary: this route has no authentication of its own
+    and reads no client-sent frame as input to anything the server executes - there is no stdin
+    relay, no subprocess, no shell and no eval anywhere on this path. `run_log_bus` is filled
+    exclusively by strings the server's own `chain_runner.run_chain()` and
+    `routines.enqueue_template()` already emit in-process while a run executes
+    (`core/run_log.py`); this handler only ever reads that buffer back. The one client-sent frame
+    it does await (`receive_text()`) exists solely to detect a disconnect - its value, if any, is
+    never inspected or acted on.
+
+    Because Phase 1 executes every run synchronously inside the request that queued it (a
+    template's "Enqueue now" call, or a Cloud Scheduler `/api/routines/fire` tick), a run is
+    almost always already terminal by the time an operator has a `task_id` to open a console on
+    - the common case here is a full-buffer replay followed by an immediate, clean close, not a
+    live stream. The live branch below still matters for two real cases: a second viewer watching
+    the same run while it is mid-flight, and a template with `requires_approval` sitting in
+    AWAITING_APPROVAL, which this route also treats as closed (see `_RUN_CONSOLE_TERMINAL_STATES`).
+    """
+    task = task_master.get_task(run_id)
+    if task is None:
+        # Denies the handshake outright (no `accept()` was ever sent) - the ASGI-level
+        # equivalent of a 404, rather than accepting a socket for a run that can never emit
+        # anything.
+        await websocket.close(code=4404)
+        return
+
+    await websocket.accept()
+    queue = run_log_bus.subscribe(run_id)
+    try:
+        lines, last_seq, bus_closed = run_log_bus.snapshot(run_id)
+        for line in lines:
+            await websocket.send_text(line)
+
+        task = task_master.get_task(run_id)
+        already_done = bus_closed or (task is not None and task.state in _RUN_CONSOLE_TERMINAL_STATES)
+
+        if not already_done:
+            receiver = asyncio.ensure_future(websocket.receive_text())
+            try:
+                while True:
+                    sender = asyncio.ensure_future(queue.get())
+                    done, _pending = await asyncio.wait({receiver, sender}, return_when=asyncio.FIRST_COMPLETED)
+                    if receiver in done:
+                        sender.cancel()
+                        receiver.exception()  # retrieve it, so a disconnect never logs as "never retrieved"
+                        break
+                    item = sender.result()
+                    if item is RUN_CLOSED:
+                        break
+                    seq, text = item
+                    if seq > last_seq:
+                        await websocket.send_text(text)
+            finally:
+                if not receiver.done():
+                    receiver.cancel()
+
+        await websocket.close()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        run_log_bus.unsubscribe(run_id, queue)
 
 
 # ---------------------------------------------------------
