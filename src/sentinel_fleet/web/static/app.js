@@ -2274,8 +2274,8 @@ function showBlueprintView(view) {
   const caption = document.getElementById("blueprint-caption");
   if (caption) {
     caption.textContent = isCircuit
-      ? "Which module imports which, parsed from the source tree on every request."
-      : "How a document travels the platform: ingestion, guardrail, gateway, conductor, memory, ledger, trace.";
+      ? "The architecture itself: which module imports which, parsed from the source tree on every request."
+      : "One invoice's path through the gates: ingestion, guardrail, gateway, conductor, memory, ledger, trace. For the architecture itself, switch to the module circuit.";
   }
   localStorage.setItem("sentinel_blueprint_view", view);
 }
@@ -2287,10 +2287,37 @@ function initCircuit() {
   const nodes = Array.from(svg.querySelectorAll(".node"));
   const wires = Array.from(svg.querySelectorAll(".wire"));
 
+  const info = document.getElementById("circuit-info");
+  const infoIdle = info ? info.innerHTML : "";
+
   const clear = () => {
     svg.classList.remove("has-focus");
     nodes.forEach(n => n.classList.remove("is-focus", "is-neighbour"));
     wires.forEach(w => w.classList.remove("is-linked"));
+    if (info) info.innerHTML = infoIdle;
+  };
+
+  // The panel is filled with textContent, never markup: a module docstring is source text and
+  // has no business being parsed as HTML.
+  const describe = (node) => {
+    if (!info) return;
+    info.replaceChildren();
+
+    const name = document.createElement("span");
+    name.className = "eyebrow";
+    name.textContent = node.getAttribute("data-id");
+
+    const summary = document.createElement("p");
+    const text = (node.getAttribute("data-summary") || "").trim();
+    summary.textContent = text || "This module carries no docstring, so it has nothing to say here yet.";
+    if (!text) summary.classList.add("is-missing");
+
+    const wiring = document.createElement("p");
+    wiring.className = "item-meta numeric";
+    wiring.textContent = `imports ${node.getAttribute("data-imports")} / `
+      + `imported by ${node.getAttribute("data-imported-by")}`;
+
+    info.append(name, summary, wiring);
   };
 
   nodes.forEach(node => {
@@ -2299,6 +2326,7 @@ function initCircuit() {
 
     const focus = () => {
       svg.classList.add("has-focus");
+      describe(node);
       nodes.forEach(other => {
         const otherId = other.getAttribute("data-id");
         other.classList.toggle("is-focus", otherId === id);

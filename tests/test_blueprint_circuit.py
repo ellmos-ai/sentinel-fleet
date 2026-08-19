@@ -43,7 +43,7 @@ def test_every_node_is_a_file_that_exists():
 
 def test_every_wire_is_a_real_import_statement():
     """The guard against a decorative diagram: no edge may exist that the code does not."""
-    _, edges = collect_graph()
+    _, edges, _ = collect_graph()
     assert edges, "no import edges were found at all"
 
     for source, target in edges:
@@ -59,7 +59,7 @@ def test_every_wire_is_a_real_import_statement():
 
 
 def test_known_edges_are_present_and_known_non_edges_are_absent():
-    _, edges = collect_graph()
+    _, edges, _ = collect_graph()
 
     # The chat service really does route through the gateway; that claim is load bearing.
     assert ("chat.service", "core.gateway") in edges
@@ -135,3 +135,55 @@ async def test_legacy_schaltplan_route_still_redirects():
         response = await client.get("/schaltplan")
         assert response.status_code == 307
         assert response.headers["location"] == "/blueprint"
+
+
+# ---------------------------------------------------------------------------
+# Legibility. Two findings from the live walkthrough: the "Pipeline" toggle promised the
+# architecture and delivered one use case's path, and a box labelled "swarm" said nothing about
+# what a swarm module does.
+# ---------------------------------------------------------------------------
+
+
+def test_every_node_carries_its_own_module_docstring():
+    """Taken from the source the graph is already parsed from, so a label beside a generated
+    diagram cannot drift from the code it describes."""
+    circuit = build_circuit()
+    summaries = {n["id"]: n["summary"] for n in circuit["nodes"]}
+
+    assert summaries["core.gateway"].startswith("Zero-Trust Sovereign Gateway")
+    assert all(s == " ".join(s.split()) for s in summaries.values() if s), \
+        "a summary is one flattened line, not a wrapped block"
+    assert all("\n" not in s for s in summaries.values())
+
+
+def test_undocumented_modules_are_named_rather_than_counted():
+    """A module with no docstring gets no explanation on the diagram. The only way that is ever
+    fixed is if someone can see which ones they are, so the build names them."""
+    circuit = build_circuit()
+    assert "undocumented" in circuit
+    assert circuit["undocumented"] == [], (
+        "these modules have no docstring and so no explanation on the circuit: "
+        + ", ".join(circuit["undocumented"])
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_blueprint_says_which_view_is_the_architecture():
+    """The "Pipeline" view is one invoice's path, not the architecture; the circuit is."""
+    from httpx import AsyncClient, ASGITransport
+    from sentinel_fleet.web.server import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/blueprint")).text
+
+    assert ">Document pipeline<" in body
+    assert "One invoice's path through the gates" in body
+    assert 'id="circuit-info"' in body
+    assert "data-summary=" in body
+
+    app_js = (Path(__file__).resolve().parents[1] / "src" / "sentinel_fleet" / "web" / "static"
+              / "app.js").read_text(encoding="utf-8")
+    describe = app_js.split("const describe = (node)")[1].split("\n  };")[0]
+    assert "textContent" in describe and "innerHTML" not in describe, \
+        "a module docstring is source text and must not be parsed as markup"

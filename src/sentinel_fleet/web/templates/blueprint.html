@@ -46,6 +46,21 @@
       overflow-x: auto;
     }
     .circuit-svg { display: block; min-width: 900px; }
+    /* What the hovered module says about itself. A fixed block rather than a floating tooltip:
+       the circuit already dims everything but the focused node, and a tooltip chasing the
+       pointer would fight that. */
+    .circuit-info {
+      margin-top: var(--s-3);
+      padding: var(--s-3);
+      min-height: 78px;
+      background: var(--surface-sunk);
+      border: 1px solid var(--rule);
+      border-left: 2px solid var(--accent);
+      border-radius: var(--r-1);
+    }
+    .circuit-info p { font-size: 12.5px; line-height: 1.5; color: var(--ink); margin-top: 2px; }
+    .circuit-info p.item-meta { color: var(--ink-3); font-size: 11px; }
+    .circuit-info p.is-missing { color: var(--ink-3); font-style: italic; }
     .circuit-svg .wire { stroke: var(--rule-strong); stroke-width: 1.1; fill: none; }
     .circuit-svg .node-box { fill: var(--surface-sunk); stroke: var(--rule); stroke-width: 1; }
     .circuit-svg .node-spine { stroke-width: 2.5; }
@@ -94,10 +109,10 @@
     <div class="section-head">
       <div>
         <h2>Architecture blueprint</h2>
-        <p id="blueprint-caption">How a document travels the platform: ingestion, guardrail, gateway, conductor, memory, ledger, trace.</p>
+        <p id="blueprint-caption">One invoice's path through the gates: ingestion, guardrail, gateway, conductor, memory, ledger, trace. For the architecture itself, switch to the module circuit.</p>
       </div>
       <div class="view-switch">
-        <button id="view-btn-flow" class="active" onclick="showBlueprintView('flow')">Pipeline</button>
+        <button id="view-btn-flow" class="active" onclick="showBlueprintView('flow')">Document pipeline</button>
         <button id="view-btn-circuit" onclick="showBlueprintView('circuit')">Module circuit</button>
       </div>
     </div>
@@ -241,8 +256,10 @@
           <g id="circuit-nodes">
             {% for n in circuit.nodes %}
             <g class="node" data-id="{{ n.id }}"
-               data-neighbours="{{ (n.imports + n.imported_by)|join(' ') }}">
-              <title>{{ n.id }} — imports {{ n.imports|length }}, imported by {{ n.imported_by|length }}</title>
+               data-neighbours="{{ (n.imports + n.imported_by)|join(' ') }}"
+               data-summary="{{ n.summary }}"
+               data-imports="{{ n.imports|length }}" data-imported-by="{{ n.imported_by|length }}">
+              <title>{{ n.id }} — {{ n.summary or 'no module docstring' }}</title>
               <rect class="node-box" x="{{ n.x }}" y="{{ n.y }}"
                     width="{{ n.width }}" height="{{ n.height }}" rx="3"></rect>
               <line class="node-spine pillar-{{ n.pillar }}"
@@ -253,6 +270,13 @@
             {% endfor %}
           </g>
         </svg>
+      </div>
+      <!-- Filled from the hovered node's own module docstring: the graph is generated from the
+           source, so its explanations are too, and neither can drift from the other. -->
+      <div id="circuit-info" class="circuit-info">
+        <span class="eyebrow">Hover a module</span>
+        <p>Every box is one module of this codebase. Point at one to see what it does and what it
+           is wired to.</p>
       </div>
     </div>
 

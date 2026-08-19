@@ -53,12 +53,31 @@ def _resolve(target: str) -> Optional[str]:
     return target[len(PACKAGE) + 1:]
 
 
-def collect_graph(root: Optional[str] = None) -> Tuple[List[str], Set[Tuple[str, str]]]:
-    """Parse every module in the package and return its modules and internal import edges."""
+def _first_docstring_line(tree: ast.Module) -> str:
+    """The module docstring's opening sentence, or "" when the module has none.
+
+    This is what a node on the circuit says about itself. Taking it from the source the graph is
+    already built from is the point: a hand-written label beside a generated diagram drifts the
+    moment a module changes, and nobody notices.
+    """
+    doc = ast.get_docstring(tree)
+    if not doc:
+        return ""
+    # Docstrings here open with one summary line, then a blank line and the detail.
+    first = doc.strip().split('\n\n')[0]
+    return " ".join(first.split())
+
+
+def collect_graph(
+    root: Optional[str] = None
+) -> Tuple[List[str], Set[Tuple[str, str]], Dict[str, str]]:
+    """Parse every module in the package and return its modules, internal import edges and the
+    first line of each module's docstring."""
     root = root or _package_root()
     modules: List[str] = []
     raw_edges: Set[Tuple[str, str]] = set()
     source_by_module: Dict[str, str] = {}
+    summaries: Dict[str, str] = {}
 
     for folder, _, files in os.walk(root):
         if "__pycache__" in folder:
@@ -80,6 +99,8 @@ def collect_graph(root: Optional[str] = None) -> Tuple[List[str], Set[Tuple[str,
         except (OSError, SyntaxError):
             continue
 
+        summaries[name] = _first_docstring_line(tree)
+
         for node in ast.walk(tree):
             targets: List[str] = []
             if isinstance(node, ast.ImportFrom) and node.module:
@@ -95,7 +116,7 @@ def collect_graph(root: Optional[str] = None) -> Tuple[List[str], Set[Tuple[str,
                 if resolved and resolved in known and resolved != name:
                     raw_edges.add((name, resolved))
 
-    return sorted(modules), raw_edges
+    return sorted(modules), raw_edges, summaries
 
 
 def _depths(modules: List[str], edges: Set[Tuple[str, str]]) -> Dict[str, int]:
@@ -125,7 +146,7 @@ def _depths(modules: List[str], edges: Set[Tuple[str, str]]) -> Dict[str, int]:
 
 def build_circuit(root: Optional[str] = None) -> Dict[str, object]:
     """Lay the graph out in dependency columns and return SVG-ready geometry."""
-    modules, edges = collect_graph(root)
+    modules, edges, summaries = collect_graph(root)
     depth = _depths(modules, edges)
     max_depth = max(depth.values()) if depth else 0
 
@@ -160,6 +181,7 @@ def build_circuit(root: Optional[str] = None) -> Dict[str, object]:
                 "y": MARGIN_Y + offset + row * ROW_GAP,
                 "width": NODE_WIDTH,
                 "height": NODE_HEIGHT,
+                "summary": summaries.get(module, ""),
                 "imports": [],
                 "imported_by": [],
             }
@@ -206,4 +228,7 @@ def build_circuit(root: Optional[str] = None) -> Dict[str, object]:
         "height": height,
         "module_count": len(nodes),
         "wire_count": len(wires),
+        # Named rather than counted: a module with no docstring gets no explanation on the
+        # diagram, and the only way that gets fixed is if someone can see which ones they are.
+        "undocumented": sorted(m for m, n in nodes.items() if not n["summary"]),
     }
