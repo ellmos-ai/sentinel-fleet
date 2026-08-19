@@ -756,3 +756,40 @@ async def test_the_last_version_of_a_prompt_cannot_be_deleted():
             assert (await client.delete(f"/api/prompts/{prompt_id}/versions/1.0.0")).status_code == 200
         finally:
             await client.delete(f"/api/prompts/{prompt_id}")
+
+
+@pytest.mark.asyncio
+async def test_the_queue_offers_a_way_to_intervene():
+    """Two identical tasks and nothing to do about either was the live test's "loss of control"."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/api/tasks/create", data={
+            "name": "Queue intervention probe", "assigned_agent": "agent:system-auditor"
+        })
+        task_id = created.json()["task"]["task_id"]
+        try:
+            queued_view = (await client.get("/")).text
+            assert f"cancelTask(&#34;{task_id}&#34;" in queued_view or f'cancelTask("{task_id}"' in queued_view, \
+                "a queued task needs a cancel action"
+
+            await client.post(f"/api/tasks/{task_id}/cancel")
+            settled_view = (await client.get("/")).text
+            assert f"deleteTask(&#34;{task_id}&#34;" in settled_view or f'deleteTask("{task_id}"' in settled_view, \
+                "a settled task needs a remove action"
+            assert f"cancelTask(&#34;{task_id}&#34;" not in settled_view, \
+                "a settled task must not still offer cancel"
+        finally:
+            await client.delete(f"/api/tasks/{task_id}")
+
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert "function cancelTask(" in script and "function deleteTask(" in script
+    assert "pauseTask" not in script, "a synchronous run has nothing to pause"
+
+
+def test_the_lifecycle_skill_describes_the_state_it_now_has():
+    """A schema change that leaves its own skill card describing the old machine is how a
+    console starts lying about itself in the one place that claims to document it."""
+    skill = (Path(__file__).resolve().parents[1] / "skills" / "uas"
+             / "task-lifecycle-maintainer" / "SKILL.md").read_text(encoding="utf-8")
+    assert "cancelled" in skill.lower()
+    assert "no cancel edge" in skill, "the skill has to explain why a running task cannot be cancelled"

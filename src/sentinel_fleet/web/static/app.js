@@ -1324,6 +1324,36 @@ function runTemplateAgain(templateId) {
   enqueueTaskTemplate(templateId);
 }
 
+// ---------------------------------------------------------------------------
+// Intervening in the queue. The live test ended up with two identical tasks after a quarantine
+// hang and had no way to touch either of them. Cancelling settles a task that has not run;
+// removing clears a settled record. There is no pause: a run in flight is synchronous and over
+// in seconds, so a pause button would offer control that does not exist.
+// ---------------------------------------------------------------------------
+
+function cancelTask(taskId, name) {
+  if (!confirm(`Cancel "${name}"?
+
+It stays in the queue as cancelled - the record and its `
+      + "history remain, only its outcome changes.")) return;
+  postAndReload(
+    `/api/tasks/${encodeURIComponent(taskId)}/cancel`,
+    { method: "POST", body: new URLSearchParams({ reason: "Cancelled by the operator" }) },
+    "Could not cancel the task"
+  );
+}
+
+function deleteTask(taskId, name) {
+  deleteComponent(
+    `/api/tasks/${encodeURIComponent(taskId)}`,
+    `Remove the record of "${name}" from the queue?
+
+This one does erase: the run and its `
+      + "outcome are gone from the queue. The gate ledger keeps what the run actually did.",
+    "Could not remove the task"
+  );
+}
+
 function deleteTaskTemplate(templateId, owner) {
   if (!confirm("Delete this task template? Remove its routine and schedule bindings first if this fails.")) return;
   postAndReload(

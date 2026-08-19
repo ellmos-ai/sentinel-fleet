@@ -15,16 +15,30 @@ class TaskState(str, Enum):
     AWAITING_APPROVAL = "awaiting_approval"
     COMPLETED = "completed"
     FAILED = "failed"
+    # A task the operator called off before it ran. Its own state rather than FAILED with a
+    # reason: nothing went wrong, somebody decided, and a queue that cannot tell those two apart
+    # reports every abandoned duplicate as a defect.
+    CANCELLED = "cancelled"
 
 
-# Terminal states have no outgoing edges: a completed or failed task must never be resurrected.
+# Terminal states have no outgoing edges: a completed, failed or cancelled task must never be
+# resurrected. IN_PROGRESS deliberately cannot be cancelled - a run here is synchronous and over
+# in seconds, so a cancel button on it would offer control that does not exist.
 ALLOWED_TASK_TRANSITIONS: Dict[TaskState, set] = {
-    TaskState.QUEUED: {TaskState.IN_PROGRESS, TaskState.AWAITING_APPROVAL, TaskState.COMPLETED, TaskState.FAILED},
+    TaskState.QUEUED: {
+        TaskState.IN_PROGRESS, TaskState.AWAITING_APPROVAL, TaskState.COMPLETED,
+        TaskState.FAILED, TaskState.CANCELLED,
+    },
     TaskState.IN_PROGRESS: {TaskState.AWAITING_APPROVAL, TaskState.COMPLETED, TaskState.FAILED},
-    TaskState.AWAITING_APPROVAL: {TaskState.IN_PROGRESS, TaskState.COMPLETED, TaskState.FAILED},
+    TaskState.AWAITING_APPROVAL: {
+        TaskState.IN_PROGRESS, TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED,
+    },
     TaskState.COMPLETED: set(),
     TaskState.FAILED: set(),
+    TaskState.CANCELLED: set(),
 }
+
+TERMINAL_TASK_STATES = {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED}
 
 
 class TaskRecord(BaseModel):
@@ -109,6 +123,31 @@ class TaskMaster:
 
         self._store.put(task_id, task)
         return task
+
+    def cancel_task(self, task_id: str, reason: str = "Cancelled by the operator") -> TaskRecord:
+        """Call off a task that has not run. Cancelling is a state, not an eraser.
+
+        The record stays in the queue with its history intact; only its own outcome changes.
+        Anything already settled, and anything currently running, is refused by the state
+        machine rather than special-cased here.
+        """
+        task = self._store.get(task_id)
+        if not task:
+            raise TaskNotFoundError(task_id)
+        return self.update_task_state(task_id, TaskState.CANCELLED, error=reason)
+
+    def delete_task(self, task_id: str) -> bool:
+        """Remove a settled record entirely - the one operation that does erase.
+
+        Only a terminal task may go: deleting one that is still queued or running would drop
+        work the fleet still owns, and the queue would stop matching what the fleet is doing.
+        """
+        task = self._store.get(task_id)
+        if not task:
+            raise TaskNotFoundError(task_id)
+        if task.state not in TERMINAL_TASK_STATES:
+            raise TaskStateTransitionError(task_id, task.state.value, "deleted")
+        return self._store.delete(task_id)
 
     def list_all(self) -> List[TaskRecord]:
         tasks = self._store.list_all()

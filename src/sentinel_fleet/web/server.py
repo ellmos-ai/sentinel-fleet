@@ -960,6 +960,20 @@ async def api_create_task(
     }
 
 
+@app.post("/api/tasks/{task_id}/cancel")
+async def api_cancel_task(task_id: str, reason: str = Form("Cancelled by the operator")):
+    """Call off a task that has not run yet. The state machine refuses anything else."""
+    task = task_master.cancel_task(task_id, reason=reason)
+    return {"status": "cancelled", "task": task.model_dump()}
+
+
+@app.delete("/api/tasks/{task_id}")
+async def api_delete_task(task_id: str):
+    """Remove a settled record. Only a terminal task may go - see TaskMaster.delete_task."""
+    task_master.delete_task(task_id)
+    return {"status": "deleted", "task_id": task_id}
+
+
 # ---------------------------------------------------------
 # API Endpoints for Task Templates & Routines
 #

@@ -632,6 +632,9 @@
         <p class="item-desc" style="padding: 0 var(--s-4); margin-top: calc(-1 * var(--s-2))">
           Runs once, right now, and leaves only its run record - nothing to name, bind or
           maintain afterwards. For something you will run again, save a reusable task below.
+          A task that has not started can be cancelled; once it has settled, its record can be
+          removed. A run in flight has neither - it is over in seconds, so there would be nothing
+          to stop.
         </p>
         {% if not tasks %}
         <div class="empty-state">
@@ -657,7 +660,7 @@
                 </td>
                 <td class="numeric">{{ t.assigned_agent }}</td>
                 <td>
-                  <span class="badge-status {% if t.state.value == 'completed' %}badge-ok{% elif t.state.value == 'failed' %}badge-danger{% elif t.state.value == 'queued' %}badge-info{% else %}badge-warn{% endif %}">
+                  <span class="badge-status {% if t.state.value == 'completed' %}badge-ok{% elif t.state.value == 'failed' %}badge-danger{% elif t.state.value == 'cancelled' %}stamp-quiet{% elif t.state.value == 'queued' %}badge-info{% else %}badge-warn{% endif %}">
                     {{ t.state.value }}
                   </span>
                 </td>
@@ -668,18 +671,24 @@
                   {% else %}-{% endif %}
                 </td>
                 <td>
-                  {% if t.source_template_id %}
                   <div class="item-actions" style="margin: 0">
+                    {% if t.source_template_id %}
                     <button class="btn btn-sm" onclick='openConsoleModal({{ t.task_id|tojson }}, {{ t.name|tojson }})'>View run</button>
-                    {% if t.state.value == 'failed' %}
-                    <!-- A refused run is not re-dispatched by releasing the agent; this is where
-                         the operator decides to give it another try. -->
+                    {% if t.state.value in ('failed', 'cancelled') %}
+                    <!-- A refused or called-off run is not re-dispatched by anything else; this
+                         is where the operator decides to give it another try. -->
                     <button class="btn btn-sm" onclick='runTemplateAgain({{ t.source_template_id|tojson }})'>Run again</button>
                     {% endif %}
+                    {% endif %}
+                    {% if t.state.value in ('queued', 'awaiting_approval') %}
+                    <button class="btn btn-sm btn-reject" onclick='cancelTask({{ t.task_id|tojson }}, {{ t.name|tojson }})'>Cancel</button>
+                    {% elif t.state.value in ('completed', 'failed', 'cancelled') %}
+                    <button class="btn btn-sm btn-reject" onclick='deleteTask({{ t.task_id|tojson }}, {{ t.name|tojson }})'>Remove</button>
+                    {% endif %}
+                    {% if not t.source_template_id and t.state.value == 'queued' %}
+                    <span class="item-meta" title="Queued directly, without a template - never runs, so it has no run log">no run log</span>
+                    {% endif %}
                   </div>
-                  {% else %}
-                  <span class="item-meta" title="Queued directly, without a template - never runs, so it has no run log">-</span>
-                  {% endif %}
                 </td>
               </tr>
               {% endfor %}

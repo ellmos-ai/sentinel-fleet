@@ -502,3 +502,71 @@ async def test_release_names_the_runs_it_stopped_without_re_running_them(client)
     runs = [t for t in task_master.list_all() if t.source_template_id == template.template_id]
     assert all(t.state is TaskState.FAILED for t in runs), \
         "release must not resurrect the run by itself"
+
+
+# ---------------------------------------------------------------------------
+# Intervening in the queue. The live test ended up with two identical tasks after the quarantine
+# hang and had no way to touch either: "deactivate, delete or pause ... I cannot intervene".
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_queued_task_can_be_cancelled_and_stays_in_the_queue(client):
+    """Cancelling is a state, not an eraser: the record and its history remain."""
+    created = await client.post("/api/tasks/create", data={
+        "name": "Duplicate to call off", "assigned_agent": "agent:system-auditor"
+    })
+    task_id = created.json()["task"]["task_id"]
+
+    cancelled = await client.post(f"/api/tasks/{task_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["task"]["state"] == "cancelled"
+
+    record = task_master.get_task(task_id)
+    assert record is not None, "cancelling must not remove the record"
+    assert record.state is TaskState.CANCELLED
+    assert "operator" in (record.error_message or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_cancelling_is_refused_once_a_task_has_settled(client):
+    """Terminal states are final - that rule holds for the new state too."""
+    created = await client.post("/api/tasks/create", data={
+        "name": "Already settled", "assigned_agent": "agent:system-auditor"
+    })
+    task_id = created.json()["task"]["task_id"]
+    task_master.update_task_state(task_id, TaskState.COMPLETED)
+
+    refused = await client.post(f"/api/tasks/{task_id}/cancel")
+    assert refused.status_code == 409
+    assert task_master.get_task(task_id).state is TaskState.COMPLETED
+
+
+def test_a_running_task_has_no_cancel_edge():
+    """A run in flight is synchronous and over in seconds. Offering to stop it would be a button
+    with nothing behind it - the same class of untruth as an "in progress" that is not running."""
+    from sentinel_fleet.uas.task_master import ALLOWED_TASK_TRANSITIONS
+
+    assert TaskState.CANCELLED not in ALLOWED_TASK_TRANSITIONS[TaskState.IN_PROGRESS]
+    assert TaskState.CANCELLED in ALLOWED_TASK_TRANSITIONS[TaskState.QUEUED]
+    assert TaskState.CANCELLED in ALLOWED_TASK_TRANSITIONS[TaskState.AWAITING_APPROVAL]
+    assert ALLOWED_TASK_TRANSITIONS[TaskState.CANCELLED] == set(), "cancelled is terminal"
+
+
+@pytest.mark.asyncio
+async def test_only_a_settled_record_can_be_removed(client):
+    """Removing does erase. A queued task still belongs to the fleet, so it may not go - the
+    queue would stop describing what the fleet is actually doing."""
+    created = await client.post("/api/tasks/create", data={
+        "name": "Still queued", "assigned_agent": "agent:system-auditor"
+    })
+    task_id = created.json()["task"]["task_id"]
+
+    refused = await client.delete(f"/api/tasks/{task_id}")
+    assert refused.status_code == 409
+    assert task_master.get_task(task_id) is not None
+
+    await client.post(f"/api/tasks/{task_id}/cancel")
+    removed = await client.delete(f"/api/tasks/{task_id}")
+    assert removed.status_code == 200
+    assert task_master.get_task(task_id) is None

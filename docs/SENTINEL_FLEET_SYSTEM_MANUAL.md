@@ -66,7 +66,7 @@ SentinelFleet unifies and hardens codebases, patterns, and research from several
 
 ### Pillar 2: UAS (Universal Autonomous System & Taskmaster)
 * **Lifecycle Manager (`lifecycle.py`):** Controls the state machine of 9 fleet agents (`IDLE`, `ACTIVE`, `WAITING_APPROVAL`, `QUARANTINED`, `ERROR`).
-* **TaskMaster (`task_master.py`):** Manages task records and guards their state machine (`QUEUED` ➔ `IN_PROGRESS` ➔ `AWAITING_APPROVAL` ➔ `COMPLETED` / `FAILED`); terminal states are final. Operator-created tasks are queued — no worker executes them in this build.
+* **TaskMaster (`task_master.py`):** Manages task records and guards their state machine (`QUEUED` ➔ `IN_PROGRESS` ➔ `AWAITING_APPROVAL` ➔ `COMPLETED` / `FAILED` / `CANCELLED`); terminal states are final. An operator may cancel a task that has not started; a running one may not be cancelled, because a run here is synchronous. Operator-created tasks are queued — no worker executes them in this build.
 * **TicketMaster (`ticket_master.py`):** The Human-in-the-Loop (HITL) gatekeeper. Whenever an agent requires permission, an immutable ticket with priority (`NORMAL`, `HIGH`, `CRITICAL`) and structured payload is created for the operator.
 * **Swarm Conductor (`swarm.py`):** Scaffold for multi-agent fan-out on Cloud Run. The current build dispatches the OmniLedger workflow sequentially through the gateway and traces every step; parallel Pub/Sub distribution is designed for, not yet implemented.
 
