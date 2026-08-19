@@ -7,7 +7,7 @@ status: active
 language: en
 pillar: memory
 description: >
-  Kuratierte Faktenpersistenz (Substring-Suche) und stichwortbasierter GARDENER-RAG-Dokumentenabruf (Wortüberlappung, kein Embedding) mit dynamischer Prompt-Injektion.
+  Curated fact persistence (substring search) and keyword-based GARDENER-RAG document retrieval (word overlap, no embeddings) with dynamic prompt injection.
 compatibility:
   google_adk: true
   gemini_3_5: true

@@ -7,7 +7,7 @@ status: active
 language: en
 pillar: uas
 description: >
-  Asynchrone Task-Koordination und State-Tracking über eine erzwungene Zustandsmaschine (queued -> in_progress -> awaiting_approval -> completed/failed, terminale Zustände sind final).
+  Asynchronous task coordination and state tracking through an enforced state machine (queued -> in_progress -> awaiting_approval -> completed/failed, terminal states are final).
 compatibility:
   google_adk: true
   gemini_3_5: true

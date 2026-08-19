@@ -9,6 +9,10 @@ import re
 from pathlib import Path
 
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
+# The bundled skill library ships user-visible descriptions too - the console renders them
+# verbatim. A German description slipped through unnoticed here once (memory-bank-connector,
+# found by eye on a video frame), because only src/ was ever scanned.
+SKILLS_ROOT = Path(__file__).resolve().parents[1] / "skills"
 TEMPLATE_DIR = SRC_ROOT / "sentinel_fleet" / "web" / "templates"
 GERMAN_CHARS = re.compile(r"[äöüÄÖÜß]")
 # Umlauts alone miss plenty of German ("Rechnungsstelle", "Beratungsvertrag"), so common
@@ -78,10 +82,15 @@ def _iter_source_files():
         if "vendor" in path.parts:
             continue
         yield path
+    for path in sorted(SKILLS_ROOT.rglob("*.md")):
+        yield path
 
 
 def _german_lines(path):
-    rel = path.relative_to(SRC_ROOT).as_posix()
+    try:
+        rel = path.relative_to(SRC_ROOT).as_posix()
+    except ValueError:
+        rel = "skills/" + path.relative_to(SKILLS_ROOT).as_posix()
     allowed = ALLOWED_GERMAN.get(rel, ())
     hits = []
     for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
