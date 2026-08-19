@@ -1,0 +1,39 @@
+# What must not travel into a deployed image.
+#
+# The Dockerfile is a plain `COPY . .`, and `gcloud run deploy --source .` uploads this working
+# directory. Without this file that includes `data/`, the local JSON stores - which after a test
+# run hold hundreds of probe tasks, throwaway prompts and test contacts. Those would become the
+# deployed instance's starting state, and the demo would open on somebody's test debris.
+#
+# gcloud does fall back to .gitignore when no .gcloudignore exists, which would have covered
+# `data/` by accident. Stating it here makes the upload deterministic instead of dependent on
+# that fallback still behaving the same way.
+
+.git/
+.gitignore
+
+# Local runtime state: every deployment starts from the seeded corpus, exactly as a fresh
+# checkout does (README, "Reset the demo data").
+data/
+
+# Local-only working material, none of it needed to run the service.
+_reports/
+_media_build/
+_analysis/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+.venv/
+venv/
+
+.env
+.env.*
+credentials*.json
+
+.vscode/
+.idea/
