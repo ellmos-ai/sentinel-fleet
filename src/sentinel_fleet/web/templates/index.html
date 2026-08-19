@@ -569,15 +569,19 @@
       <div class="card" style="margin-bottom: var(--s-5)">
         <div class="card-header">
           <h3>Tasks</h3>
+          <!-- Two ways to create used to sit side by side as equals, and the live test could
+               not tell what distinguished them. The wizard is the way; the quick form stays for
+               anyone who already knows the fields, as a link rather than a rival button. -->
           <div class="item-actions" style="margin: 0">
             <button class="btn btn-sm btn-primary" onclick="openWizard()">
               <svg class="icon"><use href="#i-plus"/></svg> Task wizard
             </button>
-            <button class="btn btn-sm" onclick="toggleModal('modal-new-template')">Quick create</button>
+            <button class="btn-inline" onclick="toggleModal('modal-new-template')">or fill the form directly</button>
           </div>
         </div>
         <p class="item-desc" style="padding: 0 var(--s-4); margin-top: calc(-1 * var(--s-2))">
-          Everything is a task: a template is a prompt plus skills. Attach a routine (<svg class="icon"><use href="#i-gear"/></svg>) or a schedule (<svg class="icon"><use href="#i-clock"/></svg>) to make it recurring or dated - remove both to make it deletable again.
+          The wizard walks it in order: name, prompt, skills, agent, then when it runs. Everything
+          here is a task - a template is a prompt plus skills. Attach a routine (<svg class="icon"><use href="#i-gear"/></svg>) or a schedule (<svg class="icon"><use href="#i-clock"/></svg>) to make it recurring or dated - remove both to make it deletable again.
         </p>
         <form method="get" action="/" class="viewer-switch">
           <label class="field-label" for="viewer-input">Viewing as</label>
@@ -1571,6 +1575,10 @@
           <svg class="icon"><use href="#i-close"/></svg>
         </button>
       </div>
+      <p class="item-desc" style="margin: 0 0 var(--s-3)">
+        The same create call the wizard makes, on one screen. Use the wizard if you would rather
+        be asked one thing at a time.
+      </p>
       <form onsubmit="submitNewTaskTemplate(event)">
         <div class="form-group">
           <label>Name</label>

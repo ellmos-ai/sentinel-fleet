@@ -345,3 +345,19 @@ def test_the_scenario_band_reads_the_response_that_already_exists():
     assert "invoice.invoice_number" in summary
     assert 'invoice.status === "booked"' in summary
     assert "fetch(" not in summary, "the band must not make a request of its own"
+
+
+@pytest.mark.asyncio
+async def test_one_primary_way_to_create_a_task():
+    """Two equally weighted create buttons sat side by side with nothing to tell them apart."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    header = body.split("<h3>Tasks</h3>")[1].split("</div>\n        <p")[0]
+    assert 'btn-primary" onclick="openWizard()"' in header, "the wizard is the primary route"
+    assert "btn-inline" in header and "or fill the form directly" in header, \
+        "the quick form must read as a secondary route, not a rival"
+    assert header.count("btn-primary") == 1, "only one primary button belongs in this header"
+    # The wizard sells the walk, not the endpoint it happens to call.
+    assert "name, prompt, skills, agent, then when it runs" in body
