@@ -276,6 +276,7 @@ def _routine_catalog(viewer: Optional[str] = None) -> List[Dict[str, Any]]:
             "template_id": template.template_id,
             "name": template.name,
             "owner": template.owner,
+            "visibility": template.visibility,
             "group": template.group,
             "assigned_agent": template.assigned_agent,
             "prompt_source": template.prompt_source,
@@ -296,8 +297,16 @@ def _routine_catalog(viewer: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index_view(request: Request):
-    """Render the Main Operator Control Dashboard."""
+async def index_view(request: Request, viewer: str = "operator"):
+    """Render the Main Operator Control Dashboard.
+
+    `viewer` names whose own view of the Tasks card this is (concept doc, section A.4/D
+    Phase 2 "removed_by"). This deployment has no login, so the URL query string is the one
+    source of that identity - no localStorage mirror, no redirect: the "Viewing as" control
+    just navigates to `/?viewer=...`, and `location.reload()` elsewhere on this page keeps the
+    query string as-is. Defaults to "operator", the same default every template's `owner` and
+    every create form already uses.
+    """
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -318,8 +327,9 @@ async def index_view(request: Request):
             "pending_tickets": ticket_master.get_pending_tickets(),
             "tasks": _tail(task_master.list_all()),
             "task_total": len(task_master.list_all()),
-            "task_templates": task_template_registry.list_all(),
-            "routine_catalog": _routine_catalog(),
+            "viewer": viewer,
+            "routine_catalog": _routine_catalog(viewer=viewer),
+            "hidden_templates": task_template_registry.list_hidden_for_viewer(viewer),
             "memories": _tail(memory_bank.list_all()),
             "prompts": prompt_registry.list_all(),
             "skills": skill_registry.list_all(),
@@ -852,6 +862,13 @@ async def api_remove_task_template_for_viewer(template_id: str, viewer: str = Fo
     itself - "remove a shared item" is not "delete it" (concept doc, section A.4)."""
     template = task_template_registry.remove_for_viewer(template_id, viewer)
     return {"status": "removed_for_viewer", "template": template.model_dump()}
+
+
+@app.post("/api/task-templates/{template_id}/restore-for-me")
+async def api_restore_task_template_for_viewer(template_id: str, viewer: str = Form("operator")):
+    """Undoes `remove-for-me` - the action behind the "hidden for you" panel's Restore row."""
+    template = task_template_registry.restore_for_viewer(template_id, viewer)
+    return {"status": "restored_for_viewer", "template": template.model_dump()}
 
 
 @app.post("/api/task-templates/{template_id}/enqueue")

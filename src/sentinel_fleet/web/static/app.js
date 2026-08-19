@@ -13,6 +13,9 @@ const state = {
   // Working copy of the template currently open in the step editor (concept doc, section
   // E.4): { templateId, steps: [...] }. Null while the modal is closed.
   stepsEditor: null,
+  // Working copy of the task wizard's in-progress form (concept doc, section D Phase 2). Null
+  // while the modal is closed - see defaultWizardState()/openWizard().
+  wizard: null,
   // The run console's xterm.js instance, its live WebSocket and the run it is currently
   // showing (concept doc, section C.7, variant (b), the web console). `term` is created once and
   // reused across opens (`term.reset()`, see openConsoleModal); `ws` and `taskId` are null
@@ -824,6 +827,165 @@ function removeScheduleBinding(templateId) {
 }
 
 // ---------------------------------------------------------------------------
+// Per-viewer hide/restore (concept doc, section A.4/D Phase 2 "removed_by"). Hiding a shared
+// template never touches the template itself - only this one viewer's own listing changes,
+// via the `viewer` query string on `/` (see server.py's index_view docstring for why that,
+// not localStorage, is the identity source here).
+// ---------------------------------------------------------------------------
+
+function hideTemplateForViewer(templateId, viewer) {
+  postAndReload(
+    `/api/task-templates/${templateId}/remove-for-me`,
+    { method: "POST", body: new URLSearchParams({ viewer }) },
+    "Could not hide the template"
+  );
+}
+
+function restoreTemplateForViewer(templateId, viewer) {
+  postAndReload(
+    `/api/task-templates/${templateId}/restore-for-me`,
+    { method: "POST", body: new URLSearchParams({ viewer }) },
+    "Could not restore the template"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Run history ("Verlauf", concept doc section A.3/D Phase 2): every TaskRecord this template
+// ever produced, not only the schedule-triggered ones the doc's Phase-2 bullet names first -
+// a bare "enqueue now" and a routine-triggered run go through the identical QUEUED -> ...
+// path (A.5), so excluding them would just hide real history behind an arbitrary filter. Each
+// row still carries `triggered_by`, so a reader can tell manual, routine and schedule runs
+// apart at a glance. Lazily loaded per template from the existing
+// GET /api/task-templates/{id} - no new endpoint, no second store.
+// ---------------------------------------------------------------------------
+
+const historyLoaded = new Set();
+
+async function toggleHistoryPanel(templateId, name) {
+  const row = document.getElementById(`history-row-${templateId}`);
+  if (!row) return;
+  const isOpen = row.style.display !== "none";
+  if (isOpen) {
+    row.style.display = "none";
+    return;
+  }
+  row.style.display = "table-row";
+  if (!historyLoaded.has(templateId)) {
+    await loadHistoryPanel(templateId, name);
+    historyLoaded.add(templateId);
+  }
+}
+
+function historyStatusBadgeClass(state) {
+  if (state === "completed") return "badge-ok";
+  if (state === "failed") return "badge-danger";
+  if (state === "queued") return "badge-info";
+  return "badge-warn";
+}
+
+function formatRunTime(epochSeconds) {
+  if (!epochSeconds) return "-";
+  return new Date(epochSeconds * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+}
+
+function buildHistoryRun(run) {
+  const card = document.createElement("div");
+  card.className = "history-run";
+
+  const head = document.createElement("div");
+  head.className = "history-run-head";
+
+  const id = document.createElement("code");
+  id.textContent = run.task_id;
+  head.appendChild(id);
+
+  const status = document.createElement("span");
+  status.className = `badge-status ${historyStatusBadgeClass(run.state)}`;
+  status.textContent = run.state;
+  head.appendChild(status);
+
+  const trigger = document.createElement("span");
+  trigger.className = "chip";
+  trigger.textContent = run.triggered_by;
+  head.appendChild(trigger);
+
+  const when = document.createElement("span");
+  when.className = "item-meta numeric";
+  when.textContent = formatRunTime(run.created_at);
+  head.appendChild(when);
+
+  const view = document.createElement("button");
+  view.type = "button";
+  view.className = "btn btn-sm";
+  view.textContent = "View run";
+  view.onclick = () => openConsoleModal(run.task_id, run.name);
+  head.appendChild(view);
+
+  card.appendChild(head);
+
+  const steps = run.output_data && Array.isArray(run.output_data.steps) ? run.output_data.steps : null;
+  if (steps && steps.length > 0) {
+    const list = document.createElement("div");
+    list.className = "history-step-list";
+    steps.forEach((step, index) => {
+      const stepRow = document.createElement("div");
+      stepRow.className = "history-step-row";
+      const label = step.error
+        ? `step ${index + 1} '${step.step_id}': ${step.status} - ${step.error}`
+        : `step ${index + 1} '${step.step_id}': ${step.status}${step.model ? ` (model=${step.model})` : ""}`;
+      stepRow.textContent = label;
+      list.appendChild(stepRow);
+    });
+    card.appendChild(list);
+  }
+
+  return card;
+}
+
+async function loadHistoryPanel(templateId, name) {
+  const container = document.getElementById(`history-content-${templateId}`);
+  if (!container) return;
+  container.replaceChildren();
+  const loading = document.createElement("div");
+  loading.className = "item-meta";
+  loading.textContent = "Loading history ...";
+  container.appendChild(loading);
+
+  try {
+    const res = await fetch(`/api/task-templates/${templateId}`);
+    if (!res.ok) throw new Error("Template not found");
+    const data = await res.json();
+    const runs = data.runs || [];
+
+    container.replaceChildren();
+
+    const makeRoutine = document.createElement("button");
+    makeRoutine.type = "button";
+    makeRoutine.className = "btn btn-sm";
+    makeRoutine.textContent = "Make this a routine";
+    makeRoutine.style.marginBottom = "var(--s-2)";
+    makeRoutine.onclick = () => openRoutineModal(templateId, name);
+    container.appendChild(makeRoutine);
+
+    if (runs.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "item-meta";
+      empty.textContent = "No runs yet.";
+      container.appendChild(empty);
+      return;
+    }
+
+    runs.forEach(run => container.appendChild(buildHistoryRun(run)));
+  } catch (err) {
+    container.replaceChildren();
+    const error = document.createElement("div");
+    error.className = "item-meta";
+    error.textContent = `Could not load the history: ${err.message}`;
+    container.appendChild(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Step editor: add/change/remove/reorder a template's steps (concept doc, section E.4
 // "Minimaler Ketten-Schnitt"). One step is an ordinary task; more than one runs as a chain.
 // Every field not exposed here (skill_ids, prompt library refs, ...) is kept from the loaded
@@ -986,6 +1148,465 @@ function submitStepsEditor() {
     { method: "PUT", body: new URLSearchParams({ steps: JSON.stringify(payload) }) },
     "Could not save the steps"
   );
+}
+
+// ---------------------------------------------------------------------------
+// Task wizard: a guided walk to the same `/api/task-templates` create call the quick form
+// (submitNewTaskTemplate above) already makes, plus the optional routine/schedule bindings -
+// no new persistence path (concept doc, section D Phase 2 "Wizard-UI"). Always submits its one
+// step through the `steps` JSON array, never the flat fields, so there is a single code path
+// for "one step" whether it came from this wizard or from `openStepsModal` later.
+//
+// `add_prompt_version()`/`add_skill_version()` wiring (D Phase 2 "Versions-Verdrahtung"): the
+// wizard calls the same `/api/prompts/{id}/version` and `/api/skills/{id}/version` endpoints
+// the Prompts/Skills tabs already use - never a second copy of that versioning logic.
+// ---------------------------------------------------------------------------
+
+const WIZARD_STEP_COUNT = 6;
+
+function defaultWizardState() {
+  return {
+    step: 0,
+    name: "", owner: "operator", group: "", visibility: "own", requiresApproval: false,
+    promptMode: "custom",
+    customPromptText: "",
+    promptId: "", promptVersion: "", promptOriginalText: "",
+    promptForkText: "", promptForkVersion: "", promptForkSummary: "Forked from the task wizard",
+    skillIds: new Set(),
+    skillForks: [],
+    agentId: "agent:task-solver",
+    pattern: "single",
+    bindRoutine: false,
+    routine: { kind: "interval", intervalSeconds: 3600, dailyTime: "04:00", cron: "", timezone: "UTC", missPolicy: "skip" },
+    bindSchedule: false,
+    schedule: { dueAt: "", missPolicy: "skip" }
+  };
+}
+
+function openWizard(prefill) {
+  state.wizard = Object.assign(defaultWizardState(), prefill || {});
+  document.getElementById("wz-name").value = state.wizard.name;
+  document.getElementById("wz-owner").value = state.wizard.owner;
+  document.getElementById("wz-group").value = state.wizard.group;
+  document.getElementById("wz-visibility").value = state.wizard.visibility;
+  document.getElementById("wz-requires-approval").checked = state.wizard.requiresApproval;
+  document.getElementById("wz-prompt-source").value = state.wizard.promptMode;
+  document.getElementById("wz-custom-prompt").value = state.wizard.customPromptText;
+  document.querySelectorAll(".wz-skill-box").forEach(box => { box.checked = state.wizard.skillIds.has(box.value); });
+  onWizardPromptSourceChange();
+  renderWizardSkillForks();
+  onWizardPatternChange();
+  onWizardBindingToggle();
+  goToWizardStep(0);
+  toggleModal("modal-wizard");
+}
+
+function openWizardFromChat() {
+  const promptId = document.getElementById("chat-prompt")?.value || "";
+  const promptText = document.getElementById("chat-input")?.value || "";
+  const prefill = {
+    skillIds: new Set(state.selectedSkills),
+    agentId: "agent:task-solver"
+  };
+  if (promptId) {
+    const versionSelect = document.getElementById("chat-prompt-version");
+    prefill.promptMode = "library";
+    prefill.promptId = promptId;
+    prefill.promptVersion = versionSelect && !versionSelect.disabled ? versionSelect.value : "";
+    if (promptText) {
+      // The chat message is not the library text itself, so it cannot silently overwrite a
+      // shared prompt version - it is carried over as the task's own custom instructions
+      // alongside the picked prompt/skills, not folded into a prompt fork.
+      prefill.customPromptText = promptText;
+    }
+  } else {
+    prefill.promptMode = "custom";
+    prefill.customPromptText = promptText;
+  }
+  openWizard(prefill);
+}
+
+function closeWizard() {
+  toggleModal("modal-wizard");
+  state.wizard = null;
+}
+
+function goToWizardStep(step) {
+  state.wizard.step = step;
+  document.querySelectorAll(".wizard-pane").forEach((pane, index) => pane.classList.toggle("is-active", index === step));
+  document.querySelectorAll(".wizard-step-dot").forEach(dot => {
+    const dotStep = Number(dot.getAttribute("data-wizard-step"));
+    dot.classList.toggle("is-active", dotStep === step);
+    dot.classList.toggle("is-done", dotStep < step);
+  });
+  document.getElementById("wz-back-btn").style.display = step === 0 ? "none" : "inline-flex";
+  document.getElementById("wz-next-btn").style.display = step === WIZARD_STEP_COUNT - 1 ? "none" : "inline-flex";
+  document.getElementById("wz-create-btn").style.display = step === WIZARD_STEP_COUNT - 1 ? "inline-flex" : "none";
+  if (step === WIZARD_STEP_COUNT - 1) renderWizardSummary();
+}
+
+function collectWizardStep(step) {
+  const w = state.wizard;
+  if (step === 0) {
+    w.name = document.getElementById("wz-name").value.trim();
+    w.owner = document.getElementById("wz-owner").value.trim() || "operator";
+    w.group = document.getElementById("wz-group").value.trim();
+    w.visibility = document.getElementById("wz-visibility").value;
+    w.requiresApproval = document.getElementById("wz-requires-approval").checked;
+  } else if (step === 1) {
+    w.promptMode = document.getElementById("wz-prompt-source").value;
+    w.customPromptText = document.getElementById("wz-custom-prompt").value;
+    w.promptId = document.getElementById("wz-prompt-id").value;
+    w.promptVersion = document.getElementById("wz-prompt-version").value;
+    w.promptForkText = document.getElementById("wz-prompt-fork-text").value;
+    w.promptForkVersion = document.getElementById("wz-prompt-fork-version").value.trim();
+    w.promptForkSummary = document.getElementById("wz-prompt-fork-summary").value.trim();
+  } else if (step === 2) {
+    w.skillIds = new Set(Array.from(document.querySelectorAll(".wz-skill-box:checked")).map(box => box.value));
+  } else if (step === 3) {
+    w.agentId = document.getElementById("wz-agent").value;
+    w.pattern = document.getElementById("wz-pattern").value;
+  } else if (step === 4) {
+    w.bindRoutine = document.getElementById("wz-bind-routine").checked;
+    w.routine = {
+      kind: document.getElementById("wz-routine-kind").value,
+      intervalSeconds: document.getElementById("wz-routine-interval").value,
+      dailyTime: document.getElementById("wz-routine-daily-time").value,
+      cron: document.getElementById("wz-routine-cron").value,
+      timezone: document.getElementById("wz-routine-timezone").value || "UTC",
+      missPolicy: document.getElementById("wz-routine-miss-policy").value
+    };
+    w.bindSchedule = document.getElementById("wz-bind-schedule").checked;
+    w.schedule = {
+      dueAt: document.getElementById("wz-schedule-due-at").value,
+      missPolicy: document.getElementById("wz-schedule-miss-policy").value
+    };
+  }
+}
+
+function wizardNext() {
+  collectWizardStep(state.wizard.step);
+  if (state.wizard.step === 0 && !state.wizard.name) {
+    showToast("Give the task a name first.");
+    return;
+  }
+  if (state.wizard.step < WIZARD_STEP_COUNT - 1) goToWizardStep(state.wizard.step + 1);
+}
+
+function wizardBack() {
+  collectWizardStep(state.wizard.step);
+  if (state.wizard.step > 0) goToWizardStep(state.wizard.step - 1);
+}
+
+function onWizardPromptSourceChange() {
+  const isLibrary = document.getElementById("wz-prompt-source").value === "library";
+  document.getElementById("wz-custom-group").style.display = isLibrary ? "none" : "block";
+  document.getElementById("wz-library-group").style.display = isLibrary ? "block" : "none";
+  if (isLibrary && state.wizard.promptId) {
+    document.getElementById("wz-prompt-id").value = state.wizard.promptId;
+    onWizardLibraryPromptChange();
+  }
+}
+
+function onWizardLibraryPromptChange() {
+  const promptId = document.getElementById("wz-prompt-id").value;
+  const versionSelect = document.getElementById("wz-prompt-version");
+  versionSelect.replaceChildren();
+
+  const prompt = state.prompts.find(p => p.id === promptId);
+  if (!prompt) {
+    versionSelect.disabled = true;
+    versionSelect.appendChild(new Option("Pick a template first", ""));
+    document.getElementById("wz-prompt-fork-text").value = "";
+    return;
+  }
+
+  versionSelect.disabled = false;
+  prompt.versions.forEach(version => {
+    const option = new Option(`v${version.version_number}`, version.version_number);
+    option.selected = state.wizard.promptVersion
+      ? version.version_number === state.wizard.promptVersion
+      : version.version_number === prompt.active_version;
+    versionSelect.appendChild(option);
+  });
+  onWizardPromptVersionChange();
+}
+
+function onWizardPromptVersionChange() {
+  const promptId = document.getElementById("wz-prompt-id").value;
+  const versionNumber = document.getElementById("wz-prompt-version").value;
+  const prompt = state.prompts.find(p => p.id === promptId);
+  const version = prompt ? prompt.versions.find(v => v.version_number === versionNumber) : null;
+  const text = version ? version.text : (prompt ? prompt.current_text : "");
+  state.wizard.promptOriginalText = text;
+  document.getElementById("wz-prompt-fork-text").value = text;
+  onWizardPromptForkTextChange();
+}
+
+function onWizardPromptForkTextChange() {
+  const changed = document.getElementById("wz-prompt-fork-text").value !== state.wizard.promptOriginalText;
+  document.getElementById("wz-prompt-fork-fields").style.display = changed ? "block" : "none";
+}
+
+function onWizardPatternChange() {
+  const isRace = document.getElementById("wz-pattern").value === "race";
+  document.getElementById("wz-pattern-note").style.display = isRace ? "block" : "none";
+}
+
+function onWizardBindingToggle() {
+  document.getElementById("wz-routine-fields").style.display = document.getElementById("wz-bind-routine").checked ? "block" : "none";
+  document.getElementById("wz-schedule-fields").style.display = document.getElementById("wz-bind-schedule").checked ? "block" : "none";
+}
+
+function onWizardRoutineKindChange() {
+  const kind = document.getElementById("wz-routine-kind").value;
+  document.getElementById("wz-routine-interval-group").style.display = kind === "interval" ? "block" : "none";
+  document.getElementById("wz-routine-daily-group").style.display = kind === "daily" ? "block" : "none";
+  document.getElementById("wz-routine-cron-group").style.display = kind === "cron" ? "block" : "none";
+  document.getElementById("wz-routine-timezone-group").style.display = kind === "interval" ? "none" : "block";
+}
+
+// Fork-before-attach staging list (D Phase 2 "add_skill_version() im Wizard-Flow"). Mirrors the
+// step editor's own add/remove-row idiom (addStepRow/removeStepRow) rather than inventing a
+// second array-builder pattern.
+
+function addWizardSkillFork() {
+  state.wizard.skillForks.push({ skill_id: state.skills[0] ? state.skills[0].skill_id : "", new_version_number: "", change_summary: "", required_tools: "" });
+  renderWizardSkillForks();
+}
+
+function removeWizardSkillFork(index) {
+  state.wizard.skillForks.splice(index, 1);
+  renderWizardSkillForks();
+}
+
+function renderWizardSkillForks() {
+  const container = document.getElementById("wz-skill-forks");
+  container.replaceChildren();
+  state.wizard.skillForks.forEach((fork, index) => container.appendChild(buildWizardSkillForkRow(fork, index)));
+}
+
+function buildWizardSkillForkRow(fork, index) {
+  const row = document.createElement("div");
+  row.className = "wizard-fork-row";
+
+  const skillGroup = document.createElement("div");
+  skillGroup.className = "form-group";
+  const skillLabel = document.createElement("label");
+  skillLabel.textContent = "Skill to fork";
+  skillGroup.appendChild(skillLabel);
+  const skillSelect = document.createElement("select");
+  skillSelect.className = "select-input";
+  state.skills.forEach(skill => {
+    const option = new Option(`${skill.name} (v${skill.version})`, skill.skill_id);
+    option.selected = skill.skill_id === fork.skill_id;
+    skillSelect.appendChild(option);
+  });
+  skillSelect.addEventListener("change", event => { fork.skill_id = event.target.value; });
+  skillGroup.appendChild(skillSelect);
+  row.appendChild(skillGroup);
+
+  const versionGroup = document.createElement("div");
+  versionGroup.className = "form-group";
+  const versionLabel = document.createElement("label");
+  versionLabel.textContent = "New version number";
+  versionGroup.appendChild(versionLabel);
+  const versionInput = document.createElement("input");
+  versionInput.className = "text-input";
+  versionInput.placeholder = "1.1.0";
+  versionInput.value = fork.new_version_number;
+  versionInput.addEventListener("input", event => { fork.new_version_number = event.target.value; });
+  versionGroup.appendChild(versionInput);
+  row.appendChild(versionGroup);
+
+  const summaryGroup = document.createElement("div");
+  summaryGroup.className = "form-group";
+  const summaryLabel = document.createElement("label");
+  summaryLabel.textContent = "What changed";
+  summaryGroup.appendChild(summaryLabel);
+  const summaryInput = document.createElement("input");
+  summaryInput.className = "text-input";
+  summaryInput.value = fork.change_summary;
+  summaryInput.addEventListener("input", event => { fork.change_summary = event.target.value; });
+  summaryGroup.appendChild(summaryInput);
+  row.appendChild(summaryGroup);
+
+  const toolsGroup = document.createElement("div");
+  toolsGroup.className = "form-group";
+  const toolsLabel = document.createElement("label");
+  toolsLabel.textContent = "Required tools (comma separated)";
+  toolsGroup.appendChild(toolsLabel);
+  const toolsInput = document.createElement("input");
+  toolsInput.className = "text-input";
+  toolsInput.value = fork.required_tools;
+  toolsInput.addEventListener("input", event => { fork.required_tools = event.target.value; });
+  toolsGroup.appendChild(toolsInput);
+  row.appendChild(toolsGroup);
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "btn btn-sm btn-reject";
+  remove.textContent = "Remove this fork";
+  remove.onclick = () => removeWizardSkillFork(index);
+  row.appendChild(remove);
+
+  return row;
+}
+
+function wizardSummaryRow(dl, term, value) {
+  const dt = document.createElement("dt");
+  dt.textContent = term;
+  const dd = document.createElement("dd");
+  dd.textContent = value;
+  dl.append(dt, dd);
+}
+
+function renderWizardSummary() {
+  const w = state.wizard;
+  const dl = document.getElementById("wz-summary");
+  dl.replaceChildren();
+  wizardSummaryRow(dl, "Name", w.name || "(not set)");
+  wizardSummaryRow(dl, "Owner / group", `${w.owner}${w.group ? ` / ${w.group}` : ""}`);
+  wizardSummaryRow(dl, "Visibility", w.visibility + (w.requiresApproval ? ", requires approval" : ""));
+  wizardSummaryRow(
+    dl, "Prompt",
+    w.promptMode === "library"
+      ? `library (${w.promptId || "none"}), forked=${w.promptForkText !== w.promptOriginalText}`
+      : `custom (${(w.customPromptText || "").length} chars)`
+  );
+  wizardSummaryRow(dl, "Skills", w.skillIds.size ? Array.from(w.skillIds).join(", ") : "none");
+  if (w.skillForks.length > 0) {
+    wizardSummaryRow(dl, "Skill forks", w.skillForks.map(f => `${f.skill_id} -> v${f.new_version_number || "?"}`).join(", "));
+  }
+  wizardSummaryRow(dl, "Agent / pattern", `${w.agentId} / ${w.pattern}`);
+  wizardSummaryRow(
+    dl, "Bindings",
+    [w.bindRoutine ? `routine (${w.routine.kind})` : null, w.bindSchedule ? `schedule (${w.schedule.dueAt || "no date set"})` : null]
+      .filter(Boolean).join(", ") || "none - a bare template, enqueue it manually"
+  );
+}
+
+function wizardRoutineForm(routine) {
+  return new URLSearchParams({
+    kind: routine.kind,
+    interval_seconds: routine.intervalSeconds,
+    daily_time: routine.dailyTime,
+    cron_expression: routine.cron,
+    timezone_name: routine.timezone,
+    miss_policy: routine.missPolicy,
+    enabled: "true"
+  });
+}
+
+function wizardScheduleForm(schedule) {
+  return new URLSearchParams({ due_at: schedule.dueAt, has_time: "true", miss_policy: schedule.missPolicy });
+}
+
+async function submitWizard() {
+  collectWizardStep(state.wizard.step);
+  const w = state.wizard;
+  if (!w.name) {
+    showToast("Give the task a name first.");
+    goToWizardStep(0);
+    return;
+  }
+  if (w.bindSchedule && !w.schedule.dueAt) {
+    showToast("Pick a due date for the schedule binding, or turn it off.");
+    goToWizardStep(4);
+    return;
+  }
+
+  // Stage 1/2: version forks (add_skill_version / add_prompt_version), before anything is
+  // created - a fork failure here means nothing else runs, exactly like the quick form's own
+  // "Could not ..." refusals elsewhere on this page.
+  let promptVersion = w.promptMode === "library" ? w.promptVersion : "";
+  try {
+    for (const fork of w.skillForks) {
+      if (!fork.skill_id || !fork.new_version_number) continue;
+      const res = await fetch(`/api/skills/${fork.skill_id}/version`, {
+        method: "POST",
+        body: new URLSearchParams({
+          new_version_number: fork.new_version_number,
+          change_summary: fork.change_summary || "Forked from the task wizard",
+          required_tools: fork.required_tools
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(`Skill fork for ${fork.skill_id} failed: ${data.detail || res.statusText}`);
+    }
+
+    if (w.promptMode === "library" && w.promptId && w.promptForkText !== w.promptOriginalText) {
+      if (!w.promptForkVersion) throw new Error("Give the forked prompt a new version number, or restore its original text.");
+      const res = await fetch(`/api/prompts/${w.promptId}/version`, {
+        method: "POST",
+        body: new URLSearchParams({
+          new_version_number: w.promptForkVersion,
+          new_text: w.promptForkText,
+          change_summary: w.promptForkSummary || "Forked from the task wizard"
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(`Prompt fork failed: ${data.detail || res.statusText}`);
+      promptVersion = data.prompt.active_version;
+    }
+  } catch (err) {
+    showToast(err.message);
+    return;
+  }
+
+  // Stage 3: create the template - the one point of no return. Every failure after this one
+  // is reported and the page still reloads, because the template itself now exists.
+  let templateId;
+  try {
+    const step = {
+      step_id: "step-1",
+      position: 0,
+      assigned_agent: w.agentId,
+      skill_ids: Array.from(w.skillIds),
+      prompt_source: w.promptMode,
+      prompt_id: w.promptMode === "library" ? (w.promptId || null) : null,
+      prompt_version: w.promptMode === "library" ? (promptVersion || null) : null,
+      custom_prompt_text: w.promptMode === "custom" ? w.customPromptText : null,
+      execution_pattern: w.pattern,
+      race_models: w.pattern === "race" ? state.models : []
+    };
+    const res = await fetch("/api/task-templates", {
+      method: "POST",
+      body: new URLSearchParams({
+        name: w.name,
+        owner: w.owner,
+        visibility: w.visibility,
+        requires_approval: w.requiresApproval ? "true" : "false",
+        group: w.group,
+        steps: JSON.stringify([step])
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Could not create the task template");
+    templateId = data.template.template_id;
+  } catch (err) {
+    showToast(err.message);
+    return;
+  }
+
+  // Stage 4/5: bindings, best-effort - the template already exists either way.
+  const bindingErrors = [];
+  if (w.bindRoutine) {
+    const res = await fetch(`/api/task-templates/${templateId}/routine`, { method: "PUT", body: wizardRoutineForm(w.routine) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      bindingErrors.push(`routine binding failed: ${data.detail || res.statusText}`);
+    }
+  }
+  if (w.bindSchedule) {
+    const res = await fetch(`/api/task-templates/${templateId}/schedule`, { method: "PUT", body: wizardScheduleForm(w.schedule) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      bindingErrors.push(`schedule binding failed: ${data.detail || res.statusText}`);
+    }
+  }
+  if (bindingErrors.length > 0) showToast(`Task created, but ${bindingErrors.join("; ")}.`);
+  location.reload();
 }
 
 // ---------------------------------------------------------------------------

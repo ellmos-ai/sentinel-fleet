@@ -45,6 +45,11 @@ async def test_index_renders_html(client):
     assert "openPromptVersionModal(" in body
     assert "openSkillVersionModal(" in body
     assert "extraction-mode-badge" in body
+    # Task wizard entry point and the per-viewer "removed_by" controls (concept doc, section
+    # D Phase 2) render unconditionally, even with no templates hidden yet.
+    assert "openWizard()" in body
+    assert 'id="viewer-input"' in body
+    assert 'value="operator"' in body  # default viewer, no ?viewer= query string on this request
 
 
 def test_all_templates_compile():

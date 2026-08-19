@@ -349,6 +349,9 @@
                 <label class="field-label" for="chat-input">Message</label>
                 <textarea id="chat-input" class="textarea-input" placeholder="Ask about the fleet, a policy or a document."></textarea>
               </div>
+              <button class="btn" onclick="openWizardFromChat()" title="Turn the current prompt, skills and template pick into a task">
+                Save as task
+              </button>
               <button id="chat-send" class="btn btn-primary" onclick="sendChat()">
                 <svg class="icon"><use href="#i-send"/></svg> Send
               </button>
@@ -489,14 +492,45 @@
       <div class="card" style="margin-bottom: var(--s-5)">
         <div class="card-header">
           <h3>Tasks</h3>
-          <button class="btn btn-sm btn-primary" onclick="toggleModal('modal-new-template')">
-            <svg class="icon"><use href="#i-plus"/></svg> New task template
-          </button>
+          <div class="item-actions" style="margin: 0">
+            <button class="btn btn-sm btn-primary" onclick="openWizard()">
+              <svg class="icon"><use href="#i-plus"/></svg> Task wizard
+            </button>
+            <button class="btn btn-sm" onclick="toggleModal('modal-new-template')">Quick create</button>
+          </div>
         </div>
         <p class="item-desc" style="padding: 0 var(--s-4); margin-top: calc(-1 * var(--s-2))">
           Everything is a task: a template is a prompt plus skills. Attach a routine (<svg class="icon"><use href="#i-gear"/></svg>) or a schedule (<svg class="icon"><use href="#i-clock"/></svg>) to make it recurring or dated - remove both to make it deletable again.
         </p>
-        {% if not task_templates %}
+        <form method="get" action="/" class="viewer-switch">
+          <label class="field-label" for="viewer-input">Viewing as</label>
+          <input type="text" id="viewer-input" name="viewer" class="text-input" value="{{ viewer }}">
+          <button type="submit" class="btn btn-sm">Switch</button>
+          {% if hidden_templates %}
+          <button type="button" class="btn btn-sm" onclick="toggleModal('hidden-templates-panel')">Hidden for you ({{ hidden_templates|length }})</button>
+          {% endif %}
+        </form>
+        {% if hidden_templates %}
+        <div id="hidden-templates-panel" class="hidden-panel" style="display: none;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Name</th><th>Owner</th><th>Action</th></tr></thead>
+              <tbody>
+                {% for h in hidden_templates %}
+                <tr>
+                  <td><b>{{ h.name }}</b></td>
+                  <td class="item-meta numeric">{{ h.owner }}</td>
+                  <td>
+                    <button class="btn btn-sm" onclick='restoreTemplateForViewer({{ h.template_id|tojson }}, {{ viewer|tojson }})'>Restore</button>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {% endif %}
+        {% if not routine_catalog %}
         <div class="empty-state">
           <svg class="icon icon-lg"><use href="#i-empty"/></svg>
           <h4>No task templates yet</h4>
@@ -535,6 +569,7 @@
                   <div class="item-actions" style="margin: 0">
                     <button class="btn btn-sm" onclick='enqueueTaskTemplate({{ row.template_id|tojson }})'>Enqueue now</button>
                     <button class="btn btn-sm" onclick='openStepsModal({{ row.template_id|tojson }}, {{ row.name|tojson }}, {{ row.steps|tojson }})'>Edit steps</button>
+                    <button class="btn btn-sm" onclick='toggleHistoryPanel({{ row.template_id|tojson }}, {{ row.name|tojson }})'>History</button>
                     {% if row.routine %}
                     <button class="btn btn-sm" onclick='removeRoutineBinding({{ row.template_id|tojson }})'>Remove routine</button>
                     {% else %}
@@ -545,10 +580,18 @@
                     {% else %}
                     <button class="btn btn-sm" onclick='openScheduleModal({{ row.template_id|tojson }}, {{ row.name|tojson }})'>Add schedule</button>
                     {% endif %}
+                    {% if row.owner != viewer and row.visibility != 'own' %}
+                    <button class="btn btn-sm" onclick='hideTemplateForViewer({{ row.template_id|tojson }}, {{ viewer|tojson }})'>Hide from my view</button>
+                    {% endif %}
                     {% if row.can_delete %}
                     <button class="btn btn-sm btn-reject" onclick='deleteTaskTemplate({{ row.template_id|tojson }}, {{ row.owner|tojson }})'>Delete</button>
                     {% endif %}
                   </div>
+                </td>
+              </tr>
+              <tr id="history-row-{{ row.template_id }}" class="history-row" style="display: none;">
+                <td colspan="6">
+                  <div id="history-content-{{ row.template_id }}" class="history-panel"></div>
                 </td>
               </tr>
               {% endfor %}
@@ -968,6 +1011,213 @@
           <button type="submit" class="btn btn-primary">Create template</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="modal-wizard" class="modal-overlay">
+    <div class="modal-card modal-card-wide">
+      <div class="modal-header">
+        <h3>Task wizard</h3>
+        <button class="btn btn-sm btn-icon" onclick="closeWizard()" aria-label="Close">
+          <svg class="icon"><use href="#i-close"/></svg>
+        </button>
+      </div>
+      <p class="item-desc" style="margin-top: calc(-1 * var(--s-2))">
+        A guided walk through the same create endpoints the quick form uses - name, prompt, skills, agent, then
+        an optional routine or schedule binding.
+      </p>
+      <div class="wizard-steps">
+        <span class="wizard-step-dot" data-wizard-step="0">1. Name</span>
+        <span class="wizard-step-dot" data-wizard-step="1">2. Prompt</span>
+        <span class="wizard-step-dot" data-wizard-step="2">3. Skills</span>
+        <span class="wizard-step-dot" data-wizard-step="3">4. Agent</span>
+        <span class="wizard-step-dot" data-wizard-step="4">5. Bindings</span>
+        <span class="wizard-step-dot" data-wizard-step="5">6. Summary</span>
+      </div>
+
+      <div id="wizard-pane-0" class="wizard-pane">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="wz-name" class="text-input" placeholder="Weekly VAT compliance sweep">
+        </div>
+        <div class="form-group">
+          <label>Owner</label>
+          <input type="text" id="wz-owner" class="text-input" value="operator">
+        </div>
+        <div class="form-group">
+          <label>Group</label>
+          <input type="text" id="wz-group" class="text-input" placeholder="compliance">
+        </div>
+        <div class="form-group">
+          <label>Visibility</label>
+          <select id="wz-visibility" class="select-input">
+            <option value="own">Own - only you, never hideable by anyone else</option>
+            <option value="organization">Organisation - shared, hideable from another viewer's own list</option>
+            <option value="restricted">Restricted - named roles only</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-row">
+            <input type="checkbox" id="wz-requires-approval">
+            <span>Requires approval before every run</span>
+          </label>
+        </div>
+      </div>
+
+      <div id="wizard-pane-1" class="wizard-pane">
+        <div class="form-group">
+          <label>Prompt source</label>
+          <select id="wz-prompt-source" class="select-input" onchange="onWizardPromptSourceChange()">
+            <option value="custom">Custom inline prompt</option>
+            <option value="library">From the prompt library</option>
+          </select>
+        </div>
+        <div id="wz-custom-group" class="form-group">
+          <label>Prompt / instructions</label>
+          <textarea id="wz-custom-prompt" class="textarea-input" placeholder="Check every open invoice for compliance and summarise defects."></textarea>
+        </div>
+        <div id="wz-library-group" style="display: none;">
+          <div class="form-group">
+            <label>Prompt template</label>
+            <select id="wz-prompt-id" class="select-input" onchange="onWizardLibraryPromptChange()">
+              <option value="">None</option>
+              {% for p in prompts %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Template version</label>
+            <select id="wz-prompt-version" class="select-input" disabled onchange="onWizardPromptVersionChange()">
+              <option value="">Pick a template first</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Text used for this task (editing it forks a new version)</label>
+            <textarea id="wz-prompt-fork-text" class="textarea-input"></textarea>
+          </div>
+          <div id="wz-prompt-fork-fields" style="display: none;">
+            <p class="item-meta">Changed from the picked version - this saves a new version via the prompt registry before the task is created.</p>
+            <div class="form-group">
+              <label>New version number</label>
+              <input type="text" id="wz-prompt-fork-version" class="text-input" placeholder="1.3.0">
+            </div>
+            <div class="form-group">
+              <label>What changed</label>
+              <input type="text" id="wz-prompt-fork-summary" class="text-input" placeholder="Adjusted for this task" value="Forked from the task wizard">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="wizard-pane-2" class="wizard-pane">
+        <div class="form-group">
+          <label>Skills</label>
+          <div class="picker" style="max-height: 150px;">
+            {% for s in skills %}
+            <label class="picker-option">
+              <input type="checkbox" class="wz-skill-box" value="{{ s.skill_id }}">
+              <span class="picker-name">{{ s.name }}</span>
+              <span class="picker-pillar">{{ s.pillar }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="form-group">
+          <button type="button" class="btn btn-sm" onclick="addWizardSkillFork()">
+            <svg class="icon"><use href="#i-plus"/></svg> Fork a skill before attaching
+          </button>
+          <p class="item-desc">Saves a new version of an existing skill (via the skill registry) before this task attaches it - the same version bump the Skills tab's own "New version" action makes.</p>
+          <div id="wz-skill-forks" class="wizard-fork-list"></div>
+        </div>
+      </div>
+
+      <div id="wizard-pane-3" class="wizard-pane">
+        <div class="form-group">
+          <label>Assigned agent</label>
+          <select id="wz-agent" class="select-input">
+            {% for a in agents %}<option value="{{ a.agent_id }}" {% if a.agent_id == 'agent:task-solver' %}selected{% endif %}>{{ a.name }} ({{ a.role.value }})</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Execution pattern</label>
+          <select id="wz-pattern" class="select-input" onchange="onWizardPatternChange()">
+            <option value="single">Single agent</option>
+            <option value="race">Race (every supported model)</option>
+          </select>
+          <p id="wz-pattern-note" class="item-meta" style="display: none;">Runs this task once per supported model at every trigger.</p>
+        </div>
+      </div>
+
+      <div id="wizard-pane-4" class="wizard-pane">
+        <div class="form-group">
+          <label class="checkbox-row">
+            <input type="checkbox" id="wz-bind-routine" onchange="onWizardBindingToggle()">
+            <span>Bind a routine now (<svg class="icon"><use href="#i-gear"/></svg> makes it recurring)</span>
+          </label>
+        </div>
+        <div id="wz-routine-fields" style="display: none;">
+          <div class="form-group">
+            <label>Recurrence</label>
+            <select id="wz-routine-kind" class="select-input" onchange="onWizardRoutineKindChange()">
+              <option value="interval">Every N seconds</option>
+              <option value="daily">Daily at a fixed time</option>
+              <option value="cron">Cron expression</option>
+            </select>
+          </div>
+          <div class="form-group" id="wz-routine-interval-group">
+            <label>Interval (seconds)</label>
+            <input type="number" id="wz-routine-interval" class="text-input" min="1" value="3600">
+          </div>
+          <div class="form-group" id="wz-routine-daily-group" style="display: none;">
+            <label>Time of day (UTC unless a timezone is given below)</label>
+            <input type="time" id="wz-routine-daily-time" class="text-input" value="04:00">
+          </div>
+          <div class="form-group" id="wz-routine-cron-group" style="display: none;">
+            <label>Cron expression</label>
+            <input type="text" id="wz-routine-cron" class="text-input" placeholder="0 8,12,16,20 * * *">
+          </div>
+          <div class="form-group" id="wz-routine-timezone-group" style="display: none;">
+            <label>Timezone</label>
+            <input type="text" id="wz-routine-timezone" class="text-input" value="UTC" placeholder="Europe/Berlin">
+          </div>
+          <div class="form-group">
+            <label>If a run was missed</label>
+            <select id="wz-routine-miss-policy" class="select-input">
+              <option value="skip">Skip it - resume counting from now</option>
+              <option value="catch_up">Catch up - run the backlog, one per check</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-row">
+            <input type="checkbox" id="wz-bind-schedule" onchange="onWizardBindingToggle()">
+            <span>Schedule it now (<svg class="icon"><use href="#i-clock"/></svg> makes it dated)</span>
+          </label>
+        </div>
+        <div id="wz-schedule-fields" style="display: none;">
+          <div class="form-group">
+            <label>Due date and time (UTC)</label>
+            <input type="datetime-local" id="wz-schedule-due-at" class="text-input">
+          </div>
+          <div class="form-group">
+            <label>If the trigger fires late</label>
+            <select id="wz-schedule-miss-policy" class="select-input">
+              <option value="skip">Skip it</option>
+              <option value="catch_up">Run it late</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div id="wizard-pane-5" class="wizard-pane">
+        <dl class="wizard-summary" id="wz-summary"></dl>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn" onclick="closeWizard()">Cancel</button>
+        <button type="button" class="btn" id="wz-back-btn" onclick="wizardBack()">Back</button>
+        <button type="button" class="btn btn-primary" id="wz-next-btn" onclick="wizardNext()">Next</button>
+        <button type="button" class="btn btn-primary" id="wz-create-btn" style="display: none;" onclick="submitWizard()">Create task</button>
+      </div>
     </div>
   </div>
 
