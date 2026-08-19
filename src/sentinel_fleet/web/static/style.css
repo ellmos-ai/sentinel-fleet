@@ -430,13 +430,26 @@ a { color: var(--accent); }
   scrollbar-width: thin;
 }
 
-/* Two groups, one question each: is this a place to act, or a place to look something up. */
+/* Three groups: where work is done, where the fleet is run and governed, and what only answers
+   questions. The colour is an index carried by the group label and by the active tab's
+   underline - never a fill, in line with the pillar hues elsewhere. */
 .tab-group-label {
   align-self: center;
   padding: 0 var(--s-2) 0 0;
   white-space: nowrap;
   color: var(--ink-3);
 }
+
+.tab-group-label.on-work { color: var(--accent); }
+.tab-group-label.on-control { color: var(--pillar-conductor); }
+.tab-group-label.on-reference { color: var(--ink-3); }
+
+.tab-btn.on-work.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-btn.on-work.active .tab-count { color: var(--accent); border-color: var(--accent); }
+.tab-btn.on-control.active { color: var(--pillar-conductor); border-bottom-color: var(--pillar-conductor); }
+.tab-btn.on-control.active .tab-count { color: var(--pillar-conductor); border-color: var(--pillar-conductor); }
+.tab-btn.on-reference.active { color: var(--ink); border-bottom-color: var(--rule-strong); }
+.tab-btn.on-reference.active .tab-count { color: var(--ink-2); border-color: var(--rule-strong); }
 
 .tab-group-sep {
   align-self: center;
@@ -902,6 +915,17 @@ a { color: var(--accent); }
   align-items: center;
   gap: var(--s-2);
   margin-left: auto;
+}
+
+/* One line per tab answering "when do I use this one rather than that one" - the question the
+   live test could not answer, having brought its first order to the chat out of habit. */
+.tab-role {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  margin-bottom: var(--s-4);
+  padding-left: var(--s-3);
+  border-left: 2px solid var(--rule-strong);
 }
 
 .section-jump {

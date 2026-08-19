@@ -298,21 +298,26 @@ async def test_the_scenarios_come_before_their_evidence():
 @pytest.mark.asyncio
 async def test_the_tab_rail_is_split_into_work_and_reference():
     """Ten equally weighted tabs told the operator nothing about where to start. The cut is by
-    what they are there to do, which is why Approvals moves ahead of the reference tabs."""
+    what they are there to do; "Control" is the operator's own word for the middle group - the
+    tabs where the fleet is run and governed."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         body = (await client.get("/")).text
 
     rail = body.split('class="tab-rail"')[1].split("</nav>")[0]
-    assert "tab-group-sep" in rail, "the two groups need a visible boundary"
-    assert rail.index(">Work<") < rail.index(">Reference<")
+    assert rail.count("tab-group-sep") == 2, "three groups need two visible boundaries"
+    assert rail.index(">Work<") < rail.index(">Control<") < rail.index(">Reference<")
+    # The colour is an index, so every tab has to declare which group it belongs to.
+    for group in ("on-work", "on-control", "on-reference"):
+        assert f"tab-group-label eyebrow {group}" in rail
+        assert f'class="tab-btn {group}' in rail
 
     order = re.findall(r'id="btn-(tab-[a-z]+)"', rail)
     assert order == [
-        "tab-overview", "tab-chat", "tab-tickets", "tab-fleet",
-        "tab-domains", "tab-contacts", "tab-memory", "tab-prompts",
-        "tab-telemetry", "tab-governance",
-    ], "work tabs first, reference tabs after the divider"
+        "tab-overview", "tab-chat",
+        "tab-fleet", "tab-tickets", "tab-prompts", "tab-memory", "tab-governance",
+        "tab-domains", "tab-contacts", "tab-telemetry",
+    ], "work, then control, then reference"
     # switchTab derives the button id from the pane id, so a rename here breaks every tab.
     for tab in order:
         assert f"switchTab('{tab}')" in rail
@@ -604,3 +609,19 @@ async def test_the_new_ticket_dialog_says_what_a_ticket_is():
 
     assert "A manual entry in the approval queue" in body
     assert "To give an agent work instead" in body
+
+
+@pytest.mark.asyncio
+async def test_chat_and_fleet_say_when_to_use_which():
+    """The live test brought its first order to the chat, out of habit from every other chat
+    tool, and found no way onward: "when do I use this chat, and when Fleet?"."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    chat = body.split('id="tab-chat"')[1].split('id="tab-domains"')[0]
+    assert "Talk to one governed agent" in chat
+    assert "save it as a task and run it in Fleet" in chat
+
+    fleet = body.split('id="tab-fleet"')[1].split('id="tab-tickets"')[0]
+    assert "Run and manage the work itself" in fleet

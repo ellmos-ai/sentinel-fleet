@@ -41,40 +41,47 @@
     <!-- Ten equally weighted tabs gave no clue where to start. The split is by what the operator
          is there to do - act on something, or look something up - not by architecture pillar:
          the live test called Domains "just an overview, it need not be this prominent". -->
+    <!-- Three groups, named by what the operator is there to do. "Control" is the operator's
+         own word from the live test: the tabs where the fleet is run and governed belong
+         together, separate from the surfaces that only answer questions. Each group carries a
+         quiet colour on its label and on the active tab's underline - an index, not a fill. -->
     <nav class="tab-rail" role="tablist">
-      <span class="tab-group-label eyebrow">Work</span>
-      <button id="btn-tab-overview" class="tab-btn active" onclick="switchTab('tab-overview')">
+      <span class="tab-group-label eyebrow on-work">Work</span>
+      <button id="btn-tab-overview" class="tab-btn on-work active" onclick="switchTab('tab-overview')">
         <svg class="icon"><use href="#i-grid"/></svg> Overview
       </button>
-      <button id="btn-tab-chat" class="tab-btn" onclick="switchTab('tab-chat')">
+      <button id="btn-tab-chat" class="tab-btn on-work" onclick="switchTab('tab-chat')">
         <svg class="icon"><use href="#i-chat"/></svg> Chat
-      </button>
-      <button id="btn-tab-tickets" class="tab-btn" onclick="switchTab('tab-tickets')">
-        <svg class="icon"><use href="#i-inbox"/></svg> Approvals <span class="tab-count">{{ pending_tickets|length }}</span>
-      </button>
-      <button id="btn-tab-fleet" class="tab-btn" onclick="switchTab('tab-fleet')">
-        <svg class="icon"><use href="#i-fleet"/></svg> Fleet <span class="tab-count">{{ agents|length }}</span>
       </button>
 
       <span class="tab-group-sep" aria-hidden="true"></span>
-      <span class="tab-group-label eyebrow">Reference</span>
-      <button id="btn-tab-domains" class="tab-btn" onclick="switchTab('tab-domains')">
-        <svg class="icon"><use href="#i-building"/></svg> Domains <span class="tab-count">{{ domains|length }}</span>
+      <span class="tab-group-label eyebrow on-control">Control</span>
+      <button id="btn-tab-fleet" class="tab-btn on-control" onclick="switchTab('tab-fleet')">
+        <svg class="icon"><use href="#i-fleet"/></svg> Fleet <span class="tab-count">{{ agents|length }}</span>
       </button>
-      <button id="btn-tab-contacts" class="tab-btn" onclick="switchTab('tab-contacts')">
-        <svg class="icon"><use href="#i-contacts"/></svg> Contacts <span class="tab-count">{{ contact_total }}</span>
+      <button id="btn-tab-tickets" class="tab-btn on-control" onclick="switchTab('tab-tickets')">
+        <svg class="icon"><use href="#i-inbox"/></svg> Approvals <span class="tab-count">{{ pending_tickets|length }}</span>
       </button>
-      <button id="btn-tab-memory" class="tab-btn" onclick="switchTab('tab-memory')">
-        <svg class="icon"><use href="#i-memory"/></svg> Memory <span class="tab-count">{{ memories|length }}</span>
-      </button>
-      <button id="btn-tab-prompts" class="tab-btn" onclick="switchTab('tab-prompts')">
+      <button id="btn-tab-prompts" class="tab-btn on-control" onclick="switchTab('tab-prompts')">
         <svg class="icon"><use href="#i-document"/></svg> Prompts &amp; skills <span class="tab-count">{{ skills|length }}</span>
       </button>
-      <button id="btn-tab-telemetry" class="tab-btn" onclick="switchTab('tab-telemetry')">
-        <svg class="icon"><use href="#i-pulse"/></svg> Telemetry <span class="tab-count">{{ spans|length }}</span>
+      <button id="btn-tab-memory" class="tab-btn on-control" onclick="switchTab('tab-memory')">
+        <svg class="icon"><use href="#i-memory"/></svg> Memory <span class="tab-count">{{ memories|length }}</span>
       </button>
-      <button id="btn-tab-governance" class="tab-btn" onclick="switchTab('tab-governance')">
+      <button id="btn-tab-governance" class="tab-btn on-control" onclick="switchTab('tab-governance')">
         <svg class="icon"><use href="#i-shield"/></svg> Governance <span class="tab-count">{{ governance.permissions.summary.tools }}</span>
+      </button>
+
+      <span class="tab-group-sep" aria-hidden="true"></span>
+      <span class="tab-group-label eyebrow on-reference">Reference</span>
+      <button id="btn-tab-domains" class="tab-btn on-reference" onclick="switchTab('tab-domains')">
+        <svg class="icon"><use href="#i-building"/></svg> Domains <span class="tab-count">{{ domains|length }}</span>
+      </button>
+      <button id="btn-tab-contacts" class="tab-btn on-reference" onclick="switchTab('tab-contacts')">
+        <svg class="icon"><use href="#i-contacts"/></svg> Contacts <span class="tab-count">{{ contact_total }}</span>
+      </button>
+      <button id="btn-tab-telemetry" class="tab-btn on-reference" onclick="switchTab('tab-telemetry')">
+        <svg class="icon"><use href="#i-pulse"/></svg> Telemetry <span class="tab-count">{{ spans|length }}</span>
       </button>
     </nav>
 
@@ -340,6 +347,12 @@
 
     <!-- CHAT -->
     <section id="tab-chat" class="tab-pane" style="display: none;">
+      <!-- The live test brought its first order here, out of habit from every other chat tool,
+           and found no way onward to Fleet. The role line answers that before the composer. -->
+      <p class="tab-role">
+        Talk to one governed agent - explore, draft, ask. For work that should repeat or run
+        unattended, save it as a task and run it in Fleet.
+      </p>
       <div class="chat-layout">
         <aside class="chat-sidebar">
           <div class="chat-sidebar-head">
@@ -586,6 +599,10 @@
 
     <!-- FLEET -->
     <section id="tab-fleet" class="tab-pane" style="display: none;">
+      <p class="tab-role">
+        Run and manage the work itself - one-off runs, reusable tasks, and the agents that carry
+        them out.
+      </p>
       <!-- Three long sections stacked into one wall. These jump straight to them. -->
       <nav class="section-jump">
         <span class="eyebrow">On this tab</span>
