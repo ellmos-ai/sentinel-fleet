@@ -1528,6 +1528,14 @@ a { color: var(--accent); }
 
 /* Two of these tiles look interchangeable at a glance - a count of ASK rules and a count of
    requests those rules stopped. The note is what separates them. */
+/* The gate sequence explains rather than operates. As a plain card among controls it read as
+   something to use, so it folds - the disclosure is the difference between a reference and a
+   panel. */
+.gov-explainer > summary { list-style: none; cursor: pointer; }
+.gov-explainer > summary::-webkit-details-marker { display: none; }
+.gov-explainer > summary:hover h3 { color: var(--accent); }
+.gov-explainer[open] > summary { border-bottom: 1px solid var(--rule); }
+
 .gov-stat-note {
   display: block;
   font-size: 10.5px;

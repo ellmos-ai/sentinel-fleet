@@ -522,3 +522,92 @@ async def test_a_real_run_shows_up_on_the_board(client):
     assert board["decisions"]["by_verdict"]["held"] >= 1
     # And Model Armor left evidence that it looked at the arguments.
     assert any(row["event"] == "model_armor_sanitized" for row in board["evidence"]["counts"])
+
+
+# ---------------------------------------------------------------------------
+# Board legibility. Four findings from the live walkthrough: an explanation that read as a
+# control, sections that gave no clue whether they could be acted on, two names already taken in
+# the operator's head ("Plans", "Decisions"), and duplication of what other tabs hold in full.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_gate_sequence_folds_away():
+    """The five gates are a reference. As a plain card among controls the live test took them
+    for one: "confusing, you think you could do something there"."""
+    from httpx import AsyncClient, ASGITransport
+    from sentinel_fleet.web.server import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert 'class="card gov-explainer"' in body
+    assert "<details" in body.split("How a call is gated")[0][-400:], \
+        "the gate sequence has to be a disclosure, not an open panel"
+    assert "explanation only" in body
+    # Content unchanged - it was good, only its framing was wrong.
+    assert "gate-stage" in body
+
+
+@pytest.mark.asyncio
+async def test_every_board_section_says_whether_it_acts():
+    from httpx import AsyncClient, ASGITransport
+    from sentinel_fleet.web.server import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    board = body.split('id="tab-governance"')[1].split("</section>")[0]
+    assert board.count("read-only view") >= 5, "a read-only section must say so"
+    # Locks and quarantine is the one place on this board with a button.
+    locks = board.split("Locks &amp; quarantine")[1][:200]
+    assert "actions available" in locks
+
+
+@pytest.mark.asyncio
+async def test_the_board_does_not_repeat_what_other_tabs_hold_in_full():
+    """Reading federation is not a licence to render everything twice."""
+    from httpx import AsyncClient, ASGITransport
+    from sentinel_fleet.web.server import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    board = body.split('id="tab-governance"')[1].split("</section>")[0]
+    assert "Tasks with steps" in board, "the operator reads 'Plans' as something else entirely"
+    assert ">Plans<" not in board, "the name stays free for a real plan concept"
+    assert "See them with their steps in Fleet" in board
+    assert "Open Approvals" in board
+    assert "Tool-call decisions" in board, "'Decisions' means operator decisions to this operator"
+
+
+@pytest.mark.asyncio
+async def test_the_usage_counter_admits_that_it_resets():
+    """Metering works - the operator simply never saw it, because every deploy zeroes an
+    in-memory counter. That is a labelling problem, not a persistence one."""
+    from httpx import AsyncClient, ASGITransport
+    from sentinel_fleet.web.server import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert "Counted since this" in body
+    assert "normal right after a deploy" in body
+
+
+@pytest.mark.asyncio
+async def test_telemetry_names_itself_as_the_full_gate_ledger():
+    """Two names for one thing: the overview says "Gate ledger", the tab says "Telemetry"."""
+    from httpx import AsyncClient, ASGITransport
+    from sentinel_fleet.web.server import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert "Telemetry — the full gate ledger" in body
+    assert "shows the last three of these" in body
