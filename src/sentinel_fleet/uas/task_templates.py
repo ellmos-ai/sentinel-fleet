@@ -26,12 +26,21 @@ MIN_STEPS = 1
 # "single" (the pre-existing one-model-call path) and "race" (chat_service.race(), bound to a
 # step). Swarm/operator patterns are real, but their dispatch loops are Phase 3 - a schema that
 # accepted them here would let the UI save a step the chain runner then silently cannot execute.
-SUPPORTED_EXECUTION_PATTERNS = {"single", "race"}
+SUPPORTED_EXECUTION_PATTERNS = {"single", "race", "research"}
 
 # Mirrors `chat/service.py`'s `MAX_RACE_LANES` (`RACE_LANE_AGENT_IDS` has 4 entries) - duplicated
 # rather than imported so this low-level model module stays free of a dependency on the chat/
 # gateway layer. If that race-lane roster ever changes size, this constant must move with it.
 MAX_RACE_MODELS = 4
+
+# How many pages one research step may read. Small and named on purpose: the cap is what keeps a
+# research step a bounded, auditable act rather than a browsing loop, and an operator has to be
+# able to read the number rather than discover it.
+MAX_RESEARCH_FETCHES = 5
+
+# Duplicated as a literal rather than imported from conductor/lifecycle for the same reason
+# MAX_RACE_MODELS is: this model module stays free of dependencies on the layers above it.
+WEB_READER_AGENT_ID = "agent:web-reader"
 
 # Tool name a template/step run is scoped under at the Sovereign Gateway. Lives here, not in
 # `routines.py` or `core/chain_runner.py`, because both of those modules need it and importing
@@ -66,9 +75,13 @@ class Step(BaseModel):
     # Parallel branches ("Schwarm (b)", concept doc section E.1) are a later phase - the minimal
     # chain cut is strictly linear, so this must stay unset (validated below).
     parallel_group: Optional[str] = None
-    execution_pattern: str = "single"        # "single" | "race" (see SUPPORTED_EXECUTION_PATTERNS)
+    execution_pattern: str = "single"        # see SUPPORTED_EXECUTION_PATTERNS
     swarm_pattern: Optional[str] = None
     race_models: List[str] = Field(default_factory=list)
+    # Pages a research step reads before it answers. The operator names them; the model never
+    # does. That is the whole difference between this and a browsing loop: the set of pages a
+    # run may touch is fixed before it starts, visible in the step, and auditable afterwards.
+    research_urls: List[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _minimal_chain_cut_shape(self) -> "Step":
@@ -94,6 +107,29 @@ class Step(BaseModel):
             raise ValueError(
                 f"step '{self.step_id}': race_models is only meaningful with "
                 f"execution_pattern='race', but this step's pattern is '{self.execution_pattern}'."
+            )
+
+        if self.execution_pattern == "research":
+            if not (1 <= len(self.research_urls) <= MAX_RESEARCH_FETCHES):
+                raise ValueError(
+                    f"step '{self.step_id}': a research step reads between 1 and "
+                    f"{MAX_RESEARCH_FETCHES} pages - got {len(self.research_urls)}."
+                )
+            if self.assigned_agent == WEB_READER_AGENT_ID:
+                # The fetches already run as agent:web-reader; the synthesis runs as this agent
+                # and calls execute_template, which web-reader is not scoped for. The gateway
+                # would answer that by quarantining it - and a misconfigured step would take the
+                # fleet's only fetching identity offline.
+                raise ValueError(
+                    f"step '{self.step_id}': a research step cannot run as "
+                    f"'{WEB_READER_AGENT_ID}'. That identity fetches the pages; the step's own "
+                    "agent writes the answer, and web-reader is not scoped to do that."
+                )
+        elif self.research_urls:
+            raise ValueError(
+                f"step '{self.step_id}': research_urls is only meaningful with "
+                f"execution_pattern='research', but this step's pattern is "
+                f"'{self.execution_pattern}'."
             )
         if self.parallel_group is not None:
             raise ValueError(

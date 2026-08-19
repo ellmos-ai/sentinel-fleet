@@ -1931,8 +1931,24 @@
           <select id="wz-pattern" class="select-input" onchange="onWizardPatternChange()">
             <option value="single">Single agent</option>
             <option value="race">Race (every supported model)</option>
+            <option value="research">Research (read pages you name, then answer)</option>
           </select>
           <p id="wz-pattern-note" class="item-meta" style="display: none;">Runs this task once per supported model at every trigger.</p>
+        </div>
+        <!-- The one place in the console where a task reaches the network. The URLs are fixed
+             here, before the run starts: that is what makes it an auditable act rather than an
+             agent browsing on its own. -->
+        <div class="form-group" id="wz-research-group" style="display: none;">
+          <label for="wz-research-urls">Pages to read</label>
+          <textarea id="wz-research-urls" class="textarea-input" rows="4"
+                    placeholder="https://example.com/one&#10;https://example.com/two"></textarea>
+          <p class="item-desc" style="margin: var(--s-1) 0 0">
+            One URL per line, at most five. Each page is fetched through the gateway as
+            <span class="numeric">agent:web-reader</span> - SSRF-guarded, one gate-ledger row and
+            one Model Armor verdict per page. A page Model Armor flags is left out of the answer
+            and named as excluded; if no page can be read, the run fails rather than answering
+            from nothing. The agent never picks a URL: you do, here.
+          </p>
         </div>
       </div>
 

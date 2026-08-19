@@ -26,6 +26,7 @@ from sentinel_fleet.chat.models import ChatMode
 from sentinel_fleet.chat.service import chat_service
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.core.config import settings
+from sentinel_fleet.core import research
 from sentinel_fleet.core.gateway import gateway
 from sentinel_fleet.core.run_log import run_log_bus
 from sentinel_fleet.core.telemetry import telemetry
@@ -100,6 +101,58 @@ async def _run_single_step(step: Step, previous_output: Optional[str]) -> Dict[s
         return {"success": True, "requires_approval": True}
     reply = result.output
     return {"success": True, "content": reply.content, "model": reply.model, "mode": reply.mode.value}
+
+
+async def _run_research_step(
+    step: Step, previous_output: Optional[str], emit=None
+) -> Dict[str, Any]:
+    """Read the pages named on the step, then answer from them.
+
+    The reading runs as `agent:web-reader` (`core/research.py`), the answering as this step's own
+    agent through the same gateway path a plain step takes. Nothing new reaches the network: the
+    URLs were fixed on the step before the run started.
+
+    With no source left to answer from, the step fails instead of answering. A model asked to
+    synthesise from nothing produces something anyway, and that something would be invention
+    wearing the shape of research.
+    """
+    agent = lifecycle_manager.get_agent(step.assigned_agent)
+    if agent is None:
+        return {"success": False, "error": f"agent '{step.assigned_agent}' is not registered"}
+
+    sources = await research.gather_sources(step.research_urls, emit=emit)
+    blocked = research.no_usable_sources_error(sources)
+    if blocked:
+        return {"success": False, "error": blocked, "sources": research.sources_summary(sources)}
+
+    system_prompt, digest = _build_step_prompt(step, previous_output)
+    system_prompt += '\n\n' + research.build_research_context(sources)
+    digest.extend(research.source_digest(sources))
+
+    result = await gateway.execute_tool_call(
+        agent=agent,
+        tool_name=EXECUTE_TEMPLATE_TOOL,
+        tool_args={
+            "system_prompt": system_prompt,
+            "user_message": f"Answer step '{step.step_id}' from the source material above.",
+            "model": settings.gemini_default_model,
+            "config_digest": '\n'.join(digest),
+        },
+        tool_func=_execute_step_call,
+    )
+    if not result.success:
+        return {"success": False, "error": result.error, "sources": research.sources_summary(sources)}
+    if result.requires_approval:
+        return {"success": True, "requires_approval": True, "sources": research.sources_summary(sources)}
+
+    reply = result.output
+    return {
+        "success": True,
+        "content": reply.content,
+        "model": reply.model,
+        "mode": reply.mode.value,
+        "sources": research.sources_summary(sources),
+    }
 
 
 async def _run_race_step(step: Step, previous_output: Optional[str], template_name: str) -> Dict[str, Any]:
@@ -200,6 +253,13 @@ async def run_chain(template: TaskTemplate, task: TaskRecord) -> TaskRecord:
 
         if step.execution_pattern == "race":
             outcome = await _run_race_step(step, previous_output, template.name)
+        elif step.execution_pattern == "research":
+            outcome = await _run_research_step(
+                step, previous_output,
+                emit=lambda line: run_log_bus.emit(
+                    task.task_id, f"step {index + 1}/{len(steps)} '{step.step_id}' fetch: {line}"
+                ),
+            )
         else:
             outcome = await _run_single_step(step, previous_output)
 
@@ -226,7 +286,10 @@ async def run_chain(template: TaskTemplate, task: TaskRecord) -> TaskRecord:
 
         if not outcome["success"]:
             telemetry.end_span(span, status="ERROR", error=outcome["error"])
-            step_records.append({"step_id": step.step_id, "status": "failed", "error": outcome["error"]})
+            failure = {"step_id": step.step_id, "status": "failed", "error": outcome["error"]}
+            if outcome.get("sources"):
+                failure["sources"] = outcome["sources"]
+            step_records.append(failure)
             run_log_bus.emit(
                 task.task_id, f"step {index + 1}/{len(steps)} '{step.step_id}': failed - {outcome['error']}"
             )
@@ -244,6 +307,8 @@ async def run_chain(template: TaskTemplate, task: TaskRecord) -> TaskRecord:
             "model": outcome.get("model"),
             "content": outcome["content"]
         }
+        if outcome.get("sources"):
+            record["sources"] = outcome["sources"]
         if "race_id" in outcome:
             record["session_id"] = outcome["session_id"]
             record["race_id"] = outcome["race_id"]

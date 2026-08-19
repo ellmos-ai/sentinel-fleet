@@ -369,8 +369,19 @@ async def enqueue_template(
 
     task_master.update_task_state(task.task_id, TaskState.IN_PROGRESS)
 
-    if len(template.steps) > 1:
-        run_log_bus.emit(task.task_id, f"multi-step template ({len(template.steps)} steps) - delegating to chain runner")
+    # A research step reads pages before it answers, which the flat single-step path below knows
+    # nothing about. Rather than a second copy of that orchestration, a lone research step is
+    # handed to the same runner the multi-step path uses - it loops over one step just as well.
+    needs_runner = len(template.steps) > 1 or template.steps[0].execution_pattern == "research"
+
+    if needs_runner:
+        if len(template.steps) > 1:
+            run_log_bus.emit(task.task_id, f"multi-step template ({len(template.steps)} steps) - delegating to chain runner")
+        else:
+            run_log_bus.emit(
+                task.task_id,
+                f"research step reading {len(template.steps[0].research_urls)} page(s) - delegating to chain runner"
+            )
         # Not closed here - chain_runner.run_chain() closes the bus itself on every one of its
         # own terminal returns (see its docstring). A raised gateway refusal is the exception:
         # it leaves through neither of those returns, so the run is settled here instead.

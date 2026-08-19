@@ -1694,14 +1694,15 @@ function buildStepRow(step, index) {
   const patternSelect = document.createElement("select");
   patternSelect.className = "select-input";
   patternSelect.appendChild(new Option("Single agent", "single"));
-  patternSelect.appendChild(new Option(`Race (all ${state.models.length} supported models)`, "race"));
-  patternSelect.value = step.execution_pattern === "race" ? "race" : "single";
-  patternSelect.disabled = state.models.length < 2;
-  patternSelect.addEventListener("change", event => {
-    step.execution_pattern = event.target.value;
-    // Switching to a race takes the step off this agent entirely, so the scope note follows.
-    refreshScopeNote();
-  });
+  const raceOption = new Option(`Race (all ${state.models.length} supported models)`, "race");
+  // Only race needs a second model. Disabling the whole select for that, as this did before
+  // research existed, would have hidden a pattern that has nothing to do with model count.
+  raceOption.disabled = state.models.length < 2;
+  patternSelect.appendChild(raceOption);
+  patternSelect.appendChild(new Option("Research (read pages you name)", "research"));
+  patternSelect.value = ["race", "research"].includes(step.execution_pattern)
+    ? step.execution_pattern
+    : "single";
   patternGroup.appendChild(patternSelect);
   if (state.models.length < 2) {
     const note = document.createElement("div");
@@ -1710,6 +1711,40 @@ function buildStepRow(step, index) {
     patternGroup.appendChild(note);
   }
   row.appendChild(patternGroup);
+
+  // The URLs a research step reads. Hidden unless the step is one, and cleared when it stops
+  // being one - the whole step array is resubmitted on save, so a stale list would be rejected
+  // by Step's own validator for a field the operator can no longer see.
+  const researchGroup = document.createElement("div");
+  researchGroup.className = "form-group";
+  const researchLabel = document.createElement("label");
+  researchLabel.textContent = "Pages to read (one URL per line, at most five)";
+  const researchField = document.createElement("textarea");
+  researchField.className = "textarea-input";
+  researchField.rows = 3;
+  researchField.value = (step.research_urls || []).join("\n");
+  researchField.addEventListener("input", event => {
+    step.research_urls = event.target.value
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean);
+  });
+  researchGroup.append(researchLabel, researchField);
+  row.appendChild(researchGroup);
+
+  const refreshResearchGroup = () => {
+    const isResearch = patternSelect.value === "research";
+    researchGroup.style.display = isResearch ? "block" : "none";
+    if (!isResearch) step.research_urls = [];
+  };
+
+  patternSelect.addEventListener("change", event => {
+    step.execution_pattern = event.target.value;
+    // Switching to a race takes the step off this agent entirely, so the scope note follows.
+    refreshScopeNote();
+    refreshResearchGroup();
+  });
+  refreshResearchGroup();
 
   // Both controls are in place now, so the note can be filled for the step as loaded.
   refreshScopeNote();
@@ -1749,7 +1784,11 @@ function submitStepsEditor() {
     // (SUPPORTED_MODELS has exactly the 2-4 race() already needs) - and explicitly cleared
     // when a step is not a race step, so switching a step away from "race" cannot leave a
     // stale race_models list that Step's own validator would then reject.
-    race_models: step.execution_pattern === "race" ? state.models : []
+    race_models: step.execution_pattern === "race" ? state.models : [],
+    // Same reasoning for the research step's URLs: the whole array is resubmitted every time,
+    // so a step switched away from "research" has to lose its list here or the next save is
+    // refused for a field the operator can no longer see.
+    research_urls: step.execution_pattern === "research" ? (step.research_urls || []) : []
   }));
   postAndReload(
     `/api/task-templates/${templateId}/steps`,
@@ -1957,8 +1996,11 @@ function onWizardPromptForkTextChange() {
 }
 
 function onWizardPatternChange() {
-  const isRace = document.getElementById("wz-pattern").value === "race";
+  const pattern = document.getElementById("wz-pattern").value;
+  const isRace = pattern === "race";
   document.getElementById("wz-pattern-note").style.display = isRace ? "block" : "none";
+  const research = document.getElementById("wz-research-group");
+  if (research) research.style.display = pattern === "research" ? "block" : "none";
 }
 
 function onWizardBindingToggle() {
@@ -1986,6 +2028,18 @@ function addWizardSkillFork() {
 function removeWizardSkillFork(index) {
   state.wizard.skillForks.splice(index, 1);
   renderWizardSkillForks();
+}
+
+// One URL per line, blanks dropped. Kept deliberately dumb: the server-side validator is what
+// enforces the cap and the shape, and a second set of rules here would only be a second place to
+// get them wrong.
+function researchUrlsFromField(fieldId) {
+  const field = document.getElementById(fieldId);
+  if (!field) return [];
+  return (field.value || "")
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
 }
 
 function renderWizardSkillForks() {
@@ -2176,7 +2230,11 @@ async function submitWizard() {
       prompt_version: w.promptMode === "library" ? (promptVersion || null) : null,
       custom_prompt_text: w.promptMode === "custom" ? w.customPromptText : null,
       execution_pattern: w.pattern,
-      race_models: w.pattern === "race" ? state.models : []
+      race_models: w.pattern === "race" ? state.models : [],
+      // Cleared unless this is a research step, for the same reason race_models is: a pattern
+      // switch that left a stale list behind would be rejected by Step's own validator, and the
+      // operator would meet that as an error on a field they cannot see.
+      research_urls: w.pattern === "research" ? researchUrlsFromField("wz-research-urls") : []
     };
     const res = await fetch("/api/task-templates", {
       method: "POST",
