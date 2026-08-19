@@ -1134,6 +1134,59 @@ function deleteMemoryEntry(key, isSeed) {
 }
 const submitNewContact = e => submitForm(e, "/api/contacts/create", "Could not save the contact");
 const submitNewSkill = e => submitForm(e, "/api/skills/create", "Could not create the skill");
+const submitNewPrompt = e => submitForm(e, "/api/prompts/create", "Could not create the prompt");
+
+// ---------------------------------------------------------------------------
+// Deleting a prompt, a version or a skill. The server refuses while a task template or a
+// recorded conversation still points at it and answers 409 naming every user; that message is
+// what the operator needs to see, so it is shown rather than replaced by a generic failure.
+// ---------------------------------------------------------------------------
+
+async function deleteComponent(url, confirmation, failure) {
+  if (!confirm(confirmation)) return;
+  try {
+    const res = await fetch(url, { method: "DELETE" });
+    if (res.ok) {
+      location.reload();
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    showToast(data.error || data.detail || failure);
+  } catch (err) {
+    showToast(err.message || failure);
+  }
+}
+
+function deletePrompt(promptId, title) {
+  deleteComponent(
+    `/api/prompts/${encodeURIComponent(promptId)}`,
+    `Delete the prompt "${title}" and every one of its versions?`,
+    "Could not delete the prompt"
+  );
+}
+
+function deletePromptVersion(promptId, selectId) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  // The copy picker's options carry the version text as their value, so the number comes from
+  // the label - the same place the operator read it.
+  const label = select.options[select.selectedIndex].textContent.trim();
+  const version = label.split(" ")[0].replace(/^v/, "");
+  deleteComponent(
+    `/api/prompts/${encodeURIComponent(promptId)}/versions/${encodeURIComponent(version)}`,
+    `Delete version ${version}? The prompt keeps its other versions.`,
+    "Could not delete the version"
+  );
+}
+
+function deleteSkill(skillId, name) {
+  deleteComponent(
+    `/api/skills/${encodeURIComponent(skillId)}`,
+    `Delete the skill "${name}"?\n\nA skill that ships as a SKILL.md file on disk returns the `
+      + "next time the registry reloads - that file is where it comes from.",
+    "Could not delete the skill"
+  );
+}
 
 function openPromptVersionModal(promptId, title, currentText) {
   document.getElementById("pv-prompt-id").value = promptId;

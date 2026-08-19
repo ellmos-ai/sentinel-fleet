@@ -1005,11 +1005,18 @@
       <div class="section-head">
         <div>
           <h3>Prompts and skills</h3>
-          <p>Both are versioned. Copy any version to reuse it elsewhere, or load it into the chat console.</p>
+          <p>Both are versioned. Copy any version to reuse it elsewhere, or load it into the chat
+             console. Deleting is refused while a task or a recorded conversation still points at
+             what you are deleting - the refusal names them.</p>
         </div>
-        <button class="btn btn-primary" onclick="toggleModal('modal-skill-new')">
-          <svg class="icon"><use href="#i-plus"/></svg> New skill
-        </button>
+        <div class="item-actions" style="margin: 0">
+          <button class="btn btn-primary" onclick="toggleModal('modal-prompt-new')">
+            <svg class="icon"><use href="#i-plus"/></svg> New prompt
+          </button>
+          <button class="btn btn-primary" onclick="toggleModal('modal-skill-new')">
+            <svg class="icon"><use href="#i-plus"/></svg> New skill
+          </button>
+        </div>
       </div>
 
       <div class="grid">
@@ -1049,6 +1056,14 @@
               <button class="btn btn-sm" onclick='openPromptPermsModal({{ p.id|tojson }}, {{ p.title|tojson }}, {{ p.visibility|tojson }}, {{ p.requires_approval|tojson }})'>
                 <svg class="icon"><use href="#i-lock"/></svg> Permissions
               </button>
+              {% if p.versions|length > 1 %}
+              <button class="btn btn-sm btn-reject" onclick="deletePromptVersion({{ p.id|tojson }}, 'pcopy-{{ loop.index }}')">
+                Delete version
+              </button>
+              {% endif %}
+              <button class="btn btn-sm btn-reject" onclick='deletePrompt({{ p.id|tojson }}, {{ p.title|tojson }})'>
+                Delete prompt
+              </button>
             </div>
           </div>
           {% endfor %}
@@ -1075,6 +1090,9 @@
                 </button>
                 <button class="btn btn-sm" onclick='openSkillVersionModal({{ s.skill_id|tojson }}, {{ s.name|tojson }}, {{ s.required_tools|join(", ")|tojson }})'>
                   <svg class="icon"><use href="#i-version"/></svg> Add version
+                </button>
+                <button class="btn btn-sm btn-reject" onclick='deleteSkill({{ s.skill_id|tojson }}, {{ s.name|tojson }})'>
+                  Delete
                 </button>
               </div>
             </div>
@@ -2276,6 +2294,51 @@
         <div class="form-actions">
           <button type="button" class="btn" onclick="toggleModal('modal-memory')">Cancel</button>
           <button type="submit" class="btn btn-primary">Store entry</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-prompt-new" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>New prompt</h3>
+        <button class="btn btn-sm btn-icon" onclick="toggleModal('modal-prompt-new')" aria-label="Close">
+          <svg class="icon"><use href="#i-close"/></svg>
+        </button>
+      </div>
+      <p class="item-desc" style="margin: 0 0 var(--s-3)">
+        A reusable prompt, versioned from the first save. Tasks and chats pin a version, so a
+        later edit never changes what an earlier run was given.
+      </p>
+      <form onsubmit="submitNewPrompt(event)">
+        <div class="form-group">
+          <label>Title</label>
+          <input type="text" name="title" class="text-input" placeholder="Vendor dispute letter" required>
+        </div>
+        <div class="form-group">
+          <label>Purpose</label>
+          <input type="text" name="purpose" class="text-input" placeholder="What this prompt is for" required>
+        </div>
+        <div class="form-group">
+          <label>Category</label>
+          <input type="text" name="category" class="text-input" value="custom">
+        </div>
+        <div class="form-group">
+          <label>Prompt text</label>
+          <textarea name="text" class="textarea-input" rows="6" required></textarea>
+        </div>
+        <div class="form-group">
+          <label>Visibility</label>
+          <select name="visibility" class="select-input">
+            <option value="organization">Organization</option>
+            <option value="public">Public</option>
+            <option value="restricted">Restricted</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn" onclick="toggleModal('modal-prompt-new')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create prompt</button>
         </div>
       </form>
     </div>

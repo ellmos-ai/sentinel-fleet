@@ -670,3 +670,89 @@ async def test_memory_entries_can_be_reached_from_the_table():
 
     # Editing must not read as rewriting evidence.
     assert "not rewrite the gate ledger" in body
+
+
+@pytest.mark.asyncio
+async def test_a_prompt_can_be_created_from_the_console():
+    """The create endpoint existed all along; there was simply no way in, so the operator could
+    not author a prompt at all."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+        assert "toggleModal('modal-prompt-new')" in body, "no way to reach the prompt author"
+        assert 'id="modal-prompt-new"' in body
+        assert "submitNewPrompt(" in body
+
+        created = await client.post("/api/prompts/create", data={
+            "title": "Console Authored Probe",
+            "purpose": "Written from the console during a test.",
+            "text": "Summarise the document in three sentences."
+        })
+        assert created.status_code == 200
+        prompt_id = created.json()["prompt"]["id"]
+
+        listing = (await client.get("/")).text
+        assert "Console Authored Probe" in listing
+
+        removed = await client.delete(f"/api/prompts/{prompt_id}")
+        assert removed.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_deleting_something_a_task_still_uses_is_refused_by_name():
+    """A silent delete would leave a template pointing at a prompt that no longer exists - a
+    broken reference the operator would only meet at the next run."""
+    from sentinel_fleet.uas.task_templates import task_template_registry
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/api/prompts/create", data={
+            "title": "Referenced Probe",
+            "purpose": "Used by a task template.",
+            "text": "Do the thing."
+        })
+        prompt_id = created.json()["prompt"]["id"]
+
+        template = task_template_registry.create_template(
+            name="Uses the referenced prompt",
+            owner="operator",
+            prompt_source="library",
+            prompt_id=prompt_id,
+            prompt_version="1.0.0",
+        )
+        try:
+            refused = await client.delete(f"/api/prompts/{prompt_id}")
+            assert refused.status_code == 409, "a used prompt must not just disappear"
+            payload = refused.json()
+            assert "Uses the referenced prompt" in payload["error"], \
+                "the refusal has to name what is still using it"
+            assert payload["details"]["used_by"]
+        finally:
+            task_template_registry.delete_template(template.template_id, requested_by="operator")
+
+        # With the reference gone, the same delete goes through.
+        assert (await client.delete(f"/api/prompts/{prompt_id}")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_the_last_version_of_a_prompt_cannot_be_deleted():
+    """A prompt with no version is a name with no text behind it."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/api/prompts/create", data={
+            "title": "Single Version Probe", "purpose": "One version only.", "text": "Only text."
+        })
+        prompt_id = created.json()["prompt"]["id"]
+        try:
+            refused = await client.delete(f"/api/prompts/{prompt_id}/versions/1.0.0")
+            assert refused.status_code == 409
+            assert "no text to run" in refused.json()["error"]
+
+            # A second version makes the first one removable.
+            await client.post(f"/api/prompts/{prompt_id}/version", data={
+                "new_version_number": "1.1.0", "new_text": "Better text.",
+                "change_summary": "Sharper wording."
+            })
+            assert (await client.delete(f"/api/prompts/{prompt_id}/versions/1.0.0")).status_code == 200
+        finally:
+            await client.delete(f"/api/prompts/{prompt_id}")

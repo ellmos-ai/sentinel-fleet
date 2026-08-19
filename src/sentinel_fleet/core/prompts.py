@@ -4,6 +4,12 @@ import time
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
+from sentinel_fleet.core.errors import (
+    LastVersionError,
+    PromptNotFoundError,
+    PromptVersionNotFoundError,
+)
+
 
 class PromptVersionRecord(BaseModel):
     version_id: str
@@ -207,6 +213,39 @@ class PromptRegistry:
         prompt.versions.append(version_rec)
         prompt.active_version = new_version_number
         prompt.current_text = new_text
+        prompt.updated_at = time.time()
+        return prompt
+
+    def delete_prompt(self, prompt_id: str) -> bool:
+        """Remove a prompt and all of its versions.
+
+        Whether anything still references it is decided by the caller: the task template registry
+        lives a layer above this module and importing it here would close a cycle, the same
+        reason `delete_template()` leaves its binding check to its own caller.
+        """
+        if prompt_id not in self._prompts:
+            return False
+        del self._prompts[prompt_id]
+        return True
+
+    def delete_version(self, prompt_id: str, version_number: str) -> PromptItem:
+        """Remove one version. The last remaining one cannot go: a prompt without a version is a
+        name with no text behind it."""
+        prompt = self.get_prompt(prompt_id)
+        if not prompt:
+            raise PromptNotFoundError(prompt_id)
+        if not any(v.version_number == version_number for v in prompt.versions):
+            raise PromptVersionNotFoundError(prompt_id, version_number)
+        if len(prompt.versions) <= 1:
+            raise LastVersionError(prompt_id)
+
+        prompt.versions = [v for v in prompt.versions if v.version_number != version_number]
+        if prompt.active_version == version_number:
+            # The newest surviving version takes over; leaving `active_version` pointing at a
+            # deleted record would make every later read resolve to nothing.
+            newest = prompt.versions[-1]
+            prompt.active_version = newest.version_number
+            prompt.current_text = newest.text
         prompt.updated_at = time.time()
         return prompt
 

@@ -127,3 +127,45 @@ class MemoryPermissionError(SentinelFleetError):
             f"'{requested_by}' cannot change memory entry '{key}': it belongs to '{owner}'.",
             {"key": key, "requested_by": requested_by, "owner": owner}
         )
+
+
+class ComponentInUseError(SentinelFleetError):
+    """Raised when a prompt, a prompt version or a skill is deleted while something still uses it.
+
+    Deleting it quietly would leave a task template pointing at a prompt that no longer exists,
+    or a recorded conversation citing a version nobody can read any more - a broken reference the
+    operator would only meet at the next run. The refusal names every user instead.
+    """
+    def __init__(self, kind: str, component_id: str, used_by: list):
+        super().__init__(
+            f"Cannot delete {kind} '{component_id}': still used by {', '.join(used_by)}. "
+            "Change or remove those references first.",
+            {"kind": kind, "component_id": component_id, "used_by": used_by}
+        )
+
+
+class LastVersionError(SentinelFleetError):
+    """Raised when the only remaining version of a prompt is deleted.
+
+    A prompt without a version has no text to run, so it would be a name with nothing behind it.
+    Delete the whole prompt instead.
+    """
+    def __init__(self, prompt_id: str):
+        super().__init__(
+            f"Cannot delete the last remaining version of '{prompt_id}': a prompt with no version "
+            "has no text to run. Delete the prompt itself instead.",
+            {"prompt_id": prompt_id}
+        )
+
+
+class PromptNotFoundError(SentinelFleetError):
+    def __init__(self, prompt_id: str):
+        super().__init__(f"Prompt '{prompt_id}' does not exist.", {"prompt_id": prompt_id})
+
+
+class PromptVersionNotFoundError(SentinelFleetError):
+    def __init__(self, prompt_id: str, version_number: str):
+        super().__init__(
+            f"Prompt '{prompt_id}' has no version '{version_number}'.",
+            {"prompt_id": prompt_id, "version_number": version_number}
+        )

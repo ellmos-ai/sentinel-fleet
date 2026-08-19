@@ -279,6 +279,19 @@ class SkillRegistry:
         skill.updated_at = time.time()
         return skill
 
+    def delete_skill(self, skill_id: str) -> bool:
+        """Remove a skill from the registry.
+
+        Whether a task template or a chat session still selects it is checked by the caller, for
+        the same layering reason as `PromptRegistry.delete_prompt()`. A skill loaded from disk
+        comes back on the next reload - the caller says so rather than letting it reappear
+        unexplained.
+        """
+        if skill_id not in self._skills:
+            return False
+        del self._skills[skill_id]
+        return True
+
     def update_permissions(
         self,
         skill_id: str,

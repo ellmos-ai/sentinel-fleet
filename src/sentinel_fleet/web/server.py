@@ -43,7 +43,11 @@ from sentinel_fleet.core.errors import (
     TemplateHasBindingsError,
     TemplatePermissionError,
     MemoryEntryNotFoundError,
-    MemoryPermissionError
+    MemoryPermissionError,
+    ComponentInUseError,
+    LastVersionError,
+    PromptNotFoundError,
+    PromptVersionNotFoundError
 )
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.uas.ticket_master import ticket_master, TicketStatus, TicketPriority
@@ -97,6 +101,8 @@ app = FastAPI(
 @app.exception_handler(SkillNotFoundError)
 @app.exception_handler(TemplateNotFoundError)
 @app.exception_handler(MemoryEntryNotFoundError)
+@app.exception_handler(PromptNotFoundError)
+@app.exception_handler(PromptVersionNotFoundError)
 async def not_found_exception_handler(request: Request, exc: SentinelFleetError):
     return JSONResponse(status_code=404, content={"error": exc.message, "details": exc.details})
 
@@ -121,6 +127,8 @@ async def zero_trust_violation_handler(request: Request, exc: SentinelFleetError
 @app.exception_handler(TaskStateTransitionError)
 @app.exception_handler(TicketResolutionError)
 @app.exception_handler(TemplateHasBindingsError)
+@app.exception_handler(ComponentInUseError)
+@app.exception_handler(LastVersionError)
 async def conflicting_state_handler(request: Request, exc: SentinelFleetError):
     """Re-resolving a settled task or ticket, or deleting a still-bound template, is a
     conflict with the current state, not a bad request."""
@@ -642,6 +650,71 @@ async def api_add_prompt_version(
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
     return {"status": "version_added", "prompt": prompt.model_dump()}
+
+
+def _references_to(prompt_id: Optional[str] = None,
+                   version_number: Optional[str] = None,
+                   skill_id: Optional[str] = None) -> List[str]:
+    """Everything that would break if this prompt, version or skill disappeared.
+
+    Checked here rather than inside the registries: task templates and chat sessions live a
+    layer above core/, and importing them from there would close a cycle - the same reason
+    delete_template() leaves its binding check to its caller.
+    """
+    users: List[str] = []
+
+    for template in task_template_registry.list_all():
+        for step in template.steps:
+            if prompt_id and step.prompt_id == prompt_id:
+                if version_number is None or step.prompt_version == version_number:
+                    users.append(f"task '{template.name}' (step {step.step_id})")
+            if skill_id and skill_id in step.skill_ids:
+                users.append(f"task '{template.name}' (step {step.step_id})")
+
+    # A recorded conversation pins the version it ran on. Deleting that version would leave the
+    # transcript citing something nobody can read any more, which is the opposite of what pinning
+    # is for.
+    for session in chat_service.list_sessions():
+        for message in session.messages:
+            if prompt_id and getattr(message, "prompt_id", "") == prompt_id:
+                if version_number is None or getattr(message, "prompt_version", "") == version_number:
+                    users.append(f"conversation '{session.title}'")
+            if skill_id and skill_id in getattr(message, "skill_ids", []):
+                users.append(f"conversation '{session.title}'")
+
+    # One template can hit several times; the operator needs the list, not the multiplicity.
+    return sorted(set(users))
+
+
+@app.delete("/api/prompts/{prompt_id}")
+async def api_delete_prompt(prompt_id: str):
+    if not prompt_registry.get_prompt(prompt_id):
+        raise PromptNotFoundError(prompt_id)
+    users = _references_to(prompt_id=prompt_id)
+    if users:
+        raise ComponentInUseError("prompt", prompt_id, users)
+    prompt_registry.delete_prompt(prompt_id)
+    return {"status": "deleted", "prompt_id": prompt_id}
+
+
+@app.delete("/api/prompts/{prompt_id}/versions/{version_number}")
+async def api_delete_prompt_version(prompt_id: str, version_number: str):
+    users = _references_to(prompt_id=prompt_id, version_number=version_number)
+    if users:
+        raise ComponentInUseError(f"version {version_number} of prompt", prompt_id, users)
+    prompt = prompt_registry.delete_version(prompt_id, version_number)
+    return {"status": "deleted", "prompt": prompt.model_dump()}
+
+
+@app.delete("/api/skills/{skill_id}")
+async def api_delete_skill(skill_id: str):
+    if not skill_registry.get_skill(skill_id):
+        raise SkillNotFoundError(skill_id)
+    users = _references_to(skill_id=skill_id)
+    if users:
+        raise ComponentInUseError("skill", skill_id, users)
+    skill_registry.delete_skill(skill_id)
+    return {"status": "deleted", "skill_id": skill_id}
 
 
 @app.post("/api/prompts/{prompt_id}/permissions")
