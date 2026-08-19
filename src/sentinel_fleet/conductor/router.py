@@ -6,14 +6,22 @@ from pydantic import BaseModel
 
 
 class ModelTier(str, Enum):
-    FAST = "gemini-3.5-flash"
-    PRO = "gemini-3.5-pro"
+    """Tiers name models the provider actually serves (checked against models.list, 2026-08-19).
+
+    The escalation tier used to be "gemini-3.5-pro", which the Gemini API has never listed.
+    There is no Pro model in the served roster, so escalation goes to the newest generation
+    instead of to a larger one.
+    """
+
+    FAST = "gemini-3.5-flash-lite"
+    STANDARD = "gemini-3.5-flash"
+    STRONG = "gemini-3.7-flash"
     LOCAL_FALLBACK = "gemma-2-9b"
 
 
 class RoutingStrategy(BaseModel):
-    preferred_tier: ModelTier = ModelTier.FAST
-    escalation_tier: ModelTier = ModelTier.PRO
+    preferred_tier: ModelTier = ModelTier.STANDARD
+    escalation_tier: ModelTier = ModelTier.STRONG
     max_retries: int = 3
     cost_budget_usd: float = 10.0
 

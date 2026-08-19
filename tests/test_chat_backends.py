@@ -79,7 +79,7 @@ async def test_a_live_answer_is_stamped_live_and_timed(monkeypatch):
     reply = await GeminiBackend().complete(
         system_prompt="You are the fleet console.",
         user_message="How long do we keep invoices?",
-        model="gemini-3.5-pro"
+        model="gemini-3.7-flash"
     )
 
     assert reply.mode is ChatMode.GEMINI_LIVE
@@ -87,7 +87,7 @@ async def test_a_live_answer_is_stamped_live_and_timed(monkeypatch):
     assert reply.latency_simulated is False, "a real call must not be flagged as simulated"
     assert reply.error == ""
     # The system prompt travels as a system instruction, not smuggled into the user turn.
-    assert captured["model"] == "gemini-3.5-pro"
+    assert captured["model"] == "gemini-3.7-flash"
     assert captured["config"].system_instruction == "You are the fleet console."
     assert captured["contents"] == ["How long do we keep invoices?"]
     assert captured["api_key"] == "test-key"
@@ -140,5 +140,20 @@ async def test_the_demo_backend_never_invents_subject_matter():
 
 
 def test_supported_models_are_the_only_offer():
-    assert backends.available_models() == ["gemini-3.5-flash", "gemini-3.5-pro"]
+    assert backends.available_models() == [
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
+    ]
     assert backends.available_models() is not backends.SUPPORTED_MODELS, "callers must not mutate the roster"
+
+
+def test_no_supported_model_is_a_pro_or_preview_id():
+    """The console offered "gemini-3.5-pro" for weeks; the Gemini API has never served it, and
+    3.1-pro exists only as a -preview alias. Offering a model the provider does not list is a
+    factual claim the operator cannot check, so the roster is held to served ids only."""
+    for model in backends.SUPPORTED_MODELS:
+        assert "-pro" not in model, f"{model} names a Pro tier the API does not serve"
+        assert "preview" not in model, f"{model} is a preview id, not a generally available one"
+        assert model.startswith("gemini-3."), f"{model} is not a Gemini 3 generation id"

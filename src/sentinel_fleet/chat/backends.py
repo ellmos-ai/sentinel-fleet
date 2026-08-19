@@ -29,7 +29,19 @@ MODEL_USAGE_EVENT = "model_usage"
 
 # Models the operator may pick in the console. Anything else is rejected before the gateway,
 # so an unknown identifier can never reach a provider SDK.
-SUPPORTED_MODELS = ["gemini-3.5-flash", "gemini-3.5-pro"]
+#
+# This roster is the generally available list the Gemini API's models.list endpoint returned on
+# 2026-08-19, not a guess: an earlier entry ("gemini-3.5-pro") did not exist at all, and the
+# console offered it for weeks. A console that names a model the provider does not serve is the
+# same class of defect as a fabricated token count - it must be measured, never assumed.
+# gemini-3.1-pro is deliberately absent: the API lists it only as a -preview alias, and it
+# predates 3.5.
+SUPPORTED_MODELS = [
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+]
 
 # Simulated demo latencies land in this window. Real model calls report measured time.
 _DEMO_LATENCY_MIN_S = 0.35

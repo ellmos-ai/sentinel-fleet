@@ -38,7 +38,7 @@ def sample_session() -> ChatSession:
         lanes=[
             RaceLane(model="gemini-3.5-flash", agent_id="agent:race-lane-1",
                      content="Lane one answer", latency_s=0.4, latency_simulated=True),
-            RaceLane(model="gemini-3.5-pro", agent_id="agent:race-lane-2",
+            RaceLane(model="gemini-3.7-flash", agent_id="agent:race-lane-2",
                      content="Lane two answer", latency_s=1.1, latency_simulated=True)
         ],
         verdict=RaceVerdict(

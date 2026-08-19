@@ -176,7 +176,7 @@ async def test_chain_run_is_wrapped_in_one_telemetry_span(recording_backend):
 # The "race" execution pattern, bound to a step.
 # ---------------------------------------------------------------------------
 
-RACE_MODELS = ["gemini-3.5-flash", "gemini-3.5-pro"]
+RACE_MODELS = ["gemini-3.5-flash", "gemini-3.7-flash"]
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,7 @@ from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.core.storage import LocalJsonStore
 from sentinel_fleet.web.server import app
 
-MODELS = ["gemini-3.5-flash", "gemini-3.5-pro"]
+MODELS = ["gemini-3.5-flash", "gemini-3.7-flash"]
 
 
 def make_service() -> ChatService:

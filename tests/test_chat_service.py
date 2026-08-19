@@ -57,7 +57,7 @@ async def test_demo_mode_is_labelled_and_states_that_no_model_ran():
 @pytest.mark.asyncio
 async def test_simulated_latency_is_deterministic_per_model():
     assert simulated_latency("gemini-3.5-flash") == simulated_latency("gemini-3.5-flash")
-    assert simulated_latency("gemini-3.5-flash") != simulated_latency("gemini-3.5-pro")
+    assert simulated_latency("gemini-3.5-flash") != simulated_latency("gemini-3.7-flash")
 
 
 @pytest.mark.asyncio

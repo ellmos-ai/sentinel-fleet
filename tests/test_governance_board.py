@@ -244,7 +244,7 @@ def test_usage_sums_only_the_calls_that_reported_a_field():
         ]),
         _span("tool_call:execute_template", "agent:task-solver", tool="execute_template", events=[
             {"name": MODEL_USAGE_EVENT, "timestamp": 2.0,
-             "payload": {"model": "gemini-3.5-pro", "total_tokens": 300}},
+             "payload": {"model": "gemini-3.7-flash", "total_tokens": 300}},
         ]),
     ]
     usage = governance.usage_summary(spans)
@@ -255,7 +255,7 @@ def test_usage_sums_only_the_calls_that_reported_a_field():
     assert usage["prompt_tokens"] == 100
     assert usage["reported"]["prompt_tokens"] == 1
     assert usage["reported"]["total_tokens"] == 2
-    assert [row["model"] for row in usage["by_model"]] == ["gemini-3.5-flash", "gemini-3.5-pro"]
+    assert [row["model"] for row in usage["by_model"]] == ["gemini-3.5-flash", "gemini-3.7-flash"]
 
 
 def test_usage_is_empty_rather_than_zero_when_nothing_was_metered():

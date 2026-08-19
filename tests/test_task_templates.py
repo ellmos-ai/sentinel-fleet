@@ -281,12 +281,12 @@ def test_race_step_needs_between_two_and_four_models():
             race_models=[f"model-{i}" for i in range(MAX_RACE_MODELS + 1)]
         )
     # Exactly at the bounds is valid.
-    Step(step_id="a", execution_pattern="race", race_models=["gemini-3.5-flash", "gemini-3.5-pro"])
+    Step(step_id="a", execution_pattern="race", race_models=["gemini-3.5-flash", "gemini-3.7-flash"])
 
 
 def test_race_models_only_allowed_with_race_pattern():
     with pytest.raises(ValidationError, match="only meaningful with execution_pattern='race'"):
-        Step(step_id="a", execution_pattern="single", race_models=["gemini-3.5-flash", "gemini-3.5-pro"])
+        Step(step_id="a", execution_pattern="single", race_models=["gemini-3.5-flash", "gemini-3.7-flash"])
 
 
 def test_parallel_group_is_rejected_in_the_minimal_chain_cut():
