@@ -375,32 +375,22 @@
           </div>
 
           <div class="composer">
-            <div class="composer-controls">
-              <div>
-                <label class="field-label" for="chat-model">Model</label>
-                <select id="chat-model" class="select-input">
-                  {% for m in chat_models %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
-                </select>
-              </div>
-              <div>
-                <label class="field-label" for="chat-prompt">Prompt template</label>
-                <select id="chat-prompt" class="select-input" onchange="onPromptTemplateChange()">
-                  <option value="">None</option>
-                  {% for p in prompts %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
-                </select>
-              </div>
-              <div>
-                <label class="field-label" for="chat-prompt-version">Template version</label>
-                <select id="chat-prompt-version" class="select-input" disabled>
-                  <option value="">Pick a template first</option>
-                </select>
-              </div>
-            </div>
+            <div id="chat-error" class="error-state" style="display: none;"></div>
 
-            <div class="composer-skills">
-              <label class="field-label" for="skill-filter">Skills in force</label>
-              <input type="text" id="skill-filter" class="text-input" placeholder="Filter by name or pillar" oninput="renderSkillPicker()">
-              <div id="skill-picker" class="picker"></div>
+            <!-- The message field comes first. Everything that governs the answer is real
+                 setup, but it is setup: it used to push the one control the operator came
+                 for off the bottom of the panel. -->
+            <div class="composer-send">
+              <div style="flex: 1 1 auto">
+                <label class="field-label" for="chat-input">Message</label>
+                <textarea id="chat-input" class="textarea-input" placeholder="Ask about the fleet, a policy or a document."></textarea>
+              </div>
+              <button class="btn" onclick="openWizardFromChat()" title="Turn the current prompt, skills and template pick into a task">
+                Save as task
+              </button>
+              <button id="chat-send" class="btn btn-primary" onclick="sendChat()">
+                <svg class="icon"><use href="#i-send"/></svg> Send
+              </button>
             </div>
 
             <!-- Picking the web-reading skill raises an expectation the fleet deliberately does
@@ -418,58 +408,81 @@
               <button class="btn btn-sm" onclick="focusWebReader()">Go to the Web reader</button>
             </div>
 
-            <!-- The google-web-reading skill's execution surface. The fetch runs through the
-                 gateway under agent:web-reader; the operator decides what reaches the model. -->
-            <div id="web-reader-panel" class="composer-skills">
-              <label class="field-label" for="web-read-url">Web reader — how research gets in</label>
-              <p class="composer-note">
-                Research does not come from the model. You fetch a public page here through
-                <span class="numeric">agent:web-reader</span>, the only identity scoped for it and
-                SSRF-guarded on every redirect, then insert the text into your message.
-              </p>
-              <div style="display: flex; gap: var(--s-2); align-items: flex-start;">
-                <input type="url" id="web-read-url" class="text-input" style="flex: 1 1 auto"
-                       placeholder="https://example.com/page">
-                <button class="btn btn-sm" onclick="readWebPage()" title="Fetch this page through the gateway">
-                  <svg class="icon"><use href="#i-download"/></svg> Read page
-                </button>
-              </div>
-              <div id="web-read-result" class="item-meta" style="margin-top: var(--s-1)"></div>
-            </div>
-
-            <div class="composer-modes">
-              <div class="mode-switch">
-                <button id="mode-chat" class="active" onclick="setChatMode('chat')">Chat</button>
-                <button id="mode-race" onclick="setChatMode('race')">Race</button>
-              </div>
-              <div id="race-controls" style="display: none; align-items: center; gap: var(--s-3); flex-wrap: wrap;">
-                <span class="eyebrow">Lanes</span>
-                {% for m in chat_models %}
-                <label class="checkbox-row">
-                  <input type="checkbox" class="race-model" value="{{ m }}" {% if loop.index <= 2 %}checked{% endif %}>
-                  <span class="numeric">{{ m }}</span>
-                </label>
-                {% endfor %}
-                <label class="checkbox-row">
-                  <input type="checkbox" id="race-judge" checked>
-                  <span>Score the lanes against the rubric</span>
-                </label>
-              </div>
-            </div>
-
-            <div id="chat-error" class="error-state" style="display: none;"></div>
-
-            <div class="composer-send">
-              <div style="flex: 1 1 auto">
-                <label class="field-label" for="chat-input">Message</label>
-                <textarea id="chat-input" class="textarea-input" placeholder="Ask about the fleet, a policy or a document."></textarea>
-              </div>
-              <button class="btn" onclick="openWizardFromChat()" title="Turn the current prompt, skills and template pick into a task">
-                Save as task
+            <div class="composer-setup">
+              <button id="composer-setup-toggle" class="setup-toggle" aria-expanded="false"
+                      aria-controls="composer-setup-body" onclick="toggleComposerSetup()">
+                <svg class="icon"><use href="#i-gear"/></svg>
+                <span>Setup</span>
+                <span id="composer-setup-summary" class="setup-summary numeric"></span>
               </button>
-              <button id="chat-send" class="btn btn-primary" onclick="sendChat()">
-                <svg class="icon"><use href="#i-send"/></svg> Send
-              </button>
+              <div id="composer-setup-body" class="setup-body" style="display: none;">
+              <div class="composer-controls">
+                <div>
+                  <label class="field-label" for="chat-model">Model</label>
+                  <select id="chat-model" class="select-input">
+                    {% for m in chat_models %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label" for="chat-prompt">Prompt template</label>
+                  <select id="chat-prompt" class="select-input" onchange="onPromptTemplateChange()">
+                    <option value="">None</option>
+                    {% for p in prompts %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label" for="chat-prompt-version">Template version</label>
+                  <select id="chat-prompt-version" class="select-input" disabled>
+                    <option value="">Pick a template first</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="composer-skills">
+                <label class="field-label" for="skill-filter">Skills in force</label>
+                <input type="text" id="skill-filter" class="text-input" placeholder="Filter by name or pillar" oninput="renderSkillPicker()">
+                <div id="skill-picker" class="picker"></div>
+              </div>
+
+              <!-- The google-web-reading skill's execution surface. The fetch runs through the
+                   gateway under agent:web-reader; the operator decides what reaches the model. -->
+              <div id="web-reader-panel" class="composer-skills">
+                <label class="field-label" for="web-read-url">Web reader — how research gets in</label>
+                <p class="composer-note">
+                  Research does not come from the model. You fetch a public page here through
+                  <span class="numeric">agent:web-reader</span>, the only identity scoped for it and
+                  SSRF-guarded on every redirect, then insert the text into your message.
+                </p>
+                <div style="display: flex; gap: var(--s-2); align-items: flex-start;">
+                  <input type="url" id="web-read-url" class="text-input" style="flex: 1 1 auto"
+                         placeholder="https://example.com/page">
+                  <button class="btn btn-sm" onclick="readWebPage()" title="Fetch this page through the gateway">
+                    <svg class="icon"><use href="#i-download"/></svg> Read page
+                  </button>
+                </div>
+                <div id="web-read-result" class="item-meta" style="margin-top: var(--s-1)"></div>
+              </div>
+
+              <div class="composer-modes">
+                <div class="mode-switch">
+                  <button id="mode-chat" class="active" onclick="setChatMode('chat')">Chat</button>
+                  <button id="mode-race" onclick="setChatMode('race')">Race</button>
+                </div>
+                <div id="race-controls" style="display: none; align-items: center; gap: var(--s-3); flex-wrap: wrap;">
+                  <span class="eyebrow">Lanes</span>
+                  {% for m in chat_models %}
+                  <label class="checkbox-row">
+                    <input type="checkbox" class="race-model" value="{{ m }}" {% if loop.index <= 2 %}checked{% endif %}>
+                    <span class="numeric">{{ m }}</span>
+                  </label>
+                  {% endfor %}
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="race-judge" checked>
+                    <span>Score the lanes against the rubric</span>
+                  </label>
+                </div>
+              </div>
+              </div>
             </div>
           </div>
         </div>

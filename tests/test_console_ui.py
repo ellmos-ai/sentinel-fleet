@@ -392,3 +392,47 @@ async def test_duplicated_surfaces_are_told_apart():
     assert "requests those rules stopped, waiting on a person now" in body
     # The memory table dropped the raw metadata dict it used to print at the operator.
     assert "<th>Metadata</th>" not in body
+
+
+@pytest.mark.asyncio
+async def test_the_composer_leads_with_the_message_field():
+    """Model, prompt, skills, web reader and race lanes pushed the message box - the one control
+    the operator came for - off the bottom of the panel."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    composer = body.split('<div class="composer">')[1].split("</section>")[0]
+    assert composer.index('id="chat-input"') < composer.index('id="composer-setup-body"'), \
+        "the message field must come before the setup block"
+    assert 'id="composer-setup-toggle"' in composer
+    assert 'style="display: none;"' in composer.split('id="composer-setup-body"')[1][:60], \
+        "setup opens collapsed"
+
+    # Everything the tests and the JS address by id has to stay in the DOM.
+    for marker in ('id="skill-picker"', 'id="chat-prompt-version"', 'id="chat-model"',
+                   'id="web-read-url"', "setChatMode('race')"):
+        assert marker in composer, f"{marker} was lost in the composer rebuild"
+
+
+def test_the_collapsed_setup_cannot_hide_what_is_in_force():
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert "updateComposerSetupSummary" in script
+    summary = script.split("function updateComposerSetupSummary(")[1].split("\n}")[0]
+    assert 'state.mode === "race"' in summary, "an active race mode must show while collapsed"
+    assert "state.selectedSkills.size" in summary
+    # The collapse is deliberately not remembered: a fresh visit opens on the message.
+    assert "composer_setup" not in script and "sentinel_setup" not in script
+
+
+def test_the_web_reader_hint_survives_the_collapse():
+    """The hint is the whole point of wave 2b; folding it into the collapsed panel would undo it."""
+    template = (TEMPLATE_DIR / "index.html").read_text(encoding="utf-8")
+    composer = template.split('<div class="composer">')[1].split("</section>")[0]
+    assert composer.index('id="web-reading-hint"') < composer.index('id="composer-setup-body"'), \
+        "the hint must sit outside the collapsible setup"
+
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    focus = script.split("function focusWebReader(")[1].split("\n}")[0]
+    assert "setComposerSetupOpen(true)" in focus, \
+        "focusing a field inside a collapsed panel would do nothing"

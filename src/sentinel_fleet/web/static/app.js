@@ -37,6 +37,9 @@ document.addEventListener("DOMContentLoaded", () => {
   if (document.getElementById("skill-picker")) {
     renderSkillPicker();
     loadSessions();
+    const model = document.getElementById("chat-model");
+    if (model) model.addEventListener("change", updateComposerSetupSummary);
+    updateComposerSetupSummary();
   }
 
   // A scenario run reloads the page; its outcome has to survive that or the run looks like
@@ -170,6 +173,7 @@ function setChatMode(mode) {
   document.getElementById("mode-race").classList.toggle("active", mode === "race");
   const raceControls = document.getElementById("race-controls");
   if (raceControls) raceControls.style.display = mode === "race" ? "flex" : "none";
+  updateComposerSetupSummary();
 }
 
 function renderSkillPicker() {
@@ -201,6 +205,7 @@ function renderSkillPicker() {
       if (box.checked) state.selectedSkills.add(skill.skill_id);
       else state.selectedSkills.delete(skill.skill_id);
       updateWebReadingHint();
+      updateComposerSetupSummary();
     });
 
     const name = document.createElement("span");
@@ -216,12 +221,63 @@ function renderSkillPicker() {
   });
 
   updateWebReadingHint();
+  updateComposerSetupSummary();
+}
+
+// ---------------------------------------------------------------------------
+// Composer setup. Model, prompt, skills, the web reader and the race lanes all govern the
+// answer, but they are setup: they used to push the message field - the one control the
+// operator came for - off the bottom of the panel. Collapsed by default and deliberately not
+// remembered, so a fresh visit always opens on the message.
+//
+// The toggle carries a summary of what is in force, because a collapsed panel that hides an
+// active race mode or a pinned template would be worse than the crowding it fixes.
+// ---------------------------------------------------------------------------
+
+function setComposerSetupOpen(open) {
+  const body = document.getElementById("composer-setup-body");
+  const toggle = document.getElementById("composer-setup-toggle");
+  if (!body || !toggle) return;
+  body.style.display = open ? "block" : "none";
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  toggle.classList.toggle("is-open", open);
+}
+
+function composerSetupIsOpen() {
+  const body = document.getElementById("composer-setup-body");
+  return !!body && body.style.display !== "none";
+}
+
+function toggleComposerSetup() {
+  setComposerSetupOpen(!composerSetupIsOpen());
+}
+
+function updateComposerSetupSummary() {
+  const summary = document.getElementById("composer-setup-summary");
+  if (!summary) return;
+
+  const parts = [];
+  const model = document.getElementById("chat-model");
+  if (model && model.value) parts.push(model.value);
+
+  const skillCount = state.selectedSkills.size;
+  if (skillCount) parts.push(`${skillCount} skill${skillCount === 1 ? "" : "s"}`);
+
+  const prompt = document.getElementById("chat-prompt");
+  if (prompt && prompt.value) {
+    const entry = state.prompts.find(p => p.id === prompt.value);
+    parts.push(entry ? entry.title : prompt.value);
+  }
+
+  if (state.mode === "race") parts.push("race mode");
+
+  summary.textContent = parts.join(" / ");
 }
 
 // The one skill whose name promises something the fleet refuses to do on its own. Selecting it
 // used to produce a dead end: the agent answered that it cannot fetch, and the panel that does
-// the fetching sat unlabelled further down the composer. The hint appears with the pick and
-// points at that panel.
+// the fetching sat unlabelled further down the composer. The hint sits outside the collapsible
+// setup so it is visible the moment the skill is picked, and its button opens the setup.
 const WEB_READING_SKILL_ID = "skill:google-web-reading";
 
 function updateWebReadingHint() {
@@ -234,6 +290,8 @@ function updateWebReadingHint() {
 }
 
 function focusWebReader() {
+  // The panel lives inside the collapsed setup; focusing a hidden field would do nothing.
+  setComposerSetupOpen(true);
   const input = document.getElementById("web-read-url");
   if (!input) return;
   input.scrollIntoView({ block: "center" });
@@ -249,6 +307,7 @@ function onPromptTemplateChange() {
   if (!prompt) {
     versionSelect.disabled = true;
     versionSelect.appendChild(new Option("Pick a template first", ""));
+    updateComposerSetupSummary();
     return;
   }
 
@@ -258,6 +317,7 @@ function onPromptTemplateChange() {
     option.selected = version.version_number === prompt.active_version;
     versionSelect.appendChild(option);
   });
+  updateComposerSetupSummary();
 }
 
 async function loadSessions() {
@@ -1024,6 +1084,7 @@ function onTemplateLibraryPromptChange() {
     option.selected = version.version_number === prompt.active_version;
     versionSelect.appendChild(option);
   });
+  updateComposerSetupSummary();
 }
 
 function submitNewTaskTemplate(event) {
