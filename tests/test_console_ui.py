@@ -359,7 +359,7 @@ async def test_one_primary_way_to_create_a_task():
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         body = (await client.get("/")).text
 
-    header = body.split("<h3>Tasks</h3>")[1].split("</div>\n        <p")[0]
+    header = body.split("<h3>Reusable tasks</h3>")[1].split("</div>\n        <p")[0]
     assert 'btn-primary" onclick="openWizard()"' in header, "the wizard is the primary route"
     assert "btn-inline" in header and "or fill the form directly" in header, \
         "the quick form must read as a secondary route, not a rival"
@@ -625,3 +625,29 @@ async def test_chat_and_fleet_say_when_to_use_which():
 
     fleet = body.split('id="tab-fleet"')[1].split('id="tab-tickets"')[0]
     assert "Run and manage the work itself" in fleet
+
+
+@pytest.mark.asyncio
+async def test_the_fleet_tab_leads_with_the_throwaway_run():
+    """The live test liked the one-off task but found its button "only much later": it sat in
+    the Fleet directory head, beside the agents, with nothing to do with them."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    fleet = body.split('id="tab-fleet"')[1].split('id="tab-tickets"')[0]
+    assert fleet.index('id="fleet-queue"') < fleet.index('id="fleet-tasks"') < fleet.index('id="fleet-directory"'), \
+        "one-off queue first, reusable tasks under it, agents last"
+
+    queue_head = fleet.split('id="fleet-queue"')[1].split("</div>")[2]
+    assert "Queue a one-off task" in fleet.split('id="fleet-queue"')[1].split('id="fleet-tasks"')[0], \
+        "the one-off button belongs beside the rows it produces"
+
+    directory = fleet.split('id="fleet-directory"')[1]
+    assert "toggleModal('modal-task')" not in directory, \
+        "the one-off button must not be left behind in the agent directory"
+
+    # The two kinds have to read as different kinds.
+    assert "Runs once, right now, and leaves only its run record" in fleet
+    assert "Reusable tasks" in fleet
+    assert "Saved templates you run repeatedly" in fleet

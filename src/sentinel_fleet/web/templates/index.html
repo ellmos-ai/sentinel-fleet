@@ -606,8 +606,8 @@
       <!-- Three long sections stacked into one wall. These jump straight to them. -->
       <nav class="section-jump">
         <span class="eyebrow">On this tab</span>
-        <button class="btn-inline" onclick="jumpToSection('fleet-tasks')">Tasks</button>
         <button class="btn-inline" onclick="jumpToSection('fleet-queue')">Task queue</button>
+        <button class="btn-inline" onclick="jumpToSection('fleet-tasks')">Reusable tasks</button>
         <button class="btn-inline" onclick="jumpToSection('fleet-directory')">Fleet directory</button>
       </nav>
 
@@ -616,9 +616,82 @@
            had been locked, let alone where to unlock it. -->
       <div id="fleet-band" class="scenario-band" style="display: none;"></div>
 
+      <!-- The queue leads the tab because the throwaway run is what an operator reaches for
+           first. Its button used to sit in the Fleet directory head, next to the agents, where
+           the live test found it "only much later". It belongs beside the rows it produces. -->
+      <div id="fleet-queue" class="card" style="margin-bottom: var(--s-5)">
+        <div class="card-header">
+          <h3>Task queue</h3>
+          <div class="item-actions" style="margin: 0">
+            <span class="badge-status badge-info numeric">{% if task_total > tasks|length %}latest {{ tasks|length }} of {{ task_total }}{% else %}{{ task_total }} tasks{% endif %}</span>
+            <button class="btn btn-sm btn-primary" onclick="toggleModal('modal-task')">
+              <svg class="icon"><use href="#i-plus"/></svg> Queue a one-off task
+            </button>
+          </div>
+        </div>
+        <p class="item-desc" style="padding: 0 var(--s-4); margin-top: calc(-1 * var(--s-2))">
+          Runs once, right now, and leaves only its run record - nothing to name, bind or
+          maintain afterwards. For something you will run again, save a reusable task below.
+        </p>
+        {% if not tasks %}
+        <div class="empty-state">
+          <svg class="icon icon-lg"><use href="#i-empty"/></svg>
+          <h4>The queue is empty</h4>
+          <p>Queued tasks are recorded here with the agent that owns them and the evidence they produced.</p>
+        </div>
+        {% else %}
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Task ID</th><th>Task</th><th>Origin</th><th>Agent</th><th>State</th><th>Evidence</th><th>Console</th></tr>
+            </thead>
+            <tbody>
+              {% for t in tasks %}
+              <tr>
+                <td><code>{{ t.task_id }}</code></td>
+                <td><b>{{ t.name }}</b></td>
+                <td class="item-meta">
+                  {% if t.source_template_id %}
+                  <span class="chip">{{ t.triggered_by }}</span> <span class="numeric">{{ t.source_template_id }}</span>
+                  {% else %}manual{% endif %}
+                </td>
+                <td class="numeric">{{ t.assigned_agent }}</td>
+                <td>
+                  <span class="badge-status {% if t.state.value == 'completed' %}badge-ok{% elif t.state.value == 'failed' %}badge-danger{% elif t.state.value == 'queued' %}badge-info{% else %}badge-warn{% endif %}">
+                    {{ t.state.value }}
+                  </span>
+                </td>
+                <td class="item-meta">
+                  {% if t.output_data %}{{ t.output_data }}
+                  {% elif t.error_message %}<span style="color: var(--danger)">{{ t.error_message }}</span>
+                  {% elif t.state.value == 'queued' %}queued for execution, no worker attached
+                  {% else %}-{% endif %}
+                </td>
+                <td>
+                  {% if t.source_template_id %}
+                  <div class="item-actions" style="margin: 0">
+                    <button class="btn btn-sm" onclick='openConsoleModal({{ t.task_id|tojson }}, {{ t.name|tojson }})'>View run</button>
+                    {% if t.state.value == 'failed' %}
+                    <!-- A refused run is not re-dispatched by releasing the agent; this is where
+                         the operator decides to give it another try. -->
+                    <button class="btn btn-sm" onclick='runTemplateAgain({{ t.source_template_id|tojson }})'>Run again</button>
+                    {% endif %}
+                  </div>
+                  {% else %}
+                  <span class="item-meta" title="Queued directly, without a template - never runs, so it has no run log">-</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </div>
+
       <div id="fleet-tasks" class="card" style="margin-bottom: var(--s-5)">
         <div class="card-header">
-          <h3>Tasks</h3>
+          <h3>Reusable tasks</h3>
           <!-- Two ways to create used to sit side by side as equals, and the live test could
                not tell what distinguished them. The wizard is the way; the quick form stays for
                anyone who already knows the fields, as a link rather than a rival button. -->
@@ -630,8 +703,8 @@
           </div>
         </div>
         <p class="item-desc" style="padding: 0 var(--s-4); margin-top: calc(-1 * var(--s-2))">
-          The wizard walks it in order: name, prompt, skills, agent, then when it runs. Everything
-          here is a task - a template is a prompt plus skills. Attach a routine (<svg class="icon"><use href="#i-gear"/></svg>) or a schedule (<svg class="icon"><use href="#i-clock"/></svg>) to make it recurring or dated - remove both to make it deletable again.
+          Saved templates you run repeatedly - a prompt plus skills, kept under a name. The wizard
+          walks it in order: name, prompt, skills, agent, then when it runs. Attach a routine (<svg class="icon"><use href="#i-gear"/></svg>) or a schedule (<svg class="icon"><use href="#i-clock"/></svg>) to make it recurring or dated - remove both to make it deletable again.
         </p>
         <form method="get" action="/" class="viewer-switch">
           <label class="field-label" for="viewer-input">Viewing as</label>
@@ -748,75 +821,11 @@
         {% endif %}
       </div>
 
-      <div id="fleet-queue" class="card">
-        <div class="card-header">
-          <h3>Task queue</h3>
-          <span class="badge-status badge-info numeric">{% if task_total > tasks|length %}latest {{ tasks|length }} of {{ task_total }}{% else %}{{ task_total }} tasks{% endif %}</span>
-        </div>
-        {% if not tasks %}
-        <div class="empty-state">
-          <svg class="icon icon-lg"><use href="#i-empty"/></svg>
-          <h4>The queue is empty</h4>
-          <p>Queued tasks are recorded here with the agent that owns them and the evidence they produced.</p>
-        </div>
-        {% else %}
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr><th>Task ID</th><th>Task</th><th>Origin</th><th>Agent</th><th>State</th><th>Evidence</th><th>Console</th></tr>
-            </thead>
-            <tbody>
-              {% for t in tasks %}
-              <tr>
-                <td><code>{{ t.task_id }}</code></td>
-                <td><b>{{ t.name }}</b></td>
-                <td class="item-meta">
-                  {% if t.source_template_id %}
-                  <span class="chip">{{ t.triggered_by }}</span> <span class="numeric">{{ t.source_template_id }}</span>
-                  {% else %}manual{% endif %}
-                </td>
-                <td class="numeric">{{ t.assigned_agent }}</td>
-                <td>
-                  <span class="badge-status {% if t.state.value == 'completed' %}badge-ok{% elif t.state.value == 'failed' %}badge-danger{% elif t.state.value == 'queued' %}badge-info{% else %}badge-warn{% endif %}">
-                    {{ t.state.value }}
-                  </span>
-                </td>
-                <td class="item-meta">
-                  {% if t.output_data %}{{ t.output_data }}
-                  {% elif t.error_message %}<span style="color: var(--danger)">{{ t.error_message }}</span>
-                  {% elif t.state.value == 'queued' %}queued for execution, no worker attached
-                  {% else %}-{% endif %}
-                </td>
-                <td>
-                  {% if t.source_template_id %}
-                  <div class="item-actions" style="margin: 0">
-                    <button class="btn btn-sm" onclick='openConsoleModal({{ t.task_id|tojson }}, {{ t.name|tojson }})'>View run</button>
-                    {% if t.state.value == 'failed' %}
-                    <!-- A refused run is not re-dispatched by releasing the agent; this is where
-                         the operator decides to give it another try. -->
-                    <button class="btn btn-sm" onclick='runTemplateAgain({{ t.source_template_id|tojson }})'>Run again</button>
-                    {% endif %}
-                  </div>
-                  {% else %}
-                  <span class="item-meta" title="Queued directly, without a template - never runs, so it has no run log">-</span>
-                  {% endif %}
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% endif %}
-      </div>
-
       <div id="fleet-directory" class="section-head">
         <div>
           <h3>Fleet directory</h3>
           <p>Every agent carries an explicit tool scope. A call outside that scope quarantines the agent instead of running.</p>
         </div>
-        <button class="btn btn-primary" onclick="toggleModal('modal-task')">
-          <svg class="icon"><use href="#i-plus"/></svg> Queue a task
-        </button>
       </div>
 
       <div class="grid" style="margin-bottom: var(--s-5)">
@@ -1664,11 +1673,15 @@
   <div id="modal-task" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
-        <h3>Queue a task</h3>
+        <h3>Queue a one-off task</h3>
         <button class="btn btn-sm btn-icon" onclick="toggleModal('modal-task')" aria-label="Close">
           <svg class="icon"><use href="#i-close"/></svg>
         </button>
       </div>
+      <p class="item-desc" style="margin: 0 0 var(--s-3)">
+        Runs once and leaves only its run record. Nothing is saved to run again - for that, make
+        a reusable task with the wizard.
+      </p>
       <form onsubmit="submitNewTask(event)">
         <div class="form-group">
           <label>Task name</label>
