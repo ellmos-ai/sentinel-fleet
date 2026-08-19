@@ -7,7 +7,7 @@ status: active
 language: en
 pillar: utilities
 description: >
-  Deterministic auditor for German § 14 UStG tax regulations, VAT ID format checks, and mathematical invoice consistency.
+  Deterministic auditor for German § 14 UStG tax regulations: presence of the 8 mandatory invoice fields (VAT ID included, presence-only - no format regex) and mathematical invoice consistency.
 fork_of: "skills/utilities/law-checker"
 compatibility:
   google_adk: true
@@ -27,10 +27,8 @@ tags:
 # § 14 UStG Tax Compliance Auditor & Legal Sentry
 
 ## Purpose
-Validates statutory requirements for European and German invoices under § 14 UStG with zero tolerance for math anomalies or missing supplier identification.
+Validates statutory requirements for European and German invoices under § 14 UStG, via `core/policies.py::PolicyEngine.evaluate_tax_compliance()` (the same function `tax-compliance-v1` describes).
 
 ## Mandatory Validations
-1. **Full Supplier Details:** Name, legal form, address.
-2. **Tax Identification:** Valid German Steuernummer or EU USt-IdNr (`DE[0-9]{9}`).
-3. **Date Stamps:** Issue date and delivery/service period.
-4. **Mathematical Parity:** `Net + (Net * Tax Rate) == Gross` within ±0.01 EUR rounding tolerance.
+1. **Supplier & Document Fields (presence only):** vendor name, vendor VAT ID, invoice number, issue date, delivery/service date, net amount, tax rate, gross amount. The check confirms each field is present and non-empty/non-zero (tax rate 0% is accepted if the key exists) - it does not validate the VAT ID against a `DE[0-9]{9}` or any other format pattern, and it does not check supplier legal form or address (`vendor_address` is not in the checked field list).
+2. **Mathematical Parity:** `round(Net * Tax Rate / 100, 2)` compared to `Gross - Net`, with a tolerance of **0.02 EUR** (2 cents, for rounding) before it is flagged as an arithmetic inconsistency.

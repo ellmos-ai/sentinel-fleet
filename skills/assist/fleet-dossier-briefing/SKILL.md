@@ -32,4 +32,4 @@ Generates high-density executive briefings and audit digests across all fleet ac
 ## Key Sections
 1. **Executive Summary:** Bullet-point digest of recent fleet milestones and pending HITL tickets.
 2. **Compliance & Risk Matrix:** Breakdown of flagged invoices and vendor dispute timelines.
-3. **Infrastructure Health:** Error rates, latency percentiles (P95), and token quotas.
+3. **Infrastructure Health:** Per-call span status (`OK`/`BLOCKED`/`SECURITY_VIOLATION`/`DENIED`/`ERROR`) and latency from `core/telemetry.py`'s OpenTelemetry spans. No percentile aggregation (e.g. P95) or token-quota accounting exists in this codebase; a briefing built on this skill reports raw span figures, not derived statistics.

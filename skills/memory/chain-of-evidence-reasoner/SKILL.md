@@ -7,7 +7,7 @@ status: active
 language: en
 pillar: memory
 description: >
-  Formal Tree-of-Thought reasoning synthesizer producing auditable step-by-step proofs and verifiable citations for SystemAuditor inspections.
+  Prompt-level instruction shaping how an agent explains a decision: cite the statutory paragraph and the retrieved memory/legal-corpus snippet it relied on, in plain step-by-step prose.
 fork_of: "skills/utilities/structured-thinking"
 compatibility:
   google_adk: true
@@ -26,4 +26,7 @@ tags:
 # Chain of Evidence Reasoner & Decision Synthesizer
 
 ## Purpose
-Generates transparent, mathematically verifiable reasoning chains for every approval, tax rejection, or vendor dispute, linking directly to statutory paragraphs and document coordinates.
+Asks the model to explain an approval, tax rejection, or vendor dispute by naming the statutory paragraph and quoting the memory-bank/legal-corpus snippet it drew on - the same reference block `domains/omniledger/dispute_loop.py` already assembles from `memory_hooker.inject_context()` and attaches to a dispute draft.
+
+## Implementation status
+This is a prompt-behaviour skill: its body is injected verbatim into the agent's system prompt (`core/skills.py`), it does not run separate reasoning code. There is no formal Tree-of-Thought solver, no mathematical proof checker, and no document-coordinate (bounding box) extraction anywhere in this codebase - `InvoiceDocument` carries text fields only, no page/position data.

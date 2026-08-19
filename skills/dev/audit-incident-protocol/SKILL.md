@@ -7,7 +7,7 @@ status: active
 language: en
 pillar: dev
 description: >
-  Creates immutable, cryptographically verifiable incident receipts for agent exceptions, policy blocks, and financial audit queries.
+  Declared capability for cryptographically verifiable incident receipts covering agent exceptions and policy blocks. No execution backend is wired yet - no receipt object or signing step exists in this codebase.
 fork_of: "skills/dev/bugfix-protocol"
 compatibility:
   google_adk: true
@@ -26,4 +26,7 @@ tags:
 # Audit Incident Protocol & Compliance Receipt Sentry
 
 ## Purpose
-Generates formal audit receipts for every exception, compliance breach, or model armor interception, ensuring full traceability for external financial auditors.
+Describes an intended formal-receipt trail for every exception, compliance breach, or Model Armor interception.
+
+## Implementation status
+`verify_receipts` in `required_tools` names an intended function; none exists. What the fleet actually has today is traceability without a receipt object: every gateway call opens an OpenTelemetry span (`core/telemetry.py`) recording status (`OK`/`BLOCKED`/`SECURITY_VIOLATION`/`DENIED`/`ERROR`) and, on a real deployment, exports it to Cloud Trace. That span record is evidence an auditor can read; it is not a signed or hashed receipt, and nothing in this codebase generates or verifies one.

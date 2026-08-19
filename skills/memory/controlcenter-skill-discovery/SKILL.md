@@ -7,7 +7,7 @@ status: active
 language: en
 pillar: memory
 description: >
-  ControlCenter-compliant skill discovery, keyword matcher, and dynamic capability bundler resolving agent intent to toolsets.
+  ControlCenter-style keyword matcher over the skill registry: scores each skill by word overlap between the query and its name/description/tags/pillar, ranked highest-overlap first.
 fork_of: "skills/infrastructure/skill-finder"
 compatibility:
   google_adk: true
@@ -26,4 +26,7 @@ tags:
 # ControlCenter Skill Discovery & Capability Matcher
 
 ## Purpose
-Enables autonomous agents to discover available enterprise skills, inspect required tool contracts, and bind dynamically to capability bundles.
+Enables an agent or operator to discover which registered skill best matches a free-text query, via `core/skills.py::SkillRegistry.find_skills()`.
+
+## Implementation status
+`find_skills()` tokenizes the query and each skill's searchable text into word sets and ranks by set-intersection size - literal keyword overlap, not semantic or embedding-based matching. A skill's `required_tools` list is returned as-is for the caller to read; nothing in this codebase validates it against an actual tool implementation or "binds" it to one, and there is no capability-bundle concept (bundling, versioned grouping) anywhere in `core/skills.py`.

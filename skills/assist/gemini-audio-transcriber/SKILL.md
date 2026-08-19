@@ -7,7 +7,7 @@ status: active
 language: en
 pillar: assist
 description: >
-  Processes spoken voice notes, vendor call recordings, and audio briefings directly using Gemini 3.5 Flash Multimodal Audio capabilities.
+  Declared capability for processing spoken voice notes and vendor call recordings using Gemini 3.5 Flash multimodal audio. No execution backend is wired yet - the fleet has no audio upload path or audio-capable model call today.
 fork_of: "skills/assist/transkription"
 compatibility:
   google_adk: true
@@ -27,4 +27,7 @@ tags:
 # Gemini Multimodal Audio Transcriber & Voice Sentry
 
 ## Purpose
-Enables SentinelFleet agents to accept voice instructions, parse phone-call summaries with suppliers, and extract structured meeting agreements directly without third-party speech pipelines.
+Describes an intended path for agents to accept voice instructions and parse phone-call summaries with suppliers.
+
+## Implementation status
+`chat/backends.py` and `domains/omniledger/extractor.py` cover text chat and document (PDF/image) uploads through the Gemini API; neither accepts an audio payload, and no other module in `src/` handles audio. The `query_memory_bank` entry in `required_tools` names an intended follow-up write into the Memory Bank once a transcript exists - there is no transcript today.

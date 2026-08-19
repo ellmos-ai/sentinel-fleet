@@ -27,3 +27,6 @@ tags:
 
 ## Purpose
 High-precision multimodal invoice data extraction engine leveraging Gemini 3.5 Flash Multimodal Vision for pixel-perfect line-item parsing, gross/net separation, and tax rate identification.
+
+## Implementation status
+Backed by `domains/omniledger/extractor.py::MultimodalExtractor`. When `GEMINI_API_KEY` is unset, or a live call fails or returns invalid JSON, extraction does not degrade silently: it falls back to one of three fixed, clearly labelled demo documents (`extraction_mode: DETERMINISTIC_DEMO`) selected by filename/text hints, never a fabricated result presented as a live extraction.

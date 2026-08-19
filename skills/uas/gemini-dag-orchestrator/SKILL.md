@@ -7,7 +7,7 @@ status: active
 language: en
 pillar: uas
 description: >
-  Decomposes ambiguous enterprise requests into acyclic directed graphs (DAGs) and coordinates parallel agent dispatch across SentinelFleet workers.
+  Runs a TaskTemplate's steps as a linear, position-ordered chain, each step's output feeding the next as context; a "race" step fans out to up to four models concurrently via `asyncio.gather`.
 fork_of: "skills/infrastructure/orchestrator"
 compatibility:
   google_adk: true
@@ -28,4 +28,7 @@ tags:
 # Gemini DAG Orchestrator & Task Decomposer
 
 ## Purpose
-Transforms high-level business goals (e.g., "Audit and reconcile Q2 invoices from Acme Corp") into discrete, executable task nodes with strict dependency tracking.
+Executes a multi-step `TaskTemplate` (`core/chain_runner.py::run_chain()`): steps run strictly in `position` order, and each step receives the previous step's output as injected context (`input_spec` is fixed to `previous_output`).
+
+## Implementation status
+This is a linear chain, not a directed acyclic graph: there is no dependency declaration between steps, no branching, and no cycle validation to enforce (a chain cannot fan out or merge). The one real parallel-execution pattern is the `race` step type, which dispatches one prompt to up to `MAX_RACE_LANES` (4) models concurrently via `asyncio.gather` in `ChatService.race()` - a genuine concurrent fan-out, but across models racing the same step, not across independent task nodes with dependencies.

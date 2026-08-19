@@ -7,7 +7,7 @@ status: active
 language: en
 pillar: utilities
 description: >
-  Autonomous German/English cross-lingual document synchronizer translating complex tax rules, error reports, and UI strings with 100% semantic fidelity.
+  Declared capability for an autonomous German/English cross-lingual document synchronizer covering tax rules, error reports, and UI strings. No execution backend is wired yet - there is no translation or locale-sync code in this repository.
 fork_of: "skills/utilities/bilingual-doc-sync"
 compatibility:
   google_adk: true
@@ -26,4 +26,7 @@ tags:
 # Gemini Bilingual Synchronizer (DE/EN)
 
 ## Purpose
-Ensures complete parity between German statutory compliance documents (§ 14 UStG, GoBD) and English international accounting reports and executive digests.
+Describes an intended path to keep German statutory compliance documents (§ 14 UStG, GoBD) and their English counterparts in parity.
+
+## Implementation status
+No translation function, i18n framework, or locale-sync job exists in `src/`; `query_memory_bank` in `required_tools` names an intended lookup step with nothing behind it. The Memory Bank and legal RAG corpus (`memory/bank.py`, `memory/gardener_rag.py`) are seeded in German only. "100% semantic fidelity" is not a measurable property of anything in this codebase and has been removed as a claim.
