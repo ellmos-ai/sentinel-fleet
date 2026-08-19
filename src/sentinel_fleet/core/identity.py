@@ -12,6 +12,7 @@ class AgentRole(str, Enum):
     LEDGER_RECONCILER = "ledger_reconciler"
     VENDOR_COMMUNICATOR = "vendor_communicator"
     SECURITY_SENTRY = "security_sentry"
+    WEB_RESEARCHER = "web_researcher"
 
 
 class AgentStatus(str, Enum):

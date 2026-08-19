@@ -329,6 +329,20 @@
               <div id="skill-picker" class="picker"></div>
             </div>
 
+            <!-- The google-web-reading skill's execution surface. The fetch runs through the
+                 gateway under agent:web-reader; the operator decides what reaches the model. -->
+            <div class="composer-skills">
+              <label class="field-label" for="web-read-url">Web reader (agent:web-reader, SSRF-guarded)</label>
+              <div style="display: flex; gap: var(--s-2); align-items: flex-start;">
+                <input type="url" id="web-read-url" class="text-input" style="flex: 1 1 auto"
+                       placeholder="https://example.com/page">
+                <button class="btn btn-sm" onclick="readWebPage()" title="Fetch this page through the gateway">
+                  <svg class="icon"><use href="#i-download"/></svg> Read page
+                </button>
+              </div>
+              <div id="web-read-result" class="item-meta" style="margin-top: var(--s-1)"></div>
+            </div>
+
             <div class="composer-modes">
               <div class="mode-switch">
                 <button id="mode-chat" class="active" onclick="setChatMode('chat')">Chat</button>

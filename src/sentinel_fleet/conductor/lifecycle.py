@@ -82,6 +82,16 @@ class LifecycleManager:
                 }
             ),
             AgentIdentity(
+                agent_id="agent:web-reader",
+                role=AgentRole.WEB_RESEARCHER,
+                name="Web Reader",
+                description="The only identity that may fetch a public page, under an SSRF guard.",
+                # read_web_page is scoped to exactly this agent. Handing it to the orchestrator or
+                # the task solver as well would mean an outbound fetch could originate from three
+                # places, and the point of the identity is that there is one door to audit.
+                allowed_tools={"read_web_page"}
+            ),
+            AgentIdentity(
                 agent_id="agent:chat-operator",
                 name="Chat Operator",
                 role=AgentRole.ORCHESTRATOR,

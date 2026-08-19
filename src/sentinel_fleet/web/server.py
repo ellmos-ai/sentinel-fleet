@@ -26,6 +26,7 @@ from sentinel_fleet.core.prompts import prompt_registry
 from sentinel_fleet.core.skills import skill_registry
 from sentinel_fleet.core.domains import domain_registry
 from sentinel_fleet.core.privacy_contacts import privacy_contact_hub
+from sentinel_fleet.core.web_reader import read_page
 from sentinel_fleet.core.errors import (
     SentinelFleetError,
     TaskNotFoundError,
@@ -203,6 +204,27 @@ async def tool_render_dispute_letter(document: InvoiceDocument, issued_at: float
     the gate ledger. It also means a quarantined dispute agent cannot keep producing letters.
     """
     return render_correction_letter_pdf(build_correction_letter(document, issued_at))
+
+
+async def tool_read_web_page(url: str) -> Dict[str, Any]:
+    """Fetch one public page under the SSRF guard and hand back its readable text.
+
+    The blocking fetch runs off the event loop. The extracted text is inspected by Model Armor
+    before it is returned: a fetched page is untrusted input, and an operator who is about to
+    paste it into a prompt should see the verdict rather than discover it later. The verdict is
+    reported, not enforced - the chat path blocks on the same scan when the text is actually sent.
+    """
+    page = await asyncio.to_thread(read_page, url)
+    inspection = gateway.model_armor.inspect_prompt(page["text"])
+    page["armor_safe"] = inspection.is_safe
+    page["armor_patterns"] = inspection.blocked_patterns
+    telemetry.record_on_active_span("web_page_inspected", {
+        "url": str(page["url"]),
+        "characters": page["characters"],
+        "armor_safe": inspection.is_safe,
+        "patterns": ", ".join(inspection.blocked_patterns) or "none",
+    })
+    return page
 
 
 async def tool_send_external_email(to: str, body: str) -> str:
@@ -1203,6 +1225,30 @@ async def api_chat_race(payload: ChatRaceRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
     return {"session_id": session.session_id, "race": record.model_dump()}
+
+
+# ---------------------------------------------------------
+# Web reading
+# ---------------------------------------------------------
+
+@app.post("/api/web/read")
+async def api_read_web_page(url: str = Form(...)):
+    """Read one public page through the gateway, under the agent that owns the tool.
+
+    A refusal and a failed fetch both answer 400 with the reason the reader gave - the guard's
+    messages name what was attempted ("... is a private address", "no host", "not a readable page
+    type"), which is what an operator needs to see. There is no second, unguarded route: the
+    console has no other way to reach the network, and `read_web_page` is scoped to one identity.
+    """
+    result = await execute_via_gateway(
+        "agent:web-reader",
+        "read_web_page",
+        {"url": url},
+        tool_read_web_page
+    )
+    if not result.success:
+        return JSONResponse(status_code=400, content={"status": "REFUSED", "reason": result.error})
+    return {"status": "ok", "page": result.output}
 
 
 # ---------------------------------------------------------

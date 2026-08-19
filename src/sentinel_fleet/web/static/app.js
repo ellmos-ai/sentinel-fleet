@@ -501,6 +501,69 @@ function collectComposer() {
   };
 }
 
+// Web reader: fetch a public page through the gateway and offer its text to the composer.
+// The operator, not the model, decides what enters the prompt - the fleet has no autonomous
+// browsing loop, and this panel is the whole of what google-web-reading can do.
+async function readWebPage() {
+  const input = document.getElementById("web-read-url");
+  const output = document.getElementById("web-read-result");
+  if (!input || !output) return;
+
+  const url = (input.value || "").trim();
+  if (!url) {
+    output.textContent = "Enter a URL first.";
+    return;
+  }
+
+  output.textContent = `Fetching ${url} through agent:web-reader`;
+  const body = new FormData();
+  body.append("url", url);
+
+  try {
+    const res = await fetch("/api/web/read", { method: "POST", body });
+    const data = await res.json();
+    if (!res.ok) {
+      output.replaceChildren();
+      const badge = document.createElement("span");
+      badge.className = "badge-status badge-danger";
+      badge.textContent = "Refused";
+      output.append(badge, ` ${data.reason || "the reader gave no reason"}`);
+      return;
+    }
+
+    const page = data.page;
+    output.replaceChildren();
+    const badge = document.createElement("span");
+    badge.className = `badge-status ${page.armor_safe ? "badge-ok" : "badge-danger"}`;
+    badge.textContent = page.armor_safe ? "Model Armor: clean" : "Model Armor: flagged";
+    badge.title = page.armor_safe
+      ? "No injection pattern found in the fetched text"
+      : `Patterns found: ${(page.armor_patterns || []).join(", ")}`;
+
+    const summary = document.createElement("span");
+    summary.textContent =
+      ` ${page.title || page.url} / ${page.characters} characters` +
+      (page.redirects && page.redirects.length ? ` / ${page.redirects.length} redirect(s)` : "") +
+      (page.text_truncated ? " / truncated" : "");
+
+    const insert = document.createElement("button");
+    insert.className = "btn btn-sm";
+    insert.style.marginLeft = "var(--s-2)";
+    insert.textContent = "Insert into message";
+    insert.onclick = () => {
+      const composer = document.getElementById("chat-input");
+      if (!composer) return;
+      const header = `Source: ${page.url}\n\n`;
+      composer.value = `${composer.value}${composer.value ? "\n\n" : ""}${header}${page.text}`;
+      composer.focus();
+    };
+
+    output.append(badge, summary, insert);
+  } catch (err) {
+    output.textContent = err.message;
+  }
+}
+
 async function sendChat() {
   const input = document.getElementById("chat-input");
   const message = (input.value || "").trim();
