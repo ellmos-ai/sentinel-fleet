@@ -38,24 +38,31 @@
 
   <div class="container">
 
+    <!-- Ten equally weighted tabs gave no clue where to start. The split is by what the operator
+         is there to do - act on something, or look something up - not by architecture pillar:
+         the live test called Domains "just an overview, it need not be this prominent". -->
     <nav class="tab-rail" role="tablist">
+      <span class="tab-group-label eyebrow">Work</span>
       <button id="btn-tab-overview" class="tab-btn active" onclick="switchTab('tab-overview')">
         <svg class="icon"><use href="#i-grid"/></svg> Overview
       </button>
       <button id="btn-tab-chat" class="tab-btn" onclick="switchTab('tab-chat')">
         <svg class="icon"><use href="#i-chat"/></svg> Chat
       </button>
+      <button id="btn-tab-tickets" class="tab-btn" onclick="switchTab('tab-tickets')">
+        <svg class="icon"><use href="#i-inbox"/></svg> Approvals <span class="tab-count">{{ pending_tickets|length }}</span>
+      </button>
+      <button id="btn-tab-fleet" class="tab-btn" onclick="switchTab('tab-fleet')">
+        <svg class="icon"><use href="#i-fleet"/></svg> Fleet <span class="tab-count">{{ agents|length }}</span>
+      </button>
+
+      <span class="tab-group-sep" aria-hidden="true"></span>
+      <span class="tab-group-label eyebrow">Reference</span>
       <button id="btn-tab-domains" class="tab-btn" onclick="switchTab('tab-domains')">
         <svg class="icon"><use href="#i-building"/></svg> Domains <span class="tab-count">{{ domains|length }}</span>
       </button>
       <button id="btn-tab-contacts" class="tab-btn" onclick="switchTab('tab-contacts')">
         <svg class="icon"><use href="#i-contacts"/></svg> Contacts <span class="tab-count">{{ contact_total }}</span>
-      </button>
-      <button id="btn-tab-fleet" class="tab-btn" onclick="switchTab('tab-fleet')">
-        <svg class="icon"><use href="#i-fleet"/></svg> Fleet <span class="tab-count">{{ agents|length }}</span>
-      </button>
-      <button id="btn-tab-tickets" class="tab-btn" onclick="switchTab('tab-tickets')">
-        <svg class="icon"><use href="#i-inbox"/></svg> Approvals <span class="tab-count">{{ pending_tickets|length }}</span>
       </button>
       <button id="btn-tab-memory" class="tab-btn" onclick="switchTab('tab-memory')">
         <svg class="icon"><use href="#i-memory"/></svg> Memory <span class="tab-count">{{ memories|length }}</span>

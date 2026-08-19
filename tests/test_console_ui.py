@@ -288,3 +288,26 @@ async def test_the_scenarios_come_before_their_evidence():
     assert "lands in the gate ledger below" in overview
     template = (TEMPLATE_DIR / "index.html").read_text(encoding="utf-8")
     assert "Run a scenario above" in template
+
+
+@pytest.mark.asyncio
+async def test_the_tab_rail_is_split_into_work_and_reference():
+    """Ten equally weighted tabs told the operator nothing about where to start. The cut is by
+    what they are there to do, which is why Approvals moves ahead of the reference tabs."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    rail = body.split('class="tab-rail"')[1].split("</nav>")[0]
+    assert "tab-group-sep" in rail, "the two groups need a visible boundary"
+    assert rail.index(">Work<") < rail.index(">Reference<")
+
+    order = re.findall(r'id="btn-(tab-[a-z]+)"', rail)
+    assert order == [
+        "tab-overview", "tab-chat", "tab-tickets", "tab-fleet",
+        "tab-domains", "tab-contacts", "tab-memory", "tab-prompts",
+        "tab-telemetry", "tab-governance",
+    ], "work tabs first, reference tabs after the divider"
+    # switchTab derives the button id from the pane id, so a rename here breaks every tab.
+    for tab in order:
+        assert f"switchTab('{tab}')" in rail

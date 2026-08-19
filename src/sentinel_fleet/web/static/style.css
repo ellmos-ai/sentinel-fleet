@@ -413,11 +413,29 @@ a { color: var(--accent); }
 
 .tab-rail {
   display: flex;
+  align-items: center;
   gap: var(--s-1);
   margin-bottom: var(--s-5);
   border-bottom: 1px solid var(--rule);
   overflow-x: auto;
   scrollbar-width: thin;
+}
+
+/* Two groups, one question each: is this a place to act, or a place to look something up. */
+.tab-group-label {
+  align-self: center;
+  padding: 0 var(--s-2) 0 0;
+  white-space: nowrap;
+  color: var(--ink-3);
+}
+
+.tab-group-sep {
+  align-self: center;
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  margin: 0 var(--s-3);
+  background: var(--rule);
 }
 
 .tab-btn {
