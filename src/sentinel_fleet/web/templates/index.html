@@ -970,9 +970,10 @@
       <div class="section-head">
         <div>
           <h3>Memory bank</h3>
-          <p>The fleet's own curated memory: facts, lessons and policies agents retrieve from and
-             inject into their prompts before they act. It lives in this app only - nothing here
-             is read from or written to anything outside it.</p>
+          <p>The fleet's own curated memory: what agents retrieve from and inject into their
+             prompts before they act. Structured like the operator's USMC pattern - facts,
+             lessons, working state, sessions - as its own instance, living in this app only:
+             nothing here is read from or written to anything outside it.</p>
         </div>
         <button class="btn btn-primary" onclick="toggleModal('modal-memory')">
           <svg class="icon"><use href="#i-plus"/></svg> Store an entry
@@ -990,6 +991,7 @@
                 <td>{{ m.content }}</td>
                 <td class="item-meta numeric">
                   {{ m.owner }}
+                  {% if m.metadata.get('legacy_category') %}<div class="item-meta">was &#34;{{ m.metadata.get('legacy_category') }}&#34;</div>{% endif %}
                   {% if m.metadata.get('seed') %}<div class="item-meta">shipped with the demo</div>{% endif %}
                   {% if m.metadata.get('edited_by') %}<div class="item-meta">edited, no longer re-seeded</div>{% endif %}
                 </td>
@@ -2220,10 +2222,10 @@
         <div class="form-group">
           <label>Category</label>
           <select id="memory-edit-category" class="select-input">
-            <option value="fact">Fact</option>
-            <option value="lesson">Lesson</option>
-            <option value="entity">Entity</option>
-            <option value="policy">Policy</option>
+            <option value="facts">Facts — true, and stays true</option>
+            <option value="lessons">Lessons — what went wrong once</option>
+            <option value="working">Working — state of something in flight</option>
+            <option value="sessions">Sessions — what a run left behind</option>
           </select>
         </div>
         <div class="form-group">
@@ -2250,10 +2252,10 @@
         <div class="form-group">
           <label>Category</label>
           <select name="category" class="select-input">
-            <option value="fact">Fact</option>
-            <option value="lesson">Lesson</option>
-            <option value="entity">Entity</option>
-            <option value="policy">Policy</option>
+            <option value="facts">Facts — true, and stays true</option>
+            <option value="lessons">Lessons — what went wrong once</option>
+            <option value="working">Working — state of something in flight</option>
+            <option value="sessions">Sessions — what a run left behind</option>
           </select>
         </div>
         <div class="form-group">

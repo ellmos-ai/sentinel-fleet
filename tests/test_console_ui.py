@@ -666,7 +666,7 @@ async def test_memory_entries_can_be_reached_from_the_table():
     assert 'id="modal-memory-edit"' in body
 
     # The tab says what the bank is; the live test had to ask whether it was the local USMC.
-    assert "It lives in this app only" in memory
+    assert "living in this app only" in memory
 
     # Editing must not read as rewriting evidence.
     assert "not rewrite the gate ledger" in body
@@ -793,3 +793,17 @@ def test_the_lifecycle_skill_describes_the_state_it_now_has():
              / "task-lifecycle-maintainer" / "SKILL.md").read_text(encoding="utf-8")
     assert "cancelled" in skill.lower()
     assert "no cancel edge" in skill, "the skill has to explain why a running task cannot be cancelled"
+
+
+@pytest.mark.asyncio
+async def test_the_memory_tab_speaks_the_operators_usmc_vocabulary():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert "Structured like the operator's USMC pattern" in body
+    memory = body.split('id="tab-memory"')[1].split('id="tab-prompts"')[0]
+    for value in ("facts", "lessons", "working", "sessions"):
+        assert f'value="{value}"' in body, f"the {value} type is not selectable"
+    # The old labels are gone from the pickers, not merely aliased behind them.
+    assert 'value="entity"' not in body and 'value="policy"' not in body
