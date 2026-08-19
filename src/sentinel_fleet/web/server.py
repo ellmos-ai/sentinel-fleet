@@ -41,7 +41,9 @@ from sentinel_fleet.core.errors import (
     TicketResolutionError,
     TemplateNotFoundError,
     TemplateHasBindingsError,
-    TemplatePermissionError
+    TemplatePermissionError,
+    MemoryEntryNotFoundError,
+    MemoryPermissionError
 )
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.uas.ticket_master import ticket_master, TicketStatus, TicketPriority
@@ -94,12 +96,14 @@ app = FastAPI(
 @app.exception_handler(ContactNotFoundError)
 @app.exception_handler(SkillNotFoundError)
 @app.exception_handler(TemplateNotFoundError)
+@app.exception_handler(MemoryEntryNotFoundError)
 async def not_found_exception_handler(request: Request, exc: SentinelFleetError):
     return JSONResponse(status_code=404, content={"error": exc.message, "details": exc.details})
 
 
 @app.exception_handler(ContactOptOutViolationError)
 @app.exception_handler(TemplatePermissionError)
+@app.exception_handler(MemoryPermissionError)
 async def opt_out_violation_handler(request: Request, exc: SentinelFleetError):
     return JSONResponse(status_code=403, content={"error": exc.message, "details": exc.details})
 
@@ -522,10 +526,30 @@ async def api_get_memory():
 async def api_create_memory(
     category: str = Form("fact"),
     key: str = Form(...),
-    content: str = Form(...)
+    content: str = Form(...),
+    owner: str = Form("operator")
 ):
-    entry = memory_bank.store_memory(category=category, key=key, content=content)
+    entry = memory_bank.store_memory(category=category, key=key, content=content, owner=owner)
     return {"status": "created", "entry": entry.model_dump()}
+
+
+@app.put("/api/memory/{key:path}")
+async def api_update_memory(
+    key: str,
+    category: str = Form(...),
+    content: str = Form(...),
+    requested_by: str = Form("operator")
+):
+    entry = memory_bank.update_memory(
+        key=key, category=category, content=content, requested_by=requested_by
+    )
+    return {"status": "updated", "entry": entry.model_dump()}
+
+
+@app.delete("/api/memory/{key:path}")
+async def api_delete_memory(key: str, requested_by: str = "operator"):
+    removed = memory_bank.delete_memory(key, requested_by=requested_by)
+    return {"status": "deleted" if removed else "not_found", "key": key}
 
 
 # ---------------------------------------------------------

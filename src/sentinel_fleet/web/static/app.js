@@ -1086,6 +1086,52 @@ function submitForm(event, url, failure) {
 const submitNewTicket = e => submitForm(e, "/api/tickets/create", "Could not create the ticket");
 const submitNewTask = e => submitForm(e, "/api/tasks/create", "Could not queue the task");
 const submitNewMemory = e => submitForm(e, "/api/memory/create", "Could not store the entry");
+
+// ---------------------------------------------------------------------------
+// Memory entries are correctable. They were not, and the live test read that as the same
+// powerlessness the overview cards caused: "if CEO is filed under the wrong category, there is
+// nothing I can do". The key stays fixed because it is what agents retrieve by; everything else
+// is editable, seeded entries included - with the consequence stated rather than hidden.
+// ---------------------------------------------------------------------------
+
+function openMemoryEditor(key, category, content, isSeed) {
+  document.getElementById("memory-edit-key").value = key;
+  document.getElementById("memory-edit-category").value = category;
+  document.getElementById("memory-edit-content").value = content;
+  const note = document.getElementById("memory-edit-seed-note");
+  if (note) note.style.display = isSeed ? "block" : "none";
+  toggleModal("modal-memory-edit");
+}
+
+function submitMemoryEdit(event) {
+  event.preventDefault();
+  const key = document.getElementById("memory-edit-key").value;
+  postAndReload(
+    `/api/memory/${encodeURIComponent(key)}`,
+    {
+      method: "PUT",
+      body: new URLSearchParams({
+        category: document.getElementById("memory-edit-category").value,
+        content: document.getElementById("memory-edit-content").value
+      })
+    },
+    "Could not save the entry"
+  );
+}
+
+function deleteMemoryEntry(key, isSeed) {
+  const warning = isSeed
+    ? `Delete "${key}"?\n\nThis entry shipped with the demo, so it is recreated the next time `
+      + "the app starts - that key belongs to the seed. Edit it instead if you want your version "
+      + "to stand."
+    : `Delete "${key}"? Agents will stop retrieving it.`;
+  if (!confirm(warning)) return;
+  postAndReload(
+    `/api/memory/${encodeURIComponent(key)}`,
+    { method: "DELETE" },
+    "Could not delete the entry"
+  );
+}
 const submitNewContact = e => submitForm(e, "/api/contacts/create", "Could not save the contact");
 const submitNewSkill = e => submitForm(e, "/api/skills/create", "Could not create the skill");
 

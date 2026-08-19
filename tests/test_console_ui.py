@@ -651,3 +651,22 @@ async def test_the_fleet_tab_leads_with_the_throwaway_run():
     assert "Runs once, right now, and leaves only its run record" in fleet
     assert "Reusable tasks" in fleet
     assert "Saved templates you run repeatedly" in fleet
+
+
+@pytest.mark.asyncio
+async def test_memory_entries_can_be_reached_from_the_table():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    memory = body.split('id="tab-memory"')[1].split('id="tab-prompts"')[0]
+    assert "openMemoryEditor(" in memory and "deleteMemoryEntry(" in memory
+    assert "<th>Owner</th>" in memory, "who may change an entry has to be visible"
+    assert "shipped with the demo" in memory, "a seeded entry must say that it is one"
+    assert 'id="modal-memory-edit"' in body
+
+    # The tab says what the bank is; the live test had to ask whether it was the local USMC.
+    assert "It lives in this app only" in memory
+
+    # Editing must not read as rewriting evidence.
+    assert "not rewrite the gate ledger" in body

@@ -961,7 +961,9 @@
       <div class="section-head">
         <div>
           <h3>Memory bank</h3>
-          <p>Curated facts, lessons and policies the agents retrieve from, plus the retrieval corpus behind them.</p>
+          <p>The fleet's own curated memory: facts, lessons and policies agents retrieve from and
+             inject into their prompts before they act. It lives in this app only - nothing here
+             is read from or written to anything outside it.</p>
         </div>
         <button class="btn btn-primary" onclick="toggleModal('modal-memory')">
           <svg class="icon"><use href="#i-plus"/></svg> Store an entry
@@ -970,13 +972,26 @@
       <div class="card">
         <div class="table-wrap">
           <table class="data-table">
-            <thead><tr><th>Category</th><th>Key</th><th>Content</th></tr></thead>
+            <thead><tr><th>Category</th><th>Key</th><th>Content</th><th>Owner</th><th>Action</th></tr></thead>
             <tbody>
               {% for m in memories %}
               <tr>
                 <td><span class="badge-status badge-purple">{{ m.category }}</span></td>
                 <td><code>{{ m.key }}</code></td>
                 <td>{{ m.content }}</td>
+                <td class="item-meta numeric">
+                  {{ m.owner }}
+                  {% if m.metadata.get('seed') %}<div class="item-meta">shipped with the demo</div>{% endif %}
+                  {% if m.metadata.get('edited_by') %}<div class="item-meta">edited, no longer re-seeded</div>{% endif %}
+                </td>
+                <td>
+                  <div class="item-actions" style="margin: 0">
+                    <button class="btn btn-sm"
+                            onclick='openMemoryEditor({{ m.key|tojson }}, {{ m.category|tojson }}, {{ m.content|tojson }}, {{ (m.metadata.get("seed") or false)|tojson }})'>Edit</button>
+                    <button class="btn btn-sm btn-reject"
+                            onclick='deleteMemoryEntry({{ m.key|tojson }}, {{ (m.metadata.get("seed") or false)|tojson }})'>Delete</button>
+                  </div>
+                </td>
               </tr>
               {% endfor %}
             </tbody>
@@ -2180,6 +2195,53 @@
         <div class="form-actions">
           <button type="button" class="btn" onclick="toggleModal('modal-ticket')">Cancel</button>
           <button type="submit" class="btn btn-primary">Create ticket</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-memory-edit" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Edit a memory entry</h3>
+        <button class="btn btn-sm btn-icon" onclick="toggleModal('modal-memory-edit')" aria-label="Close">
+          <svg class="icon"><use href="#i-close"/></svg>
+        </button>
+      </div>
+      <p class="item-desc" style="margin: 0 0 var(--s-3)">
+        Agents read this before they act, so a correction here changes what they do next. It does
+        not rewrite the gate ledger: a span records which tool an agent called, never the text it
+        retrieved, so what already happened stays as it was recorded.
+      </p>
+      <p id="memory-edit-seed-note" class="item-desc" style="display: none; margin: 0 0 var(--s-3); color: var(--warn)">
+        This entry shipped with the demo. Once you change it, the startup seeding stops restoring
+        it - your version stands.
+      </p>
+      <form onsubmit="submitMemoryEdit(event)">
+        <div class="form-group">
+          <label>Key</label>
+          <input type="text" id="memory-edit-key" class="text-input" disabled>
+          <p class="item-desc" style="margin: var(--s-1) 0 0">
+            The key is the entry's identity and the handle agents retrieve it by, so it does not
+            change here. To rename one, store a new entry and delete this one.
+          </p>
+        </div>
+        <div class="form-group">
+          <label>Category</label>
+          <select id="memory-edit-category" class="select-input">
+            <option value="fact">Fact</option>
+            <option value="lesson">Lesson</option>
+            <option value="entity">Entity</option>
+            <option value="policy">Policy</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Content</label>
+          <textarea id="memory-edit-content" class="textarea-input" required></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn" onclick="toggleModal('modal-memory-edit')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save changes</button>
         </div>
       </form>
     </div>

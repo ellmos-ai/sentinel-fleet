@@ -104,3 +104,26 @@ class TemplatePermissionError(SentinelFleetError):
             f"('{owner}') may delete it. A shared template can only be removed from your own view.",
             {"template_id": template_id, "requested_by": requested_by, "owner": owner}
         )
+
+
+class MemoryEntryNotFoundError(SentinelFleetError):
+    """Raised when an edit or delete names a memory key the bank does not hold."""
+    def __init__(self, key: str):
+        super().__init__(
+            f"Memory entry '{key}' does not exist.",
+            {"key": key}
+        )
+
+
+class MemoryPermissionError(SentinelFleetError):
+    """Raised when someone edits or deletes another operator's memory entry.
+
+    Mirrors TemplatePermissionError: the owner decides. Seeded entries are the deliberate
+    exception - they belong to the deployment rather than to a person, so anyone may curate
+    them; see MemoryBank.
+    """
+    def __init__(self, key: str, requested_by: str, owner: str):
+        super().__init__(
+            f"'{requested_by}' cannot change memory entry '{key}': it belongs to '{owner}'.",
+            {"key": key, "requested_by": requested_by, "owner": owner}
+        )
