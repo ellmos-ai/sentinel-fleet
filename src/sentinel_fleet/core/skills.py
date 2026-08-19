@@ -118,12 +118,26 @@ class ComponentV1SkillLoader:
 class SkillRegistry:
     def __init__(self, skills_dir: Optional[str] = None):
         self._skills: Dict[str, AgentSkill] = {}
-        # Locate canonical skills directory
+        # Locate the canonical skills directory. The source-tree-relative path only works for
+        # editable installs and checkouts; a container built with a plain `pip install .` runs
+        # this file from site-packages, where `../../../skills` points into the interpreter
+        # tree and silently misses all 32 bundled skills (found live on Cloud Run: the console
+        # showed the 3 fallback seeds instead). Hence the candidate chain, first hit wins:
+        # explicit arg > SENTINEL_SKILLS_DIR env > source-tree-relative > <cwd>/skills (the
+        # Dockerfile copies the repo to the workdir, so the bundled skills live there even
+        # when the package itself was installed into site-packages).
         if skills_dir:
             self._skills_dir = skills_dir
         else:
             repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-            self._skills_dir = os.path.join(repo_root, "skills")
+            candidates = [
+                os.environ.get("SENTINEL_SKILLS_DIR", ""),
+                os.path.join(repo_root, "skills"),
+                os.path.join(os.getcwd(), "skills"),
+            ]
+            self._skills_dir = next(
+                (c for c in candidates if c and os.path.isdir(c)), candidates[1]
+            )
 
         self.reload_skills()
 
@@ -134,6 +148,14 @@ class SkillRegistry:
             for s in discovered:
                 self._skills[s.skill_id] = s
         else:
+            # Loud, not silent: falling back to 3 seeds means the deployment lost its bundled
+            # skill library - exactly the failure mode that hid the Cloud Run path bug.
+            import logging
+            logging.getLogger(__name__).warning(
+                "No component-v1 skills found under %s - falling back to %d built-in seed "
+                "skills. Set SENTINEL_SKILLS_DIR if the bundled skills/ directory lives "
+                "elsewhere.", self._skills_dir, 3
+            )
             self._seed_default_skills()
 
     def _seed_default_skills(self):
