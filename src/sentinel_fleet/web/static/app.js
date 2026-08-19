@@ -39,6 +39,10 @@ document.addEventListener("DOMContentLoaded", () => {
     loadSessions();
   }
 
+  // A scenario run reloads the page; its outcome has to survive that or the run looks like
+  // nothing happened.
+  restoreScenarioBand();
+
   const input = document.getElementById("chat-input");
   if (input) {
     // Enter sends, shift+Enter keeps writing - the convention everywhere else in a chat.
@@ -717,8 +721,133 @@ function updateExtractionModeBadge(mode) {
   badge.title = entry.title;
 }
 
+// ---------------------------------------------------------------------------
+// The scenario band. A run finishes in about a second and then reloads the page, so without
+// this the console looked untouched and the operator could not tell what the run had decided
+// or where the consequence had landed. Nothing new is persisted server-side: the outcome is
+// built from the response already returned and handed across the reload in sessionStorage.
+// ---------------------------------------------------------------------------
+
+const SCENARIO_BAND_KEY = "sentinel_scenario_result";
+
+const SCENARIO_STAGES = "guardrail scan, gateway, extraction, § 14 UStG audit";
+
+function scenarioBand() {
+  return document.getElementById("scenario-band");
+}
+
+function showScenarioRunning(label) {
+  const band = scenarioBand();
+  if (!band) return;
+  band.className = "scenario-band is-running";
+  band.style.display = "flex";
+  band.replaceChildren();
+
+  const spinner = document.createElement("span");
+  spinner.className = "spinner";
+
+  const text = document.createElement("div");
+  const head = document.createElement("b");
+  head.textContent = `Running ${label}`;
+  const detail = document.createElement("span");
+  detail.textContent = ` ${SCENARIO_STAGES}, then a booking or a correction letter.`;
+  text.append(head, detail);
+
+  band.append(spinner, text);
+}
+
+function renderScenarioBand(result) {
+  const band = scenarioBand();
+  if (!band || !result) return;
+  band.className = `scenario-band tone-${result.tone || "ok"}`;
+  band.style.display = "flex";
+  band.replaceChildren();
+
+  const mark = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  mark.setAttribute("class", "icon");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", result.tone === "danger" ? "#i-alert" : "#i-check");
+  mark.appendChild(use);
+
+  const text = document.createElement("div");
+  const head = document.createElement("b");
+  head.textContent = result.headline;
+  const detail = document.createElement("span");
+  detail.textContent = ` ${result.detail}`;
+  text.append(head, detail);
+
+  band.append(mark, text);
+
+  if (result.tab) {
+    const jump = document.createElement("button");
+    jump.className = "btn btn-sm";
+    jump.onclick = () => switchTab(result.tab);
+    const label = document.createElement("span");
+    label.textContent = result.tabLabel;
+    const arrow = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    arrow.setAttribute("class", "icon");
+    const arrowUse = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    arrowUse.setAttribute("href", "#i-arrow-right");
+    arrow.appendChild(arrowUse);
+    jump.append(label, arrow);
+    band.appendChild(jump);
+  }
+}
+
+// Read once and clear: the band reports the run the operator just started, not every run since.
+function restoreScenarioBand() {
+  let stored = null;
+  try {
+    stored = sessionStorage.getItem(SCENARIO_BAND_KEY);
+    sessionStorage.removeItem(SCENARIO_BAND_KEY);
+  } catch (err) {
+    return;
+  }
+  if (!stored) return;
+  try {
+    renderScenarioBand(JSON.parse(stored));
+  } catch (err) {
+    // A malformed entry is not worth an error state; the run itself is in the gate ledger.
+  }
+}
+
+function rememberScenarioResult(result) {
+  try {
+    sessionStorage.setItem(SCENARIO_BAND_KEY, JSON.stringify(result));
+  } catch (err) {
+    // Private-mode storage refusals must not swallow the run.
+  }
+}
+
+function summariseScenario(data, label) {
+  const invoice = data.invoice || {};
+  const number = invoice.invoice_number || label;
+  const violations = invoice.compliance_violations || [];
+
+  if (invoice.status === "booked") {
+    return {
+      tone: "ok",
+      headline: `Invoice ${number} processed and booked.`,
+      detail: "No § 14 UStG defect, so the reconciler wrote it straight into the ledger store.",
+      tab: "tab-telemetry",
+      tabLabel: "See every call in Telemetry"
+    };
+  }
+
+  return {
+    tone: "warn",
+    headline: `Invoice ${number} processed, § 14 UStG defect found.`,
+    detail: violations.length
+      ? `${violations.join(", ")}. The correction letter is drafted and waiting for your approval.`
+      : "The correction letter is drafted and waiting for your approval.",
+    tab: "tab-tickets",
+    tabLabel: "Open Approvals"
+  };
+}
+
 async function dispatchInvoiceProcessing(formData, label) {
   setProcessStatus(`Dispatching ${label}`, "badge-warn");
+  showScenarioRunning(label);
 
   try {
     const res = await fetch("/api/omniledger/process", { method: "POST", body: formData });
@@ -726,13 +855,29 @@ async function dispatchInvoiceProcessing(formData, label) {
     if (res.ok) {
       updateExtractionModeBadge(data.extraction_mode);
       setProcessStatus(`${data.invoice.status} / ${data.extraction_mode}`, "badge-ok");
+      rememberScenarioResult(summariseScenario(data, label));
       setTimeout(() => location.reload(), 1200);
     } else {
       setProcessStatus(data.reason || "Blocked by Model Armor", "badge-danger");
+      rememberScenarioResult({
+        tone: "danger",
+        headline: `${label} stopped before extraction.`,
+        detail: `${data.reason || "Model Armor refused the document"}. The agent that touched it `
+          + `is quarantined until you release it.`,
+        tab: "tab-fleet",
+        tabLabel: "Open Fleet"
+      });
       setTimeout(() => location.reload(), 1800);
     }
   } catch (err) {
     setProcessStatus(err.message, "badge-danger");
+    renderScenarioBand({
+      tone: "danger",
+      headline: "The run did not reach the fleet.",
+      detail: err.message,
+      tab: "",
+      tabLabel: ""
+    });
   }
 }
 

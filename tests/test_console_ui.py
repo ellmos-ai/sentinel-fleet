@@ -311,3 +311,32 @@ async def test_the_tab_rail_is_split_into_work_and_reference():
     # switchTab derives the button id from the pane id, so a rename here breaks every tab.
     for tab in order:
         assert f"switchTab('{tab}')" in rail
+
+
+@pytest.mark.asyncio
+async def test_a_scenario_run_reports_what_it_decided():
+    """The run reloads the page after about a second, which read as nothing having happened."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert 'id="scenario-band"' in body, "the overview needs somewhere to report a run"
+
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert "showScenarioRunning(" in script, "the run needs a visible in-flight state"
+    assert "restoreScenarioBand()" in script, "the outcome has to survive the reload"
+    assert "SCENARIO_BAND_KEY" in script and "sessionStorage" in script, \
+        "the outcome crosses the reload client-side; nothing new is persisted server-side"
+    # Each outcome names the tab that now holds the consequence.
+    for tab in ("tab-tickets", "tab-fleet", "tab-telemetry"):
+        assert f'"{tab}"' in script, f"no scenario outcome leads to {tab}"
+
+
+def test_the_scenario_band_reads_the_response_that_already_exists():
+    """The summary must come from the process response, not from a second request or a store."""
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    summary = script.split("function summariseScenario(")[1].split("\nasync function")[0]
+    assert "invoice.compliance_violations" in summary
+    assert "invoice.invoice_number" in summary
+    assert 'invoice.status === "booked"' in summary
+    assert "fetch(" not in summary, "the band must not make a request of its own"

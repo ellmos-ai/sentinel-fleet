@@ -860,6 +860,37 @@ a { color: var(--accent); }
 
 .table-wrap { overflow-x: auto; }
 
+/* ---------- Scenario band ---------- */
+
+/* What the run decided and where the consequence landed. Tone follows the verdict, using the
+   same three colours the badges do, so a warn band and a warn badge mean the same thing. */
+.scenario-band {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--rule-strong);
+  border-radius: var(--r-1);
+  background: var(--surface);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.scenario-band b { display: block; }
+.scenario-band > div { flex: 1 1 auto; }
+.scenario-band .btn { flex: 0 0 auto; white-space: nowrap; }
+.scenario-band .spinner { flex: 0 0 auto; }
+
+.scenario-band.is-running { border-left-color: var(--accent); background: var(--accent-wash); }
+.scenario-band.tone-ok { border-left-color: var(--ok); background: var(--ok-wash); }
+.scenario-band.tone-ok .icon { color: var(--ok); }
+.scenario-band.tone-warn { border-left-color: var(--warn); background: var(--warn-wash); }
+.scenario-band.tone-warn .icon { color: var(--warn); }
+.scenario-band.tone-danger { border-left-color: var(--danger); background: var(--danger-wash); }
+.scenario-band.tone-danger .icon { color: var(--danger); }
+
 /* ---------- Trigger grid (demo scenarios) ---------- */
 
 .trigger-grid {

@@ -80,6 +80,11 @@
 
     <!-- OVERVIEW -->
     <section id="tab-overview" class="tab-pane">
+      <!-- A run takes a bit over a second and then reloads the page, which read as nothing
+           having happened. The band narrates the run while it is in flight and states its
+           outcome afterwards, carried across the reload in sessionStorage. -->
+      <div id="scenario-band" class="scenario-band" style="display: none;"></div>
+
       <div class="card" style="margin-bottom: var(--s-4)">
         <div class="card-header">
           <h3><svg class="icon"><use href="#i-upload"/></svg> Run a document through the fleet</h3>
