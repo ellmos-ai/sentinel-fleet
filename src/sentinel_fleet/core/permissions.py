@@ -17,6 +17,22 @@ class PermissionRule(BaseModel):
     reason: str = ""
 
 
+# What a tool with no matching rule gets. Named so the governance board can show which cells
+# rest on an explicit rule and which only inherit this fall-through - several tools that agents
+# really carry (create_task, dispatch_swarm, verify_receipts, ...) have no rule of their own.
+DEFAULT_ACTION = PermissionAction.ALLOW
+DEFAULT_REASON = "No rule matches this tool name; the registry's fall-through applies."
+
+
+class PermissionVerdict(BaseModel):
+    """Why a tool got the action it got - the rule that matched, or the default."""
+    tool_name: str
+    action: PermissionAction
+    source: str = "rule"          # "rule" | "default"
+    reason: str = ""
+    matched_pattern: Optional[str] = None
+
+
 class PermissionRegistry:
     def __init__(self):
         self.rules: List[PermissionRule] = [
@@ -45,10 +61,27 @@ class PermissionRegistry:
 
     def evaluate(self, tool_name: str) -> PermissionAction:
         """Evaluate permission for a specific tool."""
+        return self.explain(tool_name).action
+
+    def explain(self, tool_name: str) -> PermissionVerdict:
+        """The same decision `evaluate()` makes, plus what it rests on.
+
+        One matching implementation for both: a board that re-derived the match would be free to
+        disagree with the gateway, which is the one thing a governance view must never do.
+        """
         for rule in self.rules:
-            if rule.tool_pattern == tool_name or rule.tool_pattern == "*":
-                return rule.action
-            if rule.tool_pattern.endswith("*") and tool_name.startswith(rule.tool_pattern[:-1]):
-                return rule.action
-        # Default policy: allow standard internal tools, ask for unknown
-        return PermissionAction.ALLOW
+            matched = (
+                rule.tool_pattern in (tool_name, "*")
+                or (rule.tool_pattern.endswith("*") and tool_name.startswith(rule.tool_pattern[:-1]))
+            )
+            if matched:
+                return PermissionVerdict(
+                    tool_name=tool_name,
+                    action=rule.action,
+                    source="rule",
+                    reason=rule.reason,
+                    matched_pattern=rule.tool_pattern
+                )
+        return PermissionVerdict(
+            tool_name=tool_name, action=DEFAULT_ACTION, source="default", reason=DEFAULT_REASON
+        )

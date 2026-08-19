@@ -18,6 +18,7 @@ from pydantic import ValidationError as PydanticValidationError
 from sentinel_fleet.chat import export as chat_export
 from sentinel_fleet.chat.backends import SUPPORTED_MODELS
 from sentinel_fleet.chat.service import chat_service
+from sentinel_fleet.web import governance
 from sentinel_fleet.web.blueprint_graph import build_circuit
 from sentinel_fleet.core.config import settings
 from sentinel_fleet.core.identity import AgentStatus
@@ -377,7 +378,10 @@ async def index_view(request: Request, viewer: str = "operator"):
             "dsgvo_audit": privacy_contact_hub.run_dsgvo_retention_audit(),
             "invoices": list(processed_invoices.values()),
             "booked_invoices": ledger_reconciler.list_booked(),
-            "spans": telemetry.get_recent_spans()
+            "spans": telemetry.get_recent_spans(),
+            # Recomputed on every render from the live registers, like every other derived view
+            # on this page - the board has no store of its own (see web/governance.py).
+            "governance": governance.build_board()
         }
     )
 
@@ -452,6 +456,27 @@ async def api_get_telemetry_status():
         "retention_limit": telemetry.spans.maxlen,
         "last_exported_spans": list(exported[-10:])
     }
+
+
+# ---------------------------------------------------------
+# Governance board - a read federation, never a store (see web/governance.py)
+# ---------------------------------------------------------
+
+@app.get("/api/governance/board")
+async def api_governance_board():
+    """Policies, verdicts, locks, plans and approvals in one aggregated read.
+
+    The same object the Governance tab renders from, exposed as JSON so an auditor can take the
+    board's numbers away and check them against the registers themselves. Read-only by
+    construction: this module writes to nothing.
+    """
+    return governance.build_board()
+
+
+@app.get("/api/governance/permissions")
+async def api_governance_permissions():
+    """Just the agent × tool matrix, for a caller that wants the scope map on its own."""
+    return governance.permission_matrix(lifecycle_manager.list_fleet(), gateway.permissions)
 
 
 @app.get("/api/memory")
