@@ -329,8 +329,8 @@ async def test_a_scenario_run_reports_what_it_decided():
 
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
     assert "showScenarioRunning(" in script, "the run needs a visible in-flight state"
-    assert "restoreScenarioBand()" in script, "the outcome has to survive the reload"
-    assert "SCENARIO_BAND_KEY" in script and "sessionStorage" in script, \
+    assert "restoreBands()" in script, "the outcome has to survive the reload"
+    assert "BAND_KEY_PREFIX" in script and "sessionStorage" in script, \
         "the outcome crosses the reload client-side; nothing new is persisted server-side"
     # Each outcome names the tab that now holds the consequence.
     for tab in ("tab-tickets", "tab-fleet", "tab-telemetry"):
@@ -549,3 +549,58 @@ def test_the_row_overflow_menu_cannot_be_clipped_away():
     menu = css.split(".row-more-menu {")[1].split("}")[0]
     assert "position: absolute" not in menu, \
         "the overflow menu must stay in flow inside the scrolling table"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_run_tells_the_operator_where_the_lock_is():
+    """The live test hit a quarantine and reported "I could not find the quarantine anywhere"."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert 'id="fleet-band"' in body, "a dispatched or refused run needs somewhere to report"
+
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    enqueue = script.split("async function enqueueTaskTemplate(")[1].split("\n}")[0]
+    assert "res.status === 403" in enqueue, "a gateway refusal must be told apart from an error"
+    assert '"fleet-directory"' in enqueue, "the refusal has to point at where the agent is released"
+    assert "runTemplateAgain" in script, "a failed run needs a way to be tried again"
+
+
+@pytest.mark.asyncio
+async def test_the_approvals_tab_points_at_a_quarantine_it_cannot_release():
+    """The operator looked for the quarantine under Approvals, which is where things wait for a
+    person. It is not where an agent is unlocked, so the tab says so and carries the jump."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # No agent is quarantined yet, so the card must not be there at all.
+        clean = (await client.get("/")).text
+        assert "Blocked by Model Armor" not in clean.split('id="tab-tickets"')[1].split("</section>")[0]
+
+        from sentinel_fleet.conductor.lifecycle import lifecycle_manager
+        from sentinel_fleet.core.identity import AgentStatus
+        lifecycle_manager.update_agent_status(
+            "agent:system-auditor", AgentStatus.QUARANTINED, reason="Model Armor: console test"
+        )
+        try:
+            body = (await client.get("/")).text
+        finally:
+            lifecycle_manager.update_agent_status("agent:system-auditor", AgentStatus.IDLE)
+
+    approvals = body.split('id="tab-tickets"')[1].split('id="tab-memory"')[0]
+    assert "Blocked by Model Armor" in approvals
+    assert "Model Armor: console test" in approvals, "the card must carry the reason"
+    assert "jumpToSection('fleet-directory')" in approvals, "it has to lead to where the release is"
+    # The queue itself has to separate the two things that share it.
+    assert "Two things share this queue." in approvals
+    assert "queue a one-off task or run a template in Fleet" in approvals
+
+
+@pytest.mark.asyncio
+async def test_the_new_ticket_dialog_says_what_a_ticket_is():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert "A manual entry in the approval queue" in body
+    assert "To give an agent work instead" in body

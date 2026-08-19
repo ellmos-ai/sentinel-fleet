@@ -21,7 +21,12 @@ from sentinel_fleet.chat.service import chat_service
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.core import chain_runner
 from sentinel_fleet.core.config import settings
-from sentinel_fleet.core.errors import TemplateHasBindingsError, TemplateNotFoundError
+from sentinel_fleet.core.errors import (
+    QuarantineLockError,
+    SecurityViolationError,
+    TemplateHasBindingsError,
+    TemplateNotFoundError,
+)
 from sentinel_fleet.core.gateway import gateway
 from sentinel_fleet.core.run_log import run_log_bus
 from sentinel_fleet.core.schedule_math import next_after
@@ -281,6 +286,23 @@ async def _execute_template_call(system_prompt: str, user_message: str, model: s
     )
 
 
+def _settle_refused_run(task: TaskRecord, exc: Exception) -> None:
+    """Close out a run the gateway refused by raising.
+
+    A quarantine lock or a scope violation leaves `gateway.execute_tool_call()` as an exception,
+    by design - a security verdict is a refusal, not a result object. But the task was already
+    moved to IN_PROGRESS before the call, and nothing settled it afterwards, so the record sat
+    at IN_PROGRESS for ever: the console showed a run in flight with nothing behind it, and
+    releasing the agent did not change that (measured 2026-08-19, reproducing the operator
+    report "it says in progress, but nothing is happening"). The refusal still propagates to
+    the HTTP layer, which answers 403 as before; only the run's own state is settled first.
+    """
+    message = getattr(exc, "message", str(exc))
+    run_log_bus.emit(task.task_id, f"refused by the gateway - {message}")
+    run_log_bus.close(task.task_id)
+    task_master.update_task_state(task.task_id, TaskState.FAILED, error=message)
+
+
 async def enqueue_template(
     template_id: str,
     triggered_by: str = "manual",
@@ -350,8 +372,13 @@ async def enqueue_template(
     if len(template.steps) > 1:
         run_log_bus.emit(task.task_id, f"multi-step template ({len(template.steps)} steps) - delegating to chain runner")
         # Not closed here - chain_runner.run_chain() closes the bus itself on every one of its
-        # own terminal returns (see its docstring).
-        return await chain_runner.run_chain(template, task)
+        # own terminal returns (see its docstring). A raised gateway refusal is the exception:
+        # it leaves through neither of those returns, so the run is settled here instead.
+        try:
+            return await chain_runner.run_chain(template, task)
+        except (QuarantineLockError, SecurityViolationError) as exc:
+            _settle_refused_run(task, exc)
+            raise
 
     agent = lifecycle_manager.get_agent(template.assigned_agent)
     if agent is None:
@@ -365,17 +392,21 @@ async def enqueue_template(
     run_log_bus.emit(
         task.task_id, f"step 1/1 via {template.assigned_agent}, model {settings.gemini_default_model} - started"
     )
-    result = await gateway.execute_tool_call(
-        agent=agent,
-        tool_name=EXECUTE_TEMPLATE_TOOL,
-        tool_args={
-            "system_prompt": system_prompt,
-            "user_message": user_message,
-            "model": settings.gemini_default_model,
-            "config_digest": "\n".join(digest)
-        },
-        tool_func=_execute_template_call
-    )
+    try:
+        result = await gateway.execute_tool_call(
+            agent=agent,
+            tool_name=EXECUTE_TEMPLATE_TOOL,
+            tool_args={
+                "system_prompt": system_prompt,
+                "user_message": user_message,
+                "model": settings.gemini_default_model,
+                "config_digest": "\n".join(digest)
+            },
+            tool_func=_execute_template_call
+        )
+    except (QuarantineLockError, SecurityViolationError) as exc:
+        _settle_refused_run(task, exc)
+        raise
 
     if not result.success:
         run_log_bus.emit(task.task_id, f"step 1/1: failed - {result.error}")

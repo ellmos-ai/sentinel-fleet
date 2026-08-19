@@ -594,6 +594,11 @@
         <button class="btn-inline" onclick="jumpToSection('fleet-directory')">Fleet directory</button>
       </nav>
 
+      <!-- Reports what a dispatched run did, including a refusal by the gateway - which used to
+           leave only a toast, so an operator whose run was stopped never learned that an agent
+           had been locked, let alone where to unlock it. -->
+      <div id="fleet-band" class="scenario-band" style="display: none;"></div>
+
       <div id="fleet-tasks" class="card" style="margin-bottom: var(--s-5)">
         <div class="card-header">
           <h3>Tasks</h3>
@@ -767,7 +772,14 @@
                 </td>
                 <td>
                   {% if t.source_template_id %}
-                  <button class="btn btn-sm" onclick='openConsoleModal({{ t.task_id|tojson }}, {{ t.name|tojson }})'>View run</button>
+                  <div class="item-actions" style="margin: 0">
+                    <button class="btn btn-sm" onclick='openConsoleModal({{ t.task_id|tojson }}, {{ t.name|tojson }})'>View run</button>
+                    {% if t.state.value == 'failed' %}
+                    <!-- A refused run is not re-dispatched by releasing the agent; this is where
+                         the operator decides to give it another try. -->
+                    <button class="btn btn-sm" onclick='runTemplateAgain({{ t.source_template_id|tojson }})'>Run again</button>
+                    {% endif %}
+                  </div>
                   {% else %}
                   <span class="item-meta" title="Queued directly, without a template - never runs, so it has no run log">-</span>
                   {% endif %}
@@ -823,15 +835,57 @@
           <h3>Approval gate</h3>
           <p>These actions have external effect. The gateway parked each of them here rather than carrying it out.</p>
         </div>
-        <button class="btn btn-primary" onclick="toggleModal('modal-ticket')">
+        <button class="btn btn-primary" onclick="toggleModal('modal-ticket')"
+                title="File something that needs a human decision. Not a way to give an agent work - for that, use Fleet.">
           <svg class="icon"><use href="#i-plus"/></svg> New ticket
         </button>
       </div>
+      <!-- The live test looked for the quarantine here, which is reasonable: this is where
+           things wait for a person. It is not where an agent is unlocked, so this card says so
+           and takes you there. Read-only federation - it holds no state of its own and appears
+           only while something is actually locked. -->
+      {% set quarantined_agents = agents|selectattr('status.value', 'equalto', 'quarantined')|list %}
+      {% if quarantined_agents %}
+      <div class="card" style="margin-bottom: var(--s-4); border-left: 3px solid var(--danger)">
+        <div class="card-header">
+          <h3><svg class="icon"><use href="#i-ban"/></svg> Blocked by Model Armor</h3>
+          <span class="badge-status badge-danger numeric">{{ quarantined_agents|length }} locked</span>
+        </div>
+        <p class="card-note">
+          These identities are locked and cannot run anything. This is not an approval you can
+          give here - an agent is released in the Fleet directory.
+        </p>
+        <div class="card-body">
+          {% for agent in quarantined_agents %}
+          <div class="record pillar-control is-quarantined">
+            <div class="item-top">
+              <span class="item-title numeric">{{ agent.agent_id }}</span>
+              <span class="badge-status badge-danger">quarantined</span>
+            </div>
+            <div class="item-desc">{{ agent.quarantine_reason or 'No reason recorded.' }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="card-foot">
+          <button class="btn btn-sm card-link" onclick="switchTab('tab-fleet'); jumpToSection('fleet-directory')">
+            <span>Release in the Fleet directory</span>
+            <svg class="icon"><use href="#i-arrow-right"/></svg>
+          </button>
+        </div>
+      </div>
+      {% endif %}
+
       <div class="card">
         <div class="card-header">
           <h3>Queue</h3>
           <span class="badge-status {% if pending_tickets %}badge-warn{% else %}badge-ok{% endif %} numeric">{{ pending_tickets|length }} pending{% if ticket_total > tickets|length %}, latest {{ tickets|length }} of {{ ticket_total }} shown{% endif %}</span>
         </div>
+        <p class="card-note">
+          Two things share this queue. <b>Approvals</b> are concrete actions an agent reached and
+          the gateway stopped, waiting for your go-ahead. <b>Tickets</b> are points raised by the
+          system or by you that need a human decision or a repair. Neither is how you give an
+          agent work - for that, queue a one-off task or run a template in Fleet.
+        </p>
         <div class="card-body">
           {% if not tickets %}
           <div class="empty-state">
@@ -2065,6 +2119,11 @@
           <svg class="icon"><use href="#i-close"/></svg>
         </button>
       </div>
+      <p class="item-desc" style="margin: 0 0 var(--s-3)">
+        A manual entry in the approval queue: something that needs a human decision, filed by you
+        instead of raised by an agent. To give an agent work instead, queue a one-off task or run
+        a template in Fleet.
+      </p>
       <form onsubmit="submitNewTicket(event)">
         <div class="form-group">
           <label>Title</label>

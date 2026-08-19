@@ -446,11 +446,30 @@ async def api_get_fleet():
 
 @app.post("/api/agents/{agent_id}/quarantine/release")
 async def api_release_quarantine(agent_id: str):
+    """Releasing an agent does not re-run what its quarantine stopped, on purpose.
+
+    The agent was locked because something got through that should not have - a prompt
+    injection, or a call outside its scope. Re-dispatching that same work the moment a human
+    unlocks the identity would hand the attempt a second try without anyone deciding to give it
+    one. So the runs stay FAILED and the console offers to run them again; the response names
+    them so the operator learns they exist instead of hunting for them.
+    """
     agent = lifecycle_manager.get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     lifecycle_manager.update_agent_status(agent_id, AgentStatus.IDLE)
-    return {"status": "released", "agent": agent.model_dump()}
+    stopped = [
+        {"task_id": t.task_id, "name": t.name, "source_template_id": t.source_template_id}
+        for t in task_master.list_all()
+        if t.assigned_agent == agent_id
+        and t.state == TaskState.FAILED
+        and "QUARANTINE" in (t.error_message or "").upper()
+    ]
+    return {
+        "status": "released",
+        "agent": agent.model_dump(),
+        "runs_stopped_by_this_quarantine": stopped,
+    }
 
 
 @app.get("/api/telemetry/spans")

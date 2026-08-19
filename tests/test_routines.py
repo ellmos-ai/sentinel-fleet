@@ -413,3 +413,92 @@ async def test_fire_endpoint_stays_open_without_a_configured_token(client, monke
     monkeypatch.delenv("ROUTINES_FIRE_TOKEN", raising=False)
     response = await client.post("/api/routines/fire")
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Quarantine and the truth of a task's state. Reported from the live test: "it says In Progress
+# ... it does not look to me like anything is actually happening". Measured on 2026-08-19: the
+# record really did sit at IN_PROGRESS for ever, and releasing the agent did not touch it.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_run_the_gateway_refuses_does_not_stay_in_progress():
+    from sentinel_fleet.conductor.lifecycle import lifecycle_manager
+    from sentinel_fleet.core.errors import QuarantineLockError
+    from sentinel_fleet.core.identity import AgentStatus
+
+    agent_id = "agent:system-auditor"
+    template = _template(name="Quarantined run", assigned_agent=agent_id)
+    lifecycle_manager.update_agent_status(
+        agent_id, AgentStatus.QUARANTINED, reason="Model Armor: test injection"
+    )
+    try:
+        with pytest.raises(QuarantineLockError):
+            await routines.enqueue_template(template.template_id, triggered_by="manual")
+
+        runs = [t for t in task_master.list_all() if t.source_template_id == template.template_id]
+        assert len(runs) == 1
+        assert runs[0].state is TaskState.FAILED, \
+            "a refused run must not keep claiming to be in progress"
+        assert "QUARANTINE" in (runs[0].error_message or "").upper(), \
+            "the run has to say why it stopped"
+    finally:
+        lifecycle_manager.update_agent_status(agent_id, AgentStatus.IDLE)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_chain_run_is_settled_too(client):
+    """The chain runner reaches the gateway through its own call site, so the single-step fix
+    alone would have left multi-step templates hanging exactly as before."""
+    from sentinel_fleet.conductor.lifecycle import lifecycle_manager
+    from sentinel_fleet.core.errors import QuarantineLockError
+    from sentinel_fleet.core.identity import AgentStatus
+    from sentinel_fleet.uas.task_templates import Step
+
+    agent_id = "agent:system-auditor"
+    template = _template(
+        name="Quarantined chain",
+        assigned_agent=agent_id,
+        steps=[
+            Step(step_id="step-1", position=0, assigned_agent=agent_id, custom_prompt_text="One."),
+            Step(step_id="step-2", position=1, assigned_agent=agent_id, custom_prompt_text="Two."),
+        ],
+    )
+    lifecycle_manager.update_agent_status(agent_id, AgentStatus.QUARANTINED, reason="Model Armor: test")
+    try:
+        with pytest.raises(QuarantineLockError):
+            await routines.enqueue_template(template.template_id, triggered_by="manual")
+        runs = [t for t in task_master.list_all() if t.source_template_id == template.template_id]
+        assert runs and runs[0].state is TaskState.FAILED
+    finally:
+        lifecycle_manager.update_agent_status(agent_id, AgentStatus.IDLE)
+
+
+@pytest.mark.asyncio
+async def test_release_names_the_runs_it_stopped_without_re_running_them(client):
+    """Releasing must not silently re-dispatch: the agent was locked because something got
+    through, and handing that attempt a second try without a human deciding to would be the
+    wrong default. The response names the runs so the operator can decide."""
+    from sentinel_fleet.conductor.lifecycle import lifecycle_manager
+    from sentinel_fleet.core.errors import QuarantineLockError
+    from sentinel_fleet.core.identity import AgentStatus
+
+    agent_id = "agent:system-auditor"
+    template = _template(name="Released run", assigned_agent=agent_id)
+    lifecycle_manager.update_agent_status(agent_id, AgentStatus.QUARANTINED, reason="Model Armor: test")
+    with pytest.raises(QuarantineLockError):
+        await routines.enqueue_template(template.template_id, triggered_by="manual")
+
+    response = await client.post(f"/api/agents/{agent_id}/quarantine/release")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["agent"]["status"] == "idle"
+
+    stopped = payload["runs_stopped_by_this_quarantine"]
+    assert any(row["source_template_id"] == template.template_id for row in stopped), \
+        "the release must name what the quarantine had stopped"
+
+    runs = [t for t in task_master.list_all() if t.source_template_id == template.template_id]
+    assert all(t.state is TaskState.FAILED for t in runs), \
+        "release must not resurrect the run by itself"

@@ -42,9 +42,9 @@ document.addEventListener("DOMContentLoaded", () => {
     updateComposerSetupSummary();
   }
 
-  // A scenario run reloads the page; its outcome has to survive that or the run looks like
+  // An action that reloads the page has to leave its outcome behind, or it looks like
   // nothing happened.
-  restoreScenarioBand();
+  restoreBands();
 
   renderTemplateTable(1);
 
@@ -860,22 +860,22 @@ function updateExtractionModeBadge(mode) {
 }
 
 // ---------------------------------------------------------------------------
-// The scenario band. A run finishes in about a second and then reloads the page, so without
-// this the console looked untouched and the operator could not tell what the run had decided
-// or where the consequence had landed. Nothing new is persisted server-side: the outcome is
+// Bands. A console action often finishes in about a second and then reloads the page, so
+// without this the surface looked untouched and the operator could not tell what had been
+// decided or where the consequence landed. Nothing new is persisted server-side: the outcome is
 // built from the response already returned and handed across the reload in sessionStorage.
+//
+// Two bands use this: the overview's scenario band and the fleet band that reports a dispatched
+// or refused run. A band jumps either to another tab or to a section of the current one.
 // ---------------------------------------------------------------------------
 
-const SCENARIO_BAND_KEY = "sentinel_scenario_result";
+const BAND_KEY_PREFIX = "sentinel_band:";
+const BAND_SLOTS = ["scenario-band", "fleet-band"];
 
 const SCENARIO_STAGES = "guardrail scan, gateway, extraction, § 14 UStG audit";
 
-function scenarioBand() {
-  return document.getElementById("scenario-band");
-}
-
 function showScenarioRunning(label) {
-  const band = scenarioBand();
+  const band = document.getElementById("scenario-band");
   if (!band) return;
   band.className = "scenario-band is-running";
   band.style.display = "flex";
@@ -894,8 +894,17 @@ function showScenarioRunning(label) {
   band.append(spinner, text);
 }
 
-function renderScenarioBand(result) {
-  const band = scenarioBand();
+function arrowIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", "#i-arrow-right");
+  svg.appendChild(use);
+  return svg;
+}
+
+function renderBand(elementId, result) {
+  const band = document.getElementById(elementId);
   if (!band || !result) return;
   band.className = `scenario-band tone-${result.tone || "ok"}`;
   band.style.display = "flex";
@@ -922,36 +931,41 @@ function renderScenarioBand(result) {
     jump.onclick = () => switchTab(result.tab);
     const label = document.createElement("span");
     label.textContent = result.tabLabel;
-    const arrow = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    arrow.setAttribute("class", "icon");
-    const arrowUse = document.createElementNS("http://www.w3.org/2000/svg", "use");
-    arrowUse.setAttribute("href", "#i-arrow-right");
-    arrow.appendChild(arrowUse);
-    jump.append(label, arrow);
+    jump.append(label, arrowIcon());
+    band.appendChild(jump);
+  } else if (result.section) {
+    const jump = document.createElement("button");
+    jump.className = "btn btn-sm";
+    jump.onclick = () => jumpToSection(result.section);
+    const label = document.createElement("span");
+    label.textContent = result.sectionLabel;
+    jump.append(label, arrowIcon());
     band.appendChild(jump);
   }
 }
 
-// Read once and clear: the band reports the run the operator just started, not every run since.
-function restoreScenarioBand() {
-  let stored = null;
-  try {
-    stored = sessionStorage.getItem(SCENARIO_BAND_KEY);
-    sessionStorage.removeItem(SCENARIO_BAND_KEY);
-  } catch (err) {
-    return;
-  }
-  if (!stored) return;
-  try {
-    renderScenarioBand(JSON.parse(stored));
-  } catch (err) {
-    // A malformed entry is not worth an error state; the run itself is in the gate ledger.
-  }
+// Read once and clear: a band reports the action the operator just took, not every one since.
+function restoreBands() {
+  BAND_SLOTS.forEach(slot => {
+    let stored = null;
+    try {
+      stored = sessionStorage.getItem(BAND_KEY_PREFIX + slot);
+      sessionStorage.removeItem(BAND_KEY_PREFIX + slot);
+    } catch (err) {
+      return;
+    }
+    if (!stored) return;
+    try {
+      renderBand(slot, JSON.parse(stored));
+    } catch (err) {
+      // A malformed entry is not worth an error state; the run itself is in the gate ledger.
+    }
+  });
 }
 
-function rememberScenarioResult(result) {
+function rememberBand(slot, result) {
   try {
-    sessionStorage.setItem(SCENARIO_BAND_KEY, JSON.stringify(result));
+    sessionStorage.setItem(BAND_KEY_PREFIX + slot, JSON.stringify(result));
   } catch (err) {
     // Private-mode storage refusals must not swallow the run.
   }
@@ -993,11 +1007,11 @@ async function dispatchInvoiceProcessing(formData, label) {
     if (res.ok) {
       updateExtractionModeBadge(data.extraction_mode);
       setProcessStatus(`${data.invoice.status} / ${data.extraction_mode}`, "badge-ok");
-      rememberScenarioResult(summariseScenario(data, label));
+      rememberBand("scenario-band", summariseScenario(data, label));
       setTimeout(() => location.reload(), 1200);
     } else {
       setProcessStatus(data.reason || "Blocked by Model Armor", "badge-danger");
-      rememberScenarioResult({
+      rememberBand("scenario-band", {
         tone: "danger",
         headline: `${label} stopped before extraction.`,
         detail: `${data.reason || "Model Armor refused the document"}. The agent that touched it `
@@ -1009,7 +1023,7 @@ async function dispatchInvoiceProcessing(formData, label) {
     }
   } catch (err) {
     setProcessStatus(err.message, "badge-danger");
-    renderScenarioBand({
+    renderBand("scenario-band", {
       tone: "danger",
       headline: "The run did not reach the fleet.",
       detail: err.message,
@@ -1171,8 +1185,44 @@ function submitNewTaskTemplate(event) {
   submitFormWithMethod(event, "/api/task-templates", "POST", "Could not create the task template");
 }
 
-function enqueueTaskTemplate(templateId) {
-  postAndReload(`/api/task-templates/${templateId}/enqueue`, { method: "POST" }, "Could not enqueue the template");
+// A run the gateway refuses answers 403 and used to leave only a toast, so an operator whose
+// task was stopped by Model Armor had no idea the agent was now locked, let alone where to
+// unlock it. The band says both and carries the jump.
+async function enqueueTaskTemplate(templateId) {
+  try {
+    const res = await fetch(`/api/task-templates/${templateId}/enqueue`, { method: "POST" });
+    if (res.ok) {
+      rememberBand("fleet-band", {
+        tone: "ok",
+        headline: "Run dispatched.",
+        detail: "It is in the task queue above with its state and its evidence."
+      });
+      location.reload();
+      return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const blocked = res.status === 403;
+    rememberBand("fleet-band", {
+      tone: blocked ? "danger" : "warn",
+      headline: blocked ? "The gateway refused this run." : "The run could not be dispatched.",
+      detail: blocked
+        ? `${data.error || "The agent is locked."} The run is recorded as failed, not left `
+          + "hanging - release the agent in the Fleet directory, then run it again from the queue."
+        : (data.error || data.detail || "No reason was returned."),
+      section: blocked ? "fleet-directory" : "",
+      sectionLabel: blocked ? "Go to the Fleet directory" : ""
+    });
+    location.reload();
+  } catch (err) {
+    showToast(err.message || "Could not enqueue the template");
+  }
+}
+
+// Releasing an agent deliberately does not re-dispatch what its quarantine stopped; this is
+// how the operator gives that decision after the fact.
+function runTemplateAgain(templateId) {
+  enqueueTaskTemplate(templateId);
 }
 
 function deleteTaskTemplate(templateId, owner) {
