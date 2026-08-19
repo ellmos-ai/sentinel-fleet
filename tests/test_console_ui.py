@@ -256,3 +256,35 @@ def test_the_hint_is_bound_to_the_web_reading_skill_id():
     assert 'WEB_READING_SKILL_ID = "skill:google-web-reading"' in script
     assert skill_registry.get_skill("skill:google-web-reading") is not None, \
         "app.js points the hint at a skill id the registry does not know"
+
+
+@pytest.mark.asyncio
+async def test_the_console_says_what_it_is_before_it_shows_anything():
+    """A first-time reader met an empty evidence book for something they had not done yet."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+        blueprint = (await client.get("/blueprint")).text
+
+    assert "masthead-note" in body
+    assert "Agents do the document work" in body
+    assert "waits for your approval" in body
+    # The masthead is shared; the sentence describes the console, so it must not leak.
+    assert "masthead-note" not in blueprint, "the console's explainer must not render on /blueprint"
+
+
+@pytest.mark.asyncio
+async def test_the_scenarios_come_before_their_evidence():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    overview = body.split('id="tab-overview"')[1].split('id="tab-chat"')[0]
+    assert overview.index("trigger-grid") < overview.index('class="ledger"'), \
+        "the gate ledger must follow the scenarios that fill it"
+    # Both surfaces point at each other; a move that leaves the wording behind is worse than
+    # no wording at all. The ledger's own pointer only renders while it is empty, so it is
+    # checked in the template rather than in a page whose store other tests have already filled.
+    assert "lands in the gate ledger below" in overview
+    template = (TEMPLATE_DIR / "index.html").read_text(encoding="utf-8")
+    assert "Run a scenario above" in template

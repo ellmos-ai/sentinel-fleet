@@ -231,6 +231,17 @@ a { color: var(--accent); }
   margin-left: var(--s-1);
 }
 
+/* The one sentence a first-time reader needs before anything else on the page means something.
+   It sits inside the sticky masthead so it survives scrolling past the fold. */
+.masthead-note {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 var(--s-5) var(--s-3);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
 .masthead-tools {
   display: flex;
   align-items: center;

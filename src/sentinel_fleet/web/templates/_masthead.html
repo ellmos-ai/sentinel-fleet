@@ -1,4 +1,7 @@
-{# Shared masthead. `current_view` is set by the including template: "console" or "blueprint". #}
+{# Shared masthead. `current_view` is set by the including template: "console" or "blueprint".
+   `masthead_note` is optional: one sentence saying what this surface is, for a reader who
+   arrived without being told. Only the including template knows what that sentence is, so the
+   partial renders it when it is set and stays silent otherwise. #}
 <header class="masthead">
   <div class="masthead-row">
     <a class="wordmark" href="/">
@@ -20,4 +23,7 @@
       </button>
     </nav>
   </div>
+  {% if masthead_note %}
+  <div class="masthead-note">{{ masthead_note }}</div>
+  {% endif %}
 </header>

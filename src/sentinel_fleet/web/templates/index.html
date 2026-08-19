@@ -11,6 +11,7 @@
   {% include "_icons.html" %}
   {% set current_view = "console" %}
   {% set masthead_role = "operator console" %}
+  {% set masthead_note = "Agents do the document work. Every tool call they make is logged here, and anything with an effect outside the building waits for your approval." %}
   {% include "_masthead.html" %}
 
   <div class="posture">
@@ -72,37 +73,6 @@
 
     <!-- OVERVIEW -->
     <section id="tab-overview" class="tab-pane">
-      <!-- The gate ledger leads the console: nothing runs without a recorded verdict. -->
-    <section class="ledger">
-      <div class="ledger-head">
-        <div class="ledger-title">
-          <h2>Gate ledger</h2>
-          <span class="eyebrow">every tool call, every verdict</span>
-        </div>
-        <span class="badge-status badge-info numeric">{{ spans|length }} spans retained</span>
-      </div>
-      {% if not spans %}
-      <div class="ledger-idle">
-        <svg class="icon"><use href="#i-empty"/></svg>
-        <span>No governed calls yet. Run a scenario below and every tool call lands here with its verdict.</span>
-      </div>
-      {% else %}
-      <div class="ledger-rows">
-        {% for s in spans[:7]|reverse %}
-        <div class="ledger-row">
-          <span class="ledger-time">{{ s.start_time|clock }}</span>
-          <span class="ledger-op">{{ s.name }}</span>
-          <span class="ledger-actor item-meta">{{ s.agent_id }}</span>
-          <span>
-            <span class="badge-status {% if s.status == 'OK' %}badge-ok{% elif s.status in ('BLOCKED', 'DENIED', 'SECURITY_VIOLATION', 'ERROR') %}badge-danger{% else %}badge-warn{% endif %}">{{ s.status }}</span>
-            <span class="ledger-duration">{{ "%.3f"|format((s.end_time or s.start_time) - s.start_time) }}s</span>
-          </span>
-        </div>
-        {% endfor %}
-      </div>
-      {% endif %}
-    </section>
-
       <div class="card" style="margin-bottom: var(--s-4)">
         <div class="card-header">
           <h3><svg class="icon"><use href="#i-upload"/></svg> Run a document through the fleet</h3>
@@ -111,7 +81,7 @@
         <p class="item-desc">
           Pick a scenario below: one click runs the entire pipeline end to end — guardrail scan,
           gateway, extraction, § 14 UStG audit, then either a booking or a drafted correction
-          letter held at the approval gate. Every call it makes lands in the gate ledger above.
+          letter held at the approval gate. Every call it makes lands in the gate ledger below.
         </p>
         <div class="trigger-grid">
           <button class="trigger-btn on-valid" onclick="processInvoicePreset('valid')">
@@ -143,6 +113,38 @@
           </button>
         </div>
       </div>
+
+      <!-- The ledger follows the scenarios rather than leading them: an empty evidence book
+           for something the reader has not done yet was the first thing the console showed. -->
+    <section class="ledger">
+      <div class="ledger-head">
+        <div class="ledger-title">
+          <h2>Gate ledger</h2>
+          <span class="eyebrow">every tool call, every verdict</span>
+        </div>
+        <span class="badge-status badge-info numeric">{{ spans|length }} spans retained</span>
+      </div>
+      {% if not spans %}
+      <div class="ledger-idle">
+        <svg class="icon"><use href="#i-empty"/></svg>
+        <span>No governed calls yet. Run a scenario above and every tool call lands here with its verdict.</span>
+      </div>
+      {% else %}
+      <div class="ledger-rows">
+        {% for s in spans[:7]|reverse %}
+        <div class="ledger-row">
+          <span class="ledger-time">{{ s.start_time|clock }}</span>
+          <span class="ledger-op">{{ s.name }}</span>
+          <span class="ledger-actor item-meta">{{ s.agent_id }}</span>
+          <span>
+            <span class="badge-status {% if s.status == 'OK' %}badge-ok{% elif s.status in ('BLOCKED', 'DENIED', 'SECURITY_VIOLATION', 'ERROR') %}badge-danger{% else %}badge-warn{% endif %}">{{ s.status }}</span>
+            <span class="ledger-duration">{{ "%.3f"|format((s.end_time or s.start_time) - s.start_time) }}s</span>
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
 
       <div class="grid">
         <div class="card">
