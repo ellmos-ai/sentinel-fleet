@@ -52,6 +52,9 @@ class SovereignGateway:
         agent_lock = await self._get_agent_lock(agent.agent_id)
 
         async with agent_lock:
+            # Everything below runs "under" this span, including the tool body: a domain module
+            # can record its own verdict on this row via telemetry.record_on_active_span().
+            span_token = telemetry.bind_active_span(span)
             try:
                 # 1. Identity & Quarantine Check
                 if agent.status == AgentStatus.QUARANTINED:
@@ -110,6 +113,9 @@ class SovereignGateway:
                 error_msg = str(e)
                 telemetry.end_span(span, status="ERROR", error=error_msg)
                 return GatewayExecutionResult(success=False, error=error_msg)
+
+            finally:
+                telemetry.release_active_span(span_token)
 
 
 gateway = SovereignGateway()

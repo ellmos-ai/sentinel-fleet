@@ -36,6 +36,21 @@ ALLOWED_GERMAN = {
         "vendor_address=",
         "vendor_email=\"rechnung@officesupplies.example\"",
     ),
+    # Patterns that match German *document content*, not UI text. A screen that only recognised
+    # English street syntax would pass a German postal address through unflagged, which is the
+    # opposite of what the pre-model privacy screen is for.
+    "sentinel_fleet/core/privacy_screen.py": (
+        "stra(?:ß|ss)e",
+    ),
+    # Field labels printed on German invoices. The local reader has to match the words that are
+    # actually on the paper; translating them would make it read nothing at all on the very
+    # documents this § 14 UStG domain exists for.
+    "sentinel_fleet/domains/omniledger/local_text.py": (
+        "rechnungs?[-\\s]*",
+        "rechnungsdatum",
+        "rechnungsbetrag",
+        "^(?:invoice|rechnung|bill",
+    ),
     # "RechnungsSteller" is the proper name of the upstream module this engine derives from,
     # listed like the other component names (coma, clutch, law-checker).
     "sentinel_fleet/domains/omniledger/reconciliation.py": (

@@ -593,15 +593,40 @@ function setProcessStatus(text, badgeClass) {
   statusDiv.appendChild(badge);
 }
 
+// One entry per backend the extractor can declare. A two-way "live or demo" split would stamp
+// the local text-layer path green as if a model had read the document, which is the opposite of
+// what that mode says about itself.
+const EXTRACTION_MODE_BADGES = {
+  "gemini-3.5": {
+    cls: "badge-ok",
+    label: "gemini-3.5",
+    title: "Last extraction produced by a live Gemini 3.5 vision call",
+  },
+  "local-text-layer": {
+    cls: "badge-purple",
+    label: "Local text layer",
+    title:
+      "Last extraction read the document's own text layer locally: real values, no model call, " +
+      "no line items. See the extraction notes for what could not be found.",
+  },
+  "deterministic-demo": {
+    cls: "badge-warn",
+    label: "Demo mode",
+    title: "Last extraction served fixed demo data (no live model call, no uploaded document)",
+  },
+};
+
 function updateExtractionModeBadge(mode) {
   const badge = document.getElementById("extraction-mode-badge");
   if (!badge || !mode) return;
-  const isLive = mode !== "deterministic-demo";
-  badge.className = `badge-status ${isLive ? "badge-ok" : "badge-warn"}`;
-  badge.textContent = isLive ? mode : "Demo mode";
-  badge.title = isLive
-    ? `Last extraction produced by ${mode}`
-    : "Last extraction produced by deterministic demo data (no live model call)";
+  const entry = EXTRACTION_MODE_BADGES[mode] || {
+    cls: "badge-warn",
+    label: mode,
+    title: `Last extraction reported an unknown backend: ${mode}`,
+  };
+  badge.className = `badge-status ${entry.cls}`;
+  badge.textContent = entry.label;
+  badge.title = entry.title;
 }
 
 async function dispatchInvoiceProcessing(formData, label) {

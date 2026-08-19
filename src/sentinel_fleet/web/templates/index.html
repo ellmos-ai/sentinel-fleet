@@ -232,6 +232,13 @@
                 Defects: {{ inv.compliance_violations|join(', ') }}
               </div>
               {% endif %}
+              {% if inv.extraction_notes %}
+              <!-- How this document was read and what the reader could not do. A sparse invoice
+                   is only trustworthy if the reasons for the gaps are on the same card. -->
+              <div class="item-meta" style="margin-top: var(--s-1)">
+                Read as <b>{{ inv.extraction_mode.value }}</b>: {{ inv.extraction_notes|join(' / ') }}
+              </div>
+              {% endif %}
             </div>
             {% endfor %}
           </div>

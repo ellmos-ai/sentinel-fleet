@@ -32,6 +32,12 @@ dependencies = [
     # transitively in dev environments - the slim container missed it, every SKILL.md
     # silently failed to parse and Cloud Run served the 3 seed skills instead of 32.
     "pyyaml>=6.0",
+    # Text-layer reading for the local extraction path (domains/omniledger/local_text.py), the
+    # backend that runs when no GEMINI_API_KEY is set or the model call fails. Declared for the
+    # same reason pyyaml above had to be: it is present transitively in dev environments, and a
+    # slim container that lacks it would drop back to the demo documents without saying so.
+    # Chosen over Tesseract/OCR on purpose - pure Python, no system binary, no container weight.
+    "pypdf>=4.0",
 ]
 
 [project.optional-dependencies]

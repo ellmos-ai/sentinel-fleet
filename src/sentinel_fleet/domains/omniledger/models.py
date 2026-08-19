@@ -17,6 +17,9 @@ class InvoiceStatus(str, Enum):
 class ExtractionMode(str, Enum):
     """Declares which backend produced an extraction. Never claim a live model for demo data."""
     GEMINI = "gemini-3.5"
+    # Read locally out of the document's own text layer - real values, but only what the text
+    # states: no vision, no OCR, no line items.
+    LOCAL_TEXT_LAYER = "local-text-layer"
     DETERMINISTIC_DEMO = "deterministic-demo"
 
 
@@ -45,6 +48,10 @@ class InvoiceDocument(BaseModel):
     currency: str = "EUR"
     status: InvoiceStatus = InvoiceStatus.RECEIVED
     extraction_mode: ExtractionMode = ExtractionMode.DETERMINISTIC_DEMO
+    # How this document was read and what the reader could not do: the privacy verdict of the
+    # pre-model screen, the backend that read the text layer, the fields it did not find. Free
+    # evidence lines rather than typed flags - nothing here is a state another field derives from.
+    extraction_notes: List[str] = Field(default_factory=list)
     compliance_passed: bool = False
     compliance_violations: List[str] = Field(default_factory=list)
     dispute_email_draft: Optional[str] = None

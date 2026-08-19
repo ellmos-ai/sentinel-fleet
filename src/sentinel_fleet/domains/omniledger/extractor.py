@@ -1,17 +1,33 @@
-"""Multimodal Vision Document Extractor using Gemini 3.5 Flash."""
+"""Multimodal Vision Document Extractor using Gemini 3.5 Flash.
+
+Three backends, in this order of preference and each labelled in the result it produces:
+
+1. **Gemini 3.5 Flash vision** when a key is configured and the call succeeds.
+2. **The document's own text layer**, read locally (`local_text.py`), for real uploads. This is
+   what runs when there is no key or the model call fails - a real document then yields its real
+   values, sparse and annotated, instead of a fabricated stand-in.
+3. **Three fixed demo invoices** for the console's preset buttons, which supply a filename and no
+   document at all. They are the demo scenarios of this deployment, not a fallback for real input.
+
+Before anything leaves for the model, the local text view is screened for sensitive content
+(`core/privacy_screen.py`) and the verdict is written onto the gate-ledger row of the call.
+"""
 
 import os
 import json
 import asyncio
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from sentinel_fleet.domains.omniledger.models import (
     InvoiceDocument,
     InvoiceLineItem,
     InvoiceStatus,
     ExtractionMode
 )
+from sentinel_fleet.domains.omniledger import local_text
 from sentinel_fleet.core.config import settings
+from sentinel_fleet.core.privacy_screen import ScreenLevel, screen_text
+from sentinel_fleet.core.telemetry import telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -66,18 +82,110 @@ class MultimodalExtractor:
         """Extract structured invoice metadata from an uploaded document, raw text or a demo preset."""
         doc_id = f"INV-{os.urandom(4).hex().upper()}"
 
+        # The local text view is read first even when the model is available: it is what the
+        # privacy screen inspects, and the screen has to run before the content travels.
+        local = local_text.extract_text_layer(filename, file_bytes)
+        screen_notes = self._screen_before_dispatch(filename, local, text_content)
+
         if not self.api_key:
-            logger.warning("MOCK MODE: no GEMINI_API_KEY - deterministic demo extraction")
-            return self._deterministic_extract(doc_id, filename, text_content or "")
+            logger.warning("No GEMINI_API_KEY - using the local extraction path")
+            return self._extract_without_model(doc_id, filename, local, text_content, screen_notes)
 
         try:
-            return await self._extract_with_gemini(doc_id, filename, file_bytes, text_content)
+            doc = await self._extract_with_gemini(doc_id, filename, file_bytes, text_content)
+            doc.extraction_notes = screen_notes + doc.extraction_notes
+            return doc
         except Exception as exc:
             logger.warning(
-                "MOCK MODE: Gemini extraction failed (%s: %s) - falling back to deterministic demo extraction",
+                "Gemini extraction failed (%s: %s) - falling back to the local extraction path",
                 type(exc).__name__, exc
             )
-            return self._deterministic_extract(doc_id, filename, text_content or "")
+            notes = screen_notes + [f"Gemini call failed ({type(exc).__name__}); read locally instead"]
+            return self._extract_without_model(doc_id, filename, local, text_content, notes)
+
+    def _screen_before_dispatch(
+        self,
+        filename: str,
+        local: local_text.LocalTextResult,
+        text_content: Optional[str]
+    ) -> List[str]:
+        """Classify the document's content before it can reach a model, and log the verdict.
+
+        The verdict is recorded, not enforced: refusing a call on a regex hit would be a new
+        policy, and policy in this fleet lives in the permission registry and the approval gate.
+        What it buys is that an operator can see, on the gate-ledger row of the extraction
+        itself, what kind of data was about to leave.
+        """
+        readable = local.text or text_content
+        verdict = screen_text(
+            readable,
+            unscreened_reason=local.note or "the upload carries no text this build can read",
+        )
+        telemetry.record_on_active_span(
+            "privacy_screen",
+            {"document": filename, **verdict.as_span_payload()},
+        )
+        if verdict.level is ScreenLevel.RED:
+            logger.warning("Privacy screen RED for %s: %s", filename, verdict.summary())
+        return [verdict.summary()]
+
+    def _extract_without_model(
+        self,
+        doc_id: str,
+        filename: str,
+        local: local_text.LocalTextResult,
+        text_content: Optional[str],
+        notes: List[str]
+    ) -> InvoiceDocument:
+        """Local path: read the real document if there is one, otherwise serve a demo preset.
+
+        The split matters. A preset button sends a filename and no document - there the fixed demo
+        invoices are the intended, correctly labelled content. A real upload must never come back
+        as one of them, no matter how little its text layer yields.
+        """
+        if local.has_text_layer:
+            return self._document_from_text_layer(doc_id, filename, local, notes)
+
+        doc = self._deterministic_extract(doc_id, filename, text_content or "")
+        reason = local.note or "no document content was uploaded"
+        doc.extraction_notes = notes + [f"fixed demo document served: {reason}"]
+        return doc
+
+    def _document_from_text_layer(
+        self,
+        doc_id: str,
+        filename: str,
+        local: local_text.LocalTextResult,
+        notes: List[str]
+    ) -> InvoiceDocument:
+        """Build an invoice out of what the text layer actually states, and nothing else."""
+        fields, parse_notes = local_text.parse_invoice_fields(local.text)
+        doc = InvoiceDocument(
+            id=doc_id,
+            filename=filename,
+            vendor_name=str(fields.get("vendor_name", "")),
+            vendor_vat_id=fields.get("vendor_vat_id"),
+            vendor_address=None,
+            vendor_email=fields.get("vendor_email"),
+            invoice_number=str(fields.get("invoice_number", "")),
+            invoice_date=str(fields.get("invoice_date", "")),
+            delivery_date=fields.get("delivery_date"),
+            items=[],
+            net_amount=float(fields.get("net_amount", 0.0)),
+            tax_rate=float(fields.get("tax_rate", 0.0)),
+            tax_amount=float(fields.get("tax_amount", 0.0)),
+            gross_amount=float(fields.get("gross_amount", 0.0)),
+            currency=str(fields.get("currency", "EUR")),
+            status=InvoiceStatus.EXTRACTED,
+            extraction_mode=ExtractionMode.LOCAL_TEXT_LAYER,
+        )
+        doc.extraction_notes = notes + [
+            f"local fallback (text layer only), backend {local.backend}"
+            + (f", {local.note}" if local.note else ""),
+            *parse_notes,
+        ]
+        logger.info("Local text-layer extraction for %s via %s", filename, local.backend)
+        return doc
 
     async def _extract_with_gemini(
         self,

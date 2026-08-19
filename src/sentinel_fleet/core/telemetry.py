@@ -4,6 +4,7 @@ import time
 import logging
 import itertools
 from collections import deque
+from contextvars import ContextVar, Token
 from typing import Any, Deque, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 from sentinel_fleet.core.config import settings
@@ -64,6 +65,14 @@ class SpanRecord(BaseModel):
     events: List[Dict[str, Any]] = Field(default_factory=list)
     status: str = "OK"
     error_message: Optional[str] = None
+
+
+# The gate-ledger row of the tool call that is currently executing. The gateway binds it around
+# every tool body, so code deep inside a domain module can leave evidence on the very row the
+# operator is looking at, without being handed the span or having to know the agent id.
+# A ContextVar rather than a module global: race lanes run concurrently on one event loop, and a
+# global would file lane 2's verdict under lane 1's call.
+_active_span: ContextVar[Optional["SpanRecord"]] = ContextVar("sentinel_active_span", default=None)
 
 
 def _otel_safe_attributes(agent_id: str, attributes: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -186,6 +195,25 @@ class TelemetryService:
         otel_span = self._live_otel_spans.get(span.span_id)
         if otel_span is not None:
             otel_span.add_event(event_name, attributes=_otel_safe_attributes(span.agent_id, payload))
+
+    def bind_active_span(self, span: SpanRecord) -> Token:
+        """Mark a span as the one the current tool call runs under. Release it in a finally."""
+        return _active_span.set(span)
+
+    def release_active_span(self, token: Token) -> None:
+        _active_span.reset(token)
+
+    def record_on_active_span(self, event_name: str, payload: Optional[Dict[str, Any]] = None) -> bool:
+        """Attach an event to the tool call currently in flight, if there is one.
+
+        Returns whether it landed. A no-op outside the gateway is intended, not a silent loss:
+        domain modules are also exercised directly by tests and must not require a span to run.
+        """
+        span = _active_span.get()
+        if span is None:
+            return False
+        self.add_event(span, event_name, payload)
+        return True
 
     def get_recent_spans(self, limit: int = 50) -> List[SpanRecord]:
         return list(reversed(list(self.spans)[-limit:]))
