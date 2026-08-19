@@ -229,3 +229,30 @@ async def test_overview_cards_name_their_jargon_and_their_scope():
     assert "OmniLedger is the accounting domain" in body, "OmniLedger must explain itself"
     # 15 agents ship with the demo fleet, so this card is always a slice and must say so.
     assert "Showing 4 of" in body, "a truncated card must declare that it is truncated"
+
+
+@pytest.mark.asyncio
+async def test_the_web_reading_skill_has_a_visible_way_through():
+    """Selecting google-web-reading promises network access the fleet withholds on purpose. The
+    live test stalled exactly there: "security worked so well that I could not do my research".
+    The refusal has to carry the route, and the route is the Web reader panel."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert 'id="web-reading-hint"' in body, "the skill needs an inline hint at the composer"
+    assert 'id="web-reader-panel"' in body, "the hint has to point at an identifiable panel"
+    assert "focusWebReader()" in body, "the hint must take the operator to the panel"
+    assert "cannot reach the network by itself - by design" in body, \
+        "the limit is a governance decision and must be named as one"
+    assert "Web reader — how research gets in" in body, \
+        "the panel must say what it is for, not just which agent runs it"
+
+
+def test_the_hint_is_bound_to_the_web_reading_skill_id():
+    """A hardcoded id that no longer matches a skill would fail silently - the hint would simply
+    never appear again."""
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert 'WEB_READING_SKILL_ID = "skill:google-web-reading"' in script
+    assert skill_registry.get_skill("skill:google-web-reading") is not None, \
+        "app.js points the hint at a skill id the registry does not know"

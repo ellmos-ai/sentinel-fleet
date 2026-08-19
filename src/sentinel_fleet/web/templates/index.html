@@ -350,7 +350,7 @@
             <div class="empty-state" id="chat-empty">
               <svg class="icon icon-lg"><use href="#i-chat"/></svg>
               <h4>Nothing sent yet</h4>
-              <p>Pick the skills and prompt version that should govern the answer, then send a message. Switch to race mode to put two models on the same prompt.</p>
+              <p>Pick the skills and prompt version that should govern the answer, then send a message. Switch to race mode to put several models on the same prompt. To bring a web page into the conversation, fetch it in the Web reader below and insert it - the agent has no route to the network of its own.</p>
             </div>
           </div>
 
@@ -383,10 +383,30 @@
               <div id="skill-picker" class="picker"></div>
             </div>
 
+            <!-- Picking the web-reading skill raises an expectation the fleet deliberately does
+                 not meet: the agent has no browsing loop. Saying so at the moment of the pick,
+                 next to the panel that does the work, is the difference between a governance
+                 decision and a wall. -->
+            <div id="web-reading-hint" class="composer-hint" style="display: none;">
+              <svg class="icon"><use href="#i-lock"/></svg>
+              <div>
+                <b>This skill reads pages you fetch.</b>
+                The agent cannot reach the network by itself - by design, so a web page can never
+                steer it unseen. Fetch the page in the Web reader below, check the Model Armor
+                verdict, then insert the text into your message.
+              </div>
+              <button class="btn btn-sm" onclick="focusWebReader()">Go to the Web reader</button>
+            </div>
+
             <!-- The google-web-reading skill's execution surface. The fetch runs through the
                  gateway under agent:web-reader; the operator decides what reaches the model. -->
-            <div class="composer-skills">
-              <label class="field-label" for="web-read-url">Web reader (agent:web-reader, SSRF-guarded)</label>
+            <div id="web-reader-panel" class="composer-skills">
+              <label class="field-label" for="web-read-url">Web reader — how research gets in</label>
+              <p class="composer-note">
+                Research does not come from the model. You fetch a public page here through
+                <span class="numeric">agent:web-reader</span>, the only identity scoped for it and
+                SSRF-guarded on every redirect, then insert the text into your message.
+              </p>
               <div style="display: flex; gap: var(--s-2); align-items: flex-start;">
                 <input type="url" id="web-read-url" class="text-input" style="flex: 1 1 auto"
                        placeholder="https://example.com/page">

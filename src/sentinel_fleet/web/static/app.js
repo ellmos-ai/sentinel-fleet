@@ -196,6 +196,7 @@ function renderSkillPicker() {
     box.addEventListener("change", () => {
       if (box.checked) state.selectedSkills.add(skill.skill_id);
       else state.selectedSkills.delete(skill.skill_id);
+      updateWebReadingHint();
     });
 
     const name = document.createElement("span");
@@ -209,6 +210,30 @@ function renderSkillPicker() {
     row.append(box, name, pillar);
     picker.appendChild(row);
   });
+
+  updateWebReadingHint();
+}
+
+// The one skill whose name promises something the fleet refuses to do on its own. Selecting it
+// used to produce a dead end: the agent answered that it cannot fetch, and the panel that does
+// the fetching sat unlabelled further down the composer. The hint appears with the pick and
+// points at that panel.
+const WEB_READING_SKILL_ID = "skill:google-web-reading";
+
+function updateWebReadingHint() {
+  const hint = document.getElementById("web-reading-hint");
+  if (!hint) return;
+  const active = state.selectedSkills.has(WEB_READING_SKILL_ID);
+  hint.style.display = active ? "flex" : "none";
+  const panel = document.getElementById("web-reader-panel");
+  if (panel) panel.classList.toggle("is-called-for", active);
+}
+
+function focusWebReader() {
+  const input = document.getElementById("web-read-url");
+  if (!input) return;
+  input.scrollIntoView({ block: "center" });
+  input.focus();
 }
 
 function onPromptTemplateChange() {
