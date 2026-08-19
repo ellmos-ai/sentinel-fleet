@@ -37,6 +37,7 @@ class PermissionRegistry:
             PermissionRule(tool_pattern="store_memory_bank", action=PermissionAction.ALLOW),
             PermissionRule(tool_pattern="create_reconciliation_draft", action=PermissionAction.ALLOW),
             PermissionRule(tool_pattern="draft_vendor_dispute_email", action=PermissionAction.ALLOW),
+            PermissionRule(tool_pattern="render_dispute_letter", action=PermissionAction.ALLOW, reason="Rendering the correction letter has no external effect; sending it is what hits the ASK gate"),
             PermissionRule(tool_pattern="chat_completion", action=PermissionAction.ALLOW, reason="Model calls are read-only and carry no external effect"),
             PermissionRule(tool_pattern="execute_template", action=PermissionAction.ALLOW, reason="A template run is a model call; per-template approval is gated separately on the template itself"),
         ]

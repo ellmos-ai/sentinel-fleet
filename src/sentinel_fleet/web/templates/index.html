@@ -697,6 +697,14 @@
             </div>
             <div class="item-meta numeric">{{ ticket.ticket_id }} / {{ ticket.agent_id }} / {{ ticket.tool_name }} / {{ ticket.priority.value }}</div>
             <p class="item-desc">{{ ticket.description }}</p>
+            {% if ticket.payload.doc_id %}
+            <div class="item-actions">
+              <a class="btn" href="/api/tickets/{{ ticket.ticket_id }}/letter.pdf"
+                 title="The formal correction letter this ticket approves, rendered from the audited invoice">
+                <svg class="icon"><use href="#i-document"/></svg> Download letter (PDF)
+              </a>
+            </div>
+            {% endif %}
             {% if ticket.status.value == 'pending_approval' %}
             <div class="item-actions">
               <button class="btn btn-approve" onclick='approveTicket({{ ticket.ticket_id|tojson }})'>

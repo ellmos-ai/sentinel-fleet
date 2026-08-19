@@ -74,7 +74,12 @@ class LifecycleManager:
                 name="Dispute Communicator",
                 role=AgentRole.VENDOR_COMMUNICATOR,
                 description="Drafts autonomous, legally sound correction letters to vendors when defects are found.",
-                allowed_tools={"draft_vendor_dispute_email", "send_external_email", "query_memory_bank"}
+                allowed_tools={
+                    "draft_vendor_dispute_email",
+                    "render_dispute_letter",
+                    "send_external_email",
+                    "query_memory_bank",
+                }
             ),
             AgentIdentity(
                 agent_id="agent:chat-operator",

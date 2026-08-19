@@ -54,6 +54,11 @@ from sentinel_fleet.domains.omniledger.models import InvoiceDocument
 from sentinel_fleet.domains.omniledger.extractor import extractor
 from sentinel_fleet.domains.omniledger.compliance import compliance_auditor
 from sentinel_fleet.domains.omniledger.dispute_loop import dispute_communicator
+from sentinel_fleet.domains.omniledger.letter import (
+    build_correction_letter,
+    letter_filename,
+    render_correction_letter_pdf,
+)
 from sentinel_fleet.domains.omniledger.reconciliation import ledger_reconciler
 
 
@@ -188,6 +193,16 @@ async def tool_create_reconciliation_draft(document: InvoiceDocument) -> Invoice
 
 async def tool_draft_vendor_dispute_email(document: InvoiceDocument) -> str:
     return dispute_communicator.generate_dispute_resolution(document)
+
+
+async def tool_render_dispute_letter(document: InvoiceDocument, issued_at: float) -> bytes:
+    """Render the formal correction letter as a PDF.
+
+    Routed through the gateway like every other tool, although it only draws a document: it is
+    the artefact that leaves the building once the operator approves, so every render belongs on
+    the gate ledger. It also means a quarantined dispute agent cannot keep producing letters.
+    """
+    return render_correction_letter_pdf(build_correction_letter(document, issued_at))
 
 
 async def tool_send_external_email(to: str, body: str) -> str:
@@ -679,6 +694,60 @@ async def api_reject_ticket(ticket_id: str, reason: str = Form("Rejected by oper
         lifecycle_manager.update_agent_status(ticket.agent_id, AgentStatus.IDLE)
 
     return {"status": "rejected", "ticket": ticket.model_dump()}
+
+
+@app.get("/api/tickets/{ticket_id}/letter.pdf")
+async def api_ticket_correction_letter(ticket_id: str):
+    """The formal correction letter behind an approval ticket, as a PDF.
+
+    Derived on every request from the invoice plus the moment the ticket was opened, never stored:
+    two downloads of the same ticket are the same document with the same deadline, and there is no
+    second copy that could drift away from the ticket it belongs to.
+    """
+    ticket = ticket_master.get_ticket(ticket_id)
+    if ticket is None:
+        raise TicketNotFoundError(ticket_id)
+
+    doc_id = ticket.payload.get("doc_id")
+    if not doc_id:
+        raise HTTPException(
+            status_code=404,
+            detail="This ticket is not an invoice dispute, so there is no correction letter"
+        )
+
+    invoice = processed_invoices.get(doc_id)
+    if invoice is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Invoice {doc_id} is no longer in this instance's working set. Documents live in "
+                "memory for the session that processed them; re-run the document to regenerate it."
+            )
+        )
+
+    # The same opt-out check the draft passed through. A letter is outbound correspondence too,
+    # so a vendor who opted out must not get one rendered behind the gate's back.
+    permission = privacy_contact_hub.validate_send_permission(invoice.vendor_email)
+    if not permission["allowed"]:
+        raise ContactOptOutViolationError(invoice.vendor_email or "unknown", permission["reason"])
+
+    result = await execute_via_gateway(
+        "agent:vendor-dispute",
+        "render_dispute_letter",
+        {"document": invoice, "issued_at": ticket.created_at},
+        tool_render_dispute_letter
+    )
+    if not result.success:
+        return JSONResponse(status_code=403, content={
+            "status": "BLOCKED_BY_GATEWAY", "stage": "letter_render", "reason": result.error
+        })
+
+    filename = letter_filename(build_correction_letter(invoice, ticket.created_at))
+    return Response(
+        content=result.output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 @app.post("/api/tasks/create")

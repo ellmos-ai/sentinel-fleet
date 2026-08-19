@@ -11,6 +11,10 @@ import time
 from typing import Tuple
 
 from sentinel_fleet.chat.models import ChatMessage, ChatMode, ChatSession, RaceRecord
+# The Latin-1 and line-width limits of the bundled PDF core fonts are a property of the engine,
+# not of the transcript, and the vendor correction letter hits exactly the same two. They live in
+# core/pdf_text.py so both renderers observe one implementation.
+from sentinel_fleet.core.pdf_text import pdf_safe as _pdf_safe
 
 EXPORT_FORMATS = ("md", "txt", "html", "pdf")
 
@@ -217,32 +221,6 @@ def render_html(session: ChatSession) -> str:
 """
 
 
-# Longest run of characters the PDF renderer is asked to fit on one line. fpdf2 cannot break
-# inside a word, and a transcript can contain an unbroken identifier or URL wider than the page.
-PDF_MAX_TOKEN = 88
-
-
-def _latin1(text: str) -> str:
-    """The bundled PDF core fonts are Latin-1 only; drop what they cannot draw.
-
-    Substituting is better than raising: an operator asking for a PDF wants the transcript,
-    and the unsupported characters are typographic rather than semantic.
-    """
-    return text.encode("latin-1", errors="replace").decode("latin-1")
-
-
-def _pdf_safe(text: str) -> str:
-    """Latin-1 plus soft-wrapping, so no single token is wider than the text column."""
-    lines = []
-    for line in _latin1(text).splitlines() or [""]:
-        pieces = []
-        for token in line.split(" "):
-            while len(token) > PDF_MAX_TOKEN:
-                pieces.append(token[:PDF_MAX_TOKEN])
-                token = token[PDF_MAX_TOKEN:]
-            pieces.append(token)
-        lines.append(" ".join(pieces))
-    return "\n".join(lines)
 
 
 def render_pdf(session: ChatSession) -> bytes:
