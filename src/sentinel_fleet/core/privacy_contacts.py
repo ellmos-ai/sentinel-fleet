@@ -127,7 +127,7 @@ class PrivacyContactHub:
 
         contact.opt_in_status = "unsubscribed"
         contact.is_tombstone = True
-        contact.dsgvo_notes = f"Widerruf / Opt-Out am {time.strftime('%Y-%m-%d')}: {reason}"
+        contact.dsgvo_notes = f"Objection recorded {time.strftime('%Y-%m-%d')}: {reason}"
         contact.updated_at = time.time()
         self._store.put(contact_id, contact)
         return contact
@@ -141,10 +141,10 @@ class PrivacyContactHub:
         if contact.is_tombstone or contact.opt_in_status in ["unsubscribed", "blacklisted"]:
             return {
                 "allowed": False,
-                "reason": f"DSGVO Block: Kontakt {email} hat widersprochen ({contact.dsgvo_notes})."
+                "reason": f"GDPR block: {email} has objected to further contact ({contact.dsgvo_notes})."
             }
 
-        return {"allowed": True, "reason": f"DSGVO Valid: Schutzstufe {contact.protection_level} aktiv."}
+        return {"allowed": True, "reason": f"GDPR clear: protection level {contact.protection_level} in force."}
 
     def run_dsgvo_retention_audit(self) -> Dict[str, Any]:
         """Audits contacts for retention compliance."""
@@ -157,7 +157,7 @@ class PrivacyContactHub:
             "total_records": total,
             "active_contacts": active,
             "tombstones_protected": tombstones,
-            "retention_policy": "S1 (6m), S2 (12m), S3 (36m gem. § 147 AO), S4 (Permanent)",
+            "retention_policy": "S1 (6 months), S2 (12 months), S3 (36 months, § 147 AO), S4 (until revoked)",
             "status": "COMPLIANT"
         }
 

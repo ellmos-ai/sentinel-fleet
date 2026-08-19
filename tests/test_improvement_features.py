@@ -133,7 +133,7 @@ async def test_privacy_contacts_strict_errors_and_tombstones():
     # Validate permission should be blocked
     permission = privacy_contact_hub.validate_send_permission("strict@gdpr-test.de")
     assert permission["allowed"] is False
-    assert "DSGVO Block" in permission["reason"]
+    assert "GDPR block" in permission["reason"]
 
     # Missing contact error
     with pytest.raises(ContactNotFoundError):

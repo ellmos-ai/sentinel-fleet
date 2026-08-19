@@ -20,7 +20,11 @@ GERMAN_CHARS = re.compile(r"[äöüÄÖÜß]")
 GERMAN_STEMS = re.compile(
     r"rechnung|lieferant|buchhaltung|belegwesen|gesetzlich|aufbewahrung|steuernummer|"
     r"zahlungsziel|korrekturschreiben|vertrag|anschrift|freigabe|verwaltung|abrechnung|"
-    r"bestellung|sicherheitsdienst|schaltplan|warteschlange",
+    r"bestellung|sicherheitsdienst|schaltplan|warteschlange|"
+    # Found by eye in the console's own contact table, which rendered "Widerruf / Opt-Out am
+    # ..." and "DSGVO Valid: Schutzstufe ... aktiv" to the operator. None of these carry an
+    # umlaut, so only naming the stems catches them.
+    r"schutzstufe|widerruf|widerspr|kontakt",
     re.IGNORECASE
 )
 SCANNED_SUFFIXES = (".py", ".html", ".js", ".css")

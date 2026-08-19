@@ -161,12 +161,12 @@
       <div class="grid">
         <div class="card">
           <div class="card-header">
-            <h3><svg class="icon"><use href="#i-shield"/></svg> Control: fleet and armor</h3>
+            <h3><svg class="icon"><use href="#i-shield"/></svg> Your agents</h3>
             <span class="badge-status badge-info numeric">{{ agents|length }} agents</span>
           </div>
           <p class="card-note">
-            Who is on duty, and who Model Armor has pulled off it. A preview of the Fleet tab,
-            where every agent carries its scopes and its history.
+            Who is on duty, and who Model Armor has pulled off duty. This is the Control pillar:
+            a preview of the Fleet tab, where every agent carries its scopes and its history.
             {% if agents|length > 4 %}<span class="card-scope numeric">Showing 4 of {{ agents|length }}.</span>{% endif %}
           </p>
           <div class="card-body">
@@ -199,13 +199,13 @@
 
         <div class="card">
           <div class="card-header">
-            <h3><svg class="icon"><use href="#i-inbox"/></svg> Autonomy (UAS): approvals you owe</h3>
+            <h3><svg class="icon"><use href="#i-inbox"/></svg> Waiting for your approval</h3>
             <span class="badge-status {% if pending_tickets %}badge-warn{% else %}badge-ok{% endif %} numeric">{{ pending_tickets|length }} pending</span>
           </div>
           <p class="card-note">
-            UAS is the Universal Autonomous System: it runs tasks unattended and stops at an ask
-            gate whenever the decision is yours. A preview of the Approvals tab, where you act on
-            the full queue.
+            The UAS pillar - the Universal Autonomous System - runs tasks unattended and stops at an
+            ask gate whenever the decision is yours. A preview of the Approvals tab, where you act
+            on the full queue.
             {% if tickets|length > 3 %}<span class="card-scope numeric">Showing the 3 most recent of {{ tickets|length }}.</span>{% endif %}
           </p>
           <div class="card-body">
@@ -248,11 +248,11 @@
 
         <div class="card">
           <div class="card-header">
-            <h3><svg class="icon"><use href="#i-document"/></svg> Domain: OmniLedger</h3>
+            <h3><svg class="icon"><use href="#i-document"/></svg> Processed documents</h3>
             <span class="badge-status badge-ok numeric">{{ invoices|length }} processed</span>
           </div>
           <p class="card-note">
-            OmniLedger is the accounting domain: it extracts an invoice, audits it against
+            Handled by OmniLedger, the accounting domain: it extracts an invoice, audits it against
             § 14 UStG, then books it or opens a dispute. The Domains tab shows which policies,
             agents and skills it is bound to.
             {% if invoices|length > 3 %}<span class="card-scope numeric">Showing the 3 most recent of {{ invoices|length }}.</span>{% endif %}
@@ -303,12 +303,12 @@
 
         <div class="card">
           <div class="card-header">
-            <h3><svg class="icon"><use href="#i-memory"/></svg> Memory: state and traces</h3>
+            <h3><svg class="icon"><use href="#i-memory"/></svg> What the agents know</h3>
             <span class="badge-status badge-purple numeric">{{ memories|length }} entries</span>
           </div>
           <p class="card-note">
-            The facts, lessons and policies agents retrieve from before they act. A preview of the
-            Memory tab, which lists every entry with its metadata.
+            The facts, lessons and policies agents retrieve from before they act. This is the Memory
+            pillar: a preview of the Memory tab, which lists every entry.
             {% if memories|length > 4 %}<span class="card-scope numeric">Showing 4 of {{ memories|length }}.</span>{% endif %}
           </p>
           <div class="card-body">
@@ -515,7 +515,10 @@
       <div class="section-head">
         <div>
           <h3>Privacy contacts</h3>
-          <p>Retention levels S1 (6 months) to S4 (until revoked). An opt-out leaves a tombstone that blocks future contact.</p>
+          <p>The counterparties your fleet writes to: vendors, partners and institutions of your own
+             organisation. Each carries a GDPR retention level - S1 six months, S2 twelve months,
+             S3 thirty-six months for tax-relevant correspondence under § 147 AO, S4 until revoked.
+             An opt-out leaves a tombstone that blocks future contact.</p>
         </div>
         <button class="btn btn-primary" onclick="toggleModal('modal-contact')">
           <svg class="icon"><use href="#i-plus"/></svg> Add contact
@@ -1649,15 +1652,15 @@
         </button>
       </div>
       <p class="item-desc" style="margin-top: calc(-1 * var(--s-2))">
-        A guided walk through the same create endpoints the quick form uses - name, prompt, skills, agent, then
-        an optional routine or schedule binding.
+        Guided: name, prompt, skills, agent, then when it runs. Same create endpoints as the quick form,
+        walked one decision at a time so nothing is left implicit.
       </p>
       <div class="wizard-steps">
         <span class="wizard-step-dot" data-wizard-step="0">1. Name</span>
         <span class="wizard-step-dot" data-wizard-step="1">2. Prompt</span>
         <span class="wizard-step-dot" data-wizard-step="2">3. Skills</span>
         <span class="wizard-step-dot" data-wizard-step="3">4. Agent</span>
-        <span class="wizard-step-dot" data-wizard-step="4">5. Bindings</span>
+        <span class="wizard-step-dot" data-wizard-step="4">5. When does it run?</span>
         <span class="wizard-step-dot" data-wizard-step="5">6. Summary</span>
       </div>
 
@@ -1780,10 +1783,14 @@
       </div>
 
       <div id="wizard-pane-4" class="wizard-pane">
+        <p class="item-desc" style="margin-top: 0">
+          Leave both unticked and the task runs only when you start it. Tick one to make it
+          recurring (a routine), or to have it run once at a date (a schedule).
+        </p>
         <div class="form-group">
           <label class="checkbox-row">
             <input type="checkbox" id="wz-bind-routine" onchange="onWizardBindingToggle()">
-            <span>Bind a routine now (<svg class="icon"><use href="#i-gear"/></svg> makes it recurring)</span>
+            <span>Recurring (routine) <svg class="icon"><use href="#i-gear"/></svg></span>
           </label>
         </div>
         <div id="wz-routine-fields" style="display: none;">
@@ -1822,7 +1829,7 @@
         <div class="form-group">
           <label class="checkbox-row">
             <input type="checkbox" id="wz-bind-schedule" onchange="onWizardBindingToggle()">
-            <span>Schedule it now (<svg class="icon"><use href="#i-clock"/></svg> makes it dated)</span>
+            <span>Once, at a date (schedule) <svg class="icon"><use href="#i-clock"/></svg></span>
           </label>
         </div>
         <div id="wz-schedule-fields" style="display: none;">

@@ -1770,9 +1770,9 @@ function renderWizardSummary() {
   }
   wizardSummaryRow(dl, "Agent / pattern", `${w.agentId} / ${w.pattern}`);
   wizardSummaryRow(
-    dl, "Bindings",
-    [w.bindRoutine ? `routine (${w.routine.kind})` : null, w.bindSchedule ? `schedule (${w.schedule.dueAt || "no date set"})` : null]
-      .filter(Boolean).join(", ") || "none - a bare template, enqueue it manually"
+    dl, "When it runs",
+    [w.bindRoutine ? `recurring (${w.routine.kind})` : null, w.bindSchedule ? `once, at ${w.schedule.dueAt || "no date set"}` : null]
+      .filter(Boolean).join(", ") || "only when you start it"
   );
 }
 

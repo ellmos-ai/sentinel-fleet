@@ -224,9 +224,14 @@ async def test_overview_cards_name_their_jargon_and_their_scope():
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         body = (await client.get("/")).text
 
+    # The title asks the operator's question; the note carries the architecture term and
+    # explains it, so the console still maps onto the README, the manual and the video.
+    for title in ("Your agents", "Waiting for your approval", "Processed documents",
+                  "What the agents know"):
+        assert f"> {title}</h3>" in body, f"the overview card {title!r} lost its plain title"
     assert "Universal Autonomous System" in body, "UAS must be spelled out where it is used"
-    assert "Autonomy (UAS): approvals you owe" in body
-    assert "OmniLedger is the accounting domain" in body, "OmniLedger must explain itself"
+    assert "the Control pillar" in body and "the Memory\n            pillar" in body
+    assert "OmniLedger, the accounting domain" in body, "OmniLedger must explain itself"
     # 15 agents ship with the demo fleet, so this card is always a slice and must say so.
     assert "Showing 4 of" in body, "a truncated card must declare that it is truncated"
 
