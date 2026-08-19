@@ -352,5 +352,29 @@ class TaskTemplateRegistry:
             self._store.put(template_id, template)
         return template
 
+    def restore_for_viewer(self, template_id: str, viewer: str) -> TaskTemplate:
+        """Undo `remove_for_viewer()` - the mirror action a hidden template's own "Restore"
+        row needs (concept doc, section D Phase 2 "removed_by-Liste"). A no-op, not an error,
+        when the viewer never hid this template - restoring twice is as harmless as hiding
+        twice already is above.
+        """
+        template = self._store.get(template_id)
+        if not template:
+            raise TemplateNotFoundError(template_id)
+        if viewer in template.removed_by:
+            template.removed_by.remove(viewer)
+            template.updated_at = time.time()
+            self._store.put(template_id, template)
+        return template
+
+    def list_hidden_for_viewer(self, viewer: str) -> List[TaskTemplate]:
+        """The templates one viewer has hidden from their own list - the source for the
+        "hidden for you" panel that carries the Restore action. Every entry here is still
+        intact for its owner and everyone else, exactly as `remove_for_viewer()` promises.
+        """
+        templates = [t for t in self._store.list_all() if viewer in t.removed_by]
+        templates.sort(key=lambda t: t.created_at)
+        return templates
+
 
 task_template_registry = TaskTemplateRegistry()
