@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ app_name }} — Operator Console</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
 </head>
 <body>
   {% include "_icons.html" %}
@@ -572,7 +573,7 @@
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr><th>Task ID</th><th>Task</th><th>Origin</th><th>Agent</th><th>State</th><th>Evidence</th></tr>
+              <tr><th>Task ID</th><th>Task</th><th>Origin</th><th>Agent</th><th>State</th><th>Evidence</th><th>Console</th></tr>
             </thead>
             <tbody>
               {% for t in tasks %}
@@ -595,6 +596,13 @@
                   {% elif t.error_message %}<span style="color: var(--danger)">{{ t.error_message }}</span>
                   {% elif t.state.value == 'queued' %}queued for execution, no worker attached
                   {% else %}-{% endif %}
+                </td>
+                <td>
+                  {% if t.source_template_id %}
+                  <button class="btn btn-sm" onclick='openConsoleModal({{ t.task_id|tojson }}, {{ t.name|tojson }})'>View run</button>
+                  {% else %}
+                  <span class="item-meta" title="Queued directly, without a template - never runs, so it has no run log">-</span>
+                  {% endif %}
                 </td>
               </tr>
               {% endfor %}
@@ -1077,6 +1085,27 @@
     </div>
   </div>
 
+  <div id="modal-console" class="modal-overlay">
+    <div class="modal-card modal-card-wide">
+      <div class="modal-header">
+        <h3>Run console</h3>
+        <button class="btn btn-sm btn-icon" onclick="closeConsoleModal()" aria-label="Close">
+          <svg class="icon"><use href="#i-close"/></svg>
+        </button>
+      </div>
+      <p class="item-meta" id="console-task-name" style="margin-bottom: var(--s-3)"></p>
+      <p class="item-desc" style="margin-top: calc(-1 * var(--s-2))">
+        Read-only log of this run - no input goes back to the server. Phase 1 executes a run
+        synchronously inside the request that queued it, so most runs are already finished by
+        the time this opens: the buffer below is then a full replay, not a live stream.
+      </p>
+      <div id="console-terminal" class="console-terminal"></div>
+      <div class="form-actions">
+        <button type="button" class="btn" onclick="closeConsoleModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div id="modal-ticket" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
@@ -1287,6 +1316,7 @@
   <script id="skill-catalog" type="application/json">{{ skill_catalog|tojson }}</script>
   <script id="agent-catalog" type="application/json">{{ agent_catalog|tojson }}</script>
   <script id="model-catalog" type="application/json">{{ model_catalog|tojson }}</script>
+  <script src="/static/vendor/xterm/xterm.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

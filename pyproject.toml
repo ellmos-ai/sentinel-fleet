@@ -23,6 +23,11 @@ dependencies = [
     "python-multipart>=0.0.9",
     "aiofiles>=23.2.1",
     "fpdf2>=2.7.8",
+    # ASGI WebSocket support for /ws/run/{run_id} (the run console, concept doc section C.7).
+    # FastAPI's own WebSocket route only works if the ASGI server has a WebSocket
+    # implementation to hand it off to - uvicorn (the Dockerfile's actual server) needs this
+    # installed explicitly, since it is declared here as plain "uvicorn", not "uvicorn[standard]".
+    "websockets>=13.0",
 ]
 
 [project.optional-dependencies]

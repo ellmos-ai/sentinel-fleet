@@ -53,8 +53,16 @@ ALLOWED_GERMAN = {
 
 def _iter_source_files():
     for path in sorted(SRC_ROOT.rglob("*")):
-        if path.suffix in SCANNED_SUFFIXES and "__pycache__" not in path.parts:
-            yield path
+        if path.suffix not in SCANNED_SUFFIXES or "__pycache__" in path.parts:
+            continue
+        # Vendored third-party code (web/static/vendor/, e.g. xterm.js) is not this project's
+        # authorship and is exempt on principle, not by a per-line whitelist entry: xterm.js's
+        # own DEC national character set tables legitimately contain special Latin letters as
+        # terminal emulation data (the VT100 German replacement charset), unrelated to any
+        # language policy this project's own code and UI strings are held to.
+        if "vendor" in path.parts:
+            continue
+        yield path
 
 
 def _german_lines(path):

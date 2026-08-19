@@ -1099,6 +1099,24 @@ a { color: var(--accent); }
 
 .modal-header h3 { font-size: 16px; }
 
+.modal-card-wide { max-width: 860px; }
+
+/* ---------- Run console (xterm.js, vendored - static/vendor/xterm/) ---------- */
+
+.console-terminal {
+  background: #0b0f14;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-2);
+  padding: var(--s-3);
+  margin-top: var(--s-2);
+}
+
+/* xterm renders its own canvas/rows inside this wrapper - a fixed height keeps the modal from
+   jumping as lines stream in, independent of the app's light/dark theme (the terminal itself
+   is always dark, set via the Terminal({theme: ...}) call in app.js). */
+.console-terminal .xterm { height: 420px; padding: var(--s-1); }
+.console-terminal .xterm-viewport { border-radius: var(--r-1); }
+
 /* ---------- Toast ---------- */
 
 .toast {

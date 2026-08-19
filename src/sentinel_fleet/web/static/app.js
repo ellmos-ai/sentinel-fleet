@@ -12,7 +12,12 @@ const state = {
   models: [],
   // Working copy of the template currently open in the step editor (concept doc, section
   // E.4): { templateId, steps: [...] }. Null while the modal is closed.
-  stepsEditor: null
+  stepsEditor: null,
+  // The run console's xterm.js instance, its live WebSocket and the run it is currently
+  // showing (concept doc, section C.7, variant (b), the web console). `term` is created once and
+  // reused across opens (`term.reset()`, see openConsoleModal); `ws` and `taskId` are null
+  // whenever the modal is closed.
+  runConsole: { term: null, ws: null, taskId: null }
 };
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -981,6 +986,75 @@ function submitStepsEditor() {
     { method: "PUT", body: new URLSearchParams({ steps: JSON.stringify(payload) }) },
     "Could not save the steps"
   );
+}
+
+// ---------------------------------------------------------------------------
+// Run console: a read-only replay/live log of one run over /ws/run/{run_id} (concept doc,
+// section C.7, variant (b), the web console). xterm.js is vendored (static/vendor/xterm/), never
+// loaded from a CDN - version/source/license are in that directory's own header comments.
+//
+// Nothing this panel does ever sends anything back over the socket: `disableStdin` keeps xterm
+// itself from capturing keystrokes, and the WebSocket is only ever read (`onmessage`), never
+// written to - the same read-only boundary the server side of this route documents.
+// ---------------------------------------------------------------------------
+
+function ensureRunConsoleTerminal() {
+  if (state.runConsole.term) return state.runConsole.term;
+  const term = new Terminal({
+    convertEol: true,
+    disableStdin: true,
+    cursorBlink: false,
+    fontFamily: "'IBM Plex Mono', 'SF Mono', Consolas, monospace",
+    fontSize: 13,
+    theme: { background: "#0b0f14", foreground: "#e8edf2" }
+  });
+  term.open(document.getElementById("console-terminal"));
+  state.runConsole.term = term;
+  return term;
+}
+
+function openConsoleModal(taskId, name) {
+  document.getElementById("console-task-name").textContent = `${name} (${taskId})`;
+  const term = ensureRunConsoleTerminal();
+  term.reset();
+  term.writeln(`Connecting to run ${taskId} ...`);
+
+  // Close out any previous run's socket first - opening a second console while one is still
+  // live must not leave the earlier WebSocket running in the background.
+  if (state.runConsole.ws) {
+    state.runConsole.ws.onclose = null;
+    state.runConsole.ws.close();
+  }
+
+  state.runConsole.taskId = taskId;
+  const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${wsProtocol}//${location.host}/ws/run/${encodeURIComponent(taskId)}`);
+  state.runConsole.ws = ws;
+
+  ws.onopen = () => term.writeln("Connected.");
+  ws.onmessage = event => term.writeln(event.data);
+  ws.onclose = () => {
+    term.writeln("");
+    term.writeln("-- run finished, connection closed --");
+  };
+  ws.onerror = () => term.writeln("-- connection error --");
+
+  toggleModal("modal-console");
+}
+
+function closeConsoleModal() {
+  if (state.runConsole.ws) {
+    // Detach onclose first: this is the operator dismissing the panel, not the server ending
+    // the run, so the "connection closed" line in the terminal (still visible behind the
+    // modal-overlay's fade, and again the next time this taskId is opened) should not claim
+    // the run itself is over.
+    state.runConsole.ws.onclose = null;
+    state.runConsole.ws.onerror = null;
+    state.runConsole.ws.close();
+    state.runConsole.ws = null;
+  }
+  state.runConsole.taskId = null;
+  toggleModal("modal-console");
 }
 
 // ---------------------------------------------------------------------------
