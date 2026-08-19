@@ -27,6 +27,7 @@ from sentinel_fleet.chat.service import chat_service
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.core.config import settings
 from sentinel_fleet.core.gateway import gateway
+from sentinel_fleet.core.run_log import run_log_bus
 from sentinel_fleet.core.telemetry import telemetry
 from sentinel_fleet.uas.task_master import TaskRecord, TaskState, task_master
 from sentinel_fleet.uas.task_templates import EXECUTE_TEMPLATE_TOOL, Step, TaskTemplate
@@ -158,12 +159,28 @@ async def _run_race_step(step: Step, previous_output: Optional[str], template_na
     }
 
 
+def _step_model_label(step: Step) -> str:
+    """What to name a step's model in a log line before it has actually run - known upfront for
+    both patterns: "single" always calls the deployment default, "race" always calls every
+    model listed on the step."""
+    if step.execution_pattern == "race":
+        return ",".join(step.race_models)
+    return settings.gemini_default_model
+
+
 async def run_chain(template: TaskTemplate, task: TaskRecord) -> TaskRecord:
     """Runs every step of `template` in position order against the already-created,
     already-IN_PROGRESS `task` (both handled by the caller, `routines.enqueue_template()`, the
     same way for a single-step run). Each step's output becomes the next step's
     `previous_output` context - `input_spec` is fixed to "previous_output" for the whole
     minimal cut, enforced by `Step`'s own validator, so there is nothing else to branch on here.
+
+    Every step boundary is also mirrored into `run_log_bus` under `task.task_id` as a plain,
+    content-free status line (concept doc, section C.7, variant (b), the web console) - never the
+    step's actual output, only what stage it is in, which model/pattern it used, and how it
+    ended. `run_log_bus.close()` is called at every terminal return below, exactly where this
+    function would otherwise just return - a WebSocket subscriber on this run learns the run is
+    over at the same moment the caller does.
     """
     steps = sorted(template.steps, key=lambda s: s.position)
     step_records: List[Dict[str, Any]] = []
@@ -172,8 +189,15 @@ async def run_chain(template: TaskTemplate, task: TaskRecord) -> TaskRecord:
     span = telemetry.start_span(
         "chain:run", CHAIN_RUNNER_AGENT_ID, {"template_id": template.template_id, "steps": str(len(steps))}
     )
+    run_log_bus.emit(task.task_id, f"chain run started: {len(steps)} step(s)")
 
     for index, step in enumerate(steps):
+        run_log_bus.emit(
+            task.task_id,
+            f"step {index + 1}/{len(steps)} '{step.step_id}' ({step.execution_pattern}) "
+            f"via {step.assigned_agent}, model {_step_model_label(step)} - started"
+        )
+
         if step.execution_pattern == "race":
             outcome = await _run_race_step(step, previous_output, template.name)
         else:
@@ -190,6 +214,11 @@ async def run_chain(template: TaskTemplate, task: TaskRecord) -> TaskRecord:
                 priority=TicketPriority.NORMAL
             )
             step_records.append({"step_id": step.step_id, "status": "awaiting_approval"})
+            run_log_bus.emit(
+                task.task_id,
+                f"step {index + 1}/{len(steps)} '{step.step_id}': awaiting approval (ticket {ticket.ticket_id})"
+            )
+            run_log_bus.close(task.task_id)
             return task_master.update_task_state(
                 task.task_id, TaskState.AWAITING_APPROVAL,
                 output_data={"ticket_id": ticket.ticket_id, "steps": step_records}
@@ -198,6 +227,10 @@ async def run_chain(template: TaskTemplate, task: TaskRecord) -> TaskRecord:
         if not outcome["success"]:
             telemetry.end_span(span, status="ERROR", error=outcome["error"])
             step_records.append({"step_id": step.step_id, "status": "failed", "error": outcome["error"]})
+            run_log_bus.emit(
+                task.task_id, f"step {index + 1}/{len(steps)} '{step.step_id}': failed - {outcome['error']}"
+            )
+            run_log_bus.close(task.task_id)
             return task_master.update_task_state(
                 task.task_id, TaskState.FAILED,
                 error=f"step {step.step_id} ({index + 1}/{len(steps)}): {outcome['error']}",
@@ -216,8 +249,14 @@ async def run_chain(template: TaskTemplate, task: TaskRecord) -> TaskRecord:
             record["race_id"] = outcome["race_id"]
         step_records.append(record)
         previous_output = outcome["content"]
+        run_log_bus.emit(
+            task.task_id,
+            f"step {index + 1}/{len(steps)} '{step.step_id}': completed (model={outcome.get('model')})"
+        )
 
     telemetry.end_span(span, status="OK")
+    run_log_bus.emit(task.task_id, "chain run completed")
+    run_log_bus.close(task.task_id)
     return task_master.update_task_state(
         task.task_id, TaskState.COMPLETED,
         output_data={"content": previous_output, "steps": step_records}

@@ -23,6 +23,7 @@ from sentinel_fleet.core import chain_runner
 from sentinel_fleet.core.config import settings
 from sentinel_fleet.core.errors import TemplateHasBindingsError, TemplateNotFoundError
 from sentinel_fleet.core.gateway import gateway
+from sentinel_fleet.core.run_log import run_log_bus
 from sentinel_fleet.core.schedule_math import next_after
 from sentinel_fleet.core.storage import get_store
 from sentinel_fleet.uas.task_master import TaskRecord, TaskState, task_master
@@ -295,6 +296,13 @@ async def enqueue_template(
     existed. A multi-step template (concept doc, section E.4 "Minimaler Ketten-Schnitt") is
     handed to `core/chain_runner.py` instead, once past the template-level approval gate and
     IN_PROGRESS transition both paths share.
+
+    Every terminal return below also mirrors into `run_log_bus` under the run's `task_id`
+    (concept doc, section C.7, variant (b), the web console) - a content-free status line plus
+    `run_log_bus.close()`, so a `/ws/run/{task_id}` subscriber learns the run ended at the same
+    moment `task_master` does. The chain delegation below is the one exception: it does not
+    close the bus itself, because `chain_runner.run_chain()` already does that on every one of
+    its own terminal returns.
     """
     template = task_template_registry.get_template(template_id)
     if not template:
@@ -308,6 +316,10 @@ async def enqueue_template(
         source_binding_id=source_binding_id,
         triggered_by=triggered_by,
         scheduled_for=scheduled_for
+    )
+    run_log_bus.emit(
+        task.task_id, f"task {task.task_id} created for template '{template.name}' ({template_id}), "
+                      f"triggered_by={triggered_by}"
     )
 
     if template.requires_approval:
@@ -327,6 +339,8 @@ async def enqueue_template(
             payload={"template_id": template_id, "task_id": task.task_id},
             priority=TicketPriority.NORMAL
         )
+        run_log_bus.emit(task.task_id, f"template requires approval before running (ticket {ticket.ticket_id})")
+        run_log_bus.close(task.task_id)
         return task_master.update_task_state(
             task.task_id, TaskState.AWAITING_APPROVAL, output_data={"ticket_id": ticket.ticket_id}
         )
@@ -334,15 +348,23 @@ async def enqueue_template(
     task_master.update_task_state(task.task_id, TaskState.IN_PROGRESS)
 
     if len(template.steps) > 1:
+        run_log_bus.emit(task.task_id, f"multi-step template ({len(template.steps)} steps) - delegating to chain runner")
+        # Not closed here - chain_runner.run_chain() closes the bus itself on every one of its
+        # own terminal returns (see its docstring).
         return await chain_runner.run_chain(template, task)
 
     agent = lifecycle_manager.get_agent(template.assigned_agent)
     if agent is None:
+        run_log_bus.emit(task.task_id, f"failed - agent '{template.assigned_agent}' is not registered")
+        run_log_bus.close(task.task_id)
         return task_master.update_task_state(
             task.task_id, TaskState.FAILED, error=f"Agent '{template.assigned_agent}' is not registered"
         )
 
     system_prompt, user_message, digest = _build_prompt(template)
+    run_log_bus.emit(
+        task.task_id, f"step 1/1 via {template.assigned_agent}, model {settings.gemini_default_model} - started"
+    )
     result = await gateway.execute_tool_call(
         agent=agent,
         tool_name=EXECUTE_TEMPLATE_TOOL,
@@ -356,6 +378,8 @@ async def enqueue_template(
     )
 
     if not result.success:
+        run_log_bus.emit(task.task_id, f"step 1/1: failed - {result.error}")
+        run_log_bus.close(task.task_id)
         return task_master.update_task_state(task.task_id, TaskState.FAILED, error=result.error)
 
     if result.requires_approval:
@@ -370,11 +394,16 @@ async def enqueue_template(
             payload={"template_id": template_id, "task_id": task.task_id},
             priority=TicketPriority.NORMAL
         )
+        run_log_bus.emit(task.task_id, f"step 1/1: awaiting approval (ticket {ticket.ticket_id})")
+        run_log_bus.close(task.task_id)
         return task_master.update_task_state(
             task.task_id, TaskState.AWAITING_APPROVAL, output_data={"ticket_id": ticket.ticket_id}
         )
 
     reply = result.output
+    run_log_bus.emit(task.task_id, f"step 1/1: completed (model={reply.model})")
+    run_log_bus.emit(task.task_id, "task completed")
+    run_log_bus.close(task.task_id)
     return task_master.update_task_state(
         task.task_id,
         TaskState.COMPLETED,

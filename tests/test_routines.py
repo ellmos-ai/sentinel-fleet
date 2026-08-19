@@ -8,6 +8,7 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
+from sentinel_fleet.core.run_log import run_log_bus
 from sentinel_fleet.core.telemetry import telemetry
 from sentinel_fleet.uas import routines
 from sentinel_fleet.uas.task_master import TaskState, task_master
@@ -205,6 +206,61 @@ async def test_enqueue_with_requires_approval_routes_to_the_ticket_gate():
     assert ticket is not None
     assert ticket.status == TicketStatus.PENDING_APPROVAL
     assert ticket.payload["template_id"] == template.template_id
+
+
+# ---------------------------------------------------------------------------
+# run_log_bus emitter: the single-step path mirrors its own status lines into the run console's
+# log bus and closes it on every terminal return (concept doc, section C.7 Ausprägung (b)
+# "WEB-Konsole") - unchanged since before chains existed otherwise, this is the only new thing
+# on this path. run_id == task_id throughout.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_completed_single_step_run_emits_a_status_narrative_and_closes_the_bus():
+    template = _template(name="Single-step log probe", assigned_agent="agent:task-solver")
+
+    task = await routines.enqueue_template(template.template_id, triggered_by="manual")
+
+    assert task.state == TaskState.COMPLETED
+    lines, _, closed = run_log_bus.snapshot(task.task_id)
+    joined = "\n".join(lines)
+    assert f"task {task.task_id} created for template" in joined
+    assert template.template_id in joined
+    assert "triggered_by=manual" in joined
+    assert "step 1/1 via agent:task-solver" in joined and "started" in joined
+    assert "step 1/1: completed (model=" in joined
+    assert "task completed" in joined
+    assert closed is True
+    # Multi-step-only lines never appear on the single-step path.
+    assert "delegating to chain runner" not in joined
+    assert "chain run" not in joined
+    # Never the model's actual reply text (concept doc: status/pattern/model/gate/error only).
+    assert task.output_data["content"] not in joined
+
+
+@pytest.mark.asyncio
+async def test_enqueue_with_missing_agent_emits_a_failure_line_and_closes_the_bus():
+    template = _template(name="Unregistered agent, log probe", assigned_agent="agent:does-not-exist")
+    task = await routines.enqueue_template(template.template_id, triggered_by="manual")
+
+    lines, _, closed = run_log_bus.snapshot(task.task_id)
+    joined = "\n".join(lines)
+    assert "failed - agent 'agent:does-not-exist' is not registered" in joined
+    assert closed is True
+
+
+@pytest.mark.asyncio
+async def test_enqueue_with_requires_approval_emits_its_line_before_any_step_runs():
+    template = _template(name="Gated template, log probe", requires_approval=True)
+    task = await routines.enqueue_template(template.template_id, triggered_by="manual")
+
+    lines, _, closed = run_log_bus.snapshot(task.task_id)
+    joined = "\n".join(lines)
+    assert "template requires approval" in joined
+    assert "ticket" in joined
+    assert closed is True
+    # The gate stopped it before any step-level line was ever emitted.
+    assert "step 1/1" not in joined
 
 
 # ---------------------------------------------------------------------------

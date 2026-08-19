@@ -12,6 +12,7 @@ import pytest
 from sentinel_fleet.chat.backends import BackendReply, ModelBackend
 from sentinel_fleet.chat.models import ChatMode
 from sentinel_fleet.chat.service import chat_service
+from sentinel_fleet.core.run_log import run_log_bus
 from sentinel_fleet.core.telemetry import telemetry
 from sentinel_fleet.uas import routines
 from sentinel_fleet.uas.task_master import TaskState, task_master
@@ -252,3 +253,113 @@ async def test_a_blocked_race_step_fails_the_chain_instead_of_forwarding_boilerp
     steps = task.output_data["steps"]
     assert len(steps) == 1
     assert steps[0]["status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# run_log_bus emitter: chain_runner.run_chain() mirrors every step boundary into the run
+# console's log bus and closes it on every terminal return (concept doc, section C.7
+# Ausprägung (b) "WEB-Konsole"). run_id == task_id throughout.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_completed_chain_emits_a_full_status_narrative_and_closes_the_bus(recording_backend):
+    template = _template([
+        Step(step_id="step-1", position=0, custom_prompt_text="First."),
+        Step(step_id="step-2", position=1, custom_prompt_text="Second."),
+    ])
+
+    task = await routines.enqueue_template(template.template_id, triggered_by="manual")
+
+    lines, _, closed = run_log_bus.snapshot(task.task_id)
+    joined = "\n".join(lines)
+    assert "task" in joined and template.template_id in joined  # created-line from routines.py
+    assert "delegating to chain runner" in joined
+    assert "chain run started: 2 step(s)" in joined
+    assert "step 1/2 'step-1'" in joined and "started" in joined
+    assert "step 1/2 'step-1': completed" in joined
+    assert "step 2/2 'step-2'" in joined
+    assert "step 2/2 'step-2': completed" in joined
+    assert "chain run completed" in joined
+    assert closed is True
+    # Never the model's actual reply text - only status/pattern/model/gate/error (concept doc,
+    # section C.7): this backend's replies are always "reply #<n> from <model>".
+    assert "reply #" not in joined
+
+
+@pytest.mark.asyncio
+async def test_a_failed_chain_step_emits_a_failure_line_and_closes_the_bus(recording_backend):
+    template = _template([
+        Step(step_id="step-1", position=0, custom_prompt_text="Runs fine."),
+        Step(step_id="step-2", position=1, assigned_agent="agent:does-not-exist"),
+    ])
+
+    task = await routines.enqueue_template(template.template_id, triggered_by="manual")
+
+    lines, _, closed = run_log_bus.snapshot(task.task_id)
+    joined = "\n".join(lines)
+    assert "step 2/2 'step-2': failed - agent 'agent:does-not-exist' is not registered" in joined
+    assert closed is True
+    # The chain never reached "chain run completed" - it stopped at the failure.
+    assert "chain run completed" not in joined
+
+
+@pytest.mark.asyncio
+async def test_a_template_level_approval_gate_on_a_chain_emits_its_own_line_and_never_delegates(recording_backend):
+    """Template-level `requires_approval` (concept doc, section A.4) is checked in
+    `routines.enqueue_template()` before a multi-step template is ever handed to the chain
+    runner - its log line and bus close therefore come from routines.py, not chain_runner.py,
+    and the chain never actually starts."""
+    template = _template(
+        [
+            Step(step_id="step-1", position=0, custom_prompt_text="First."),
+            Step(step_id="step-2", position=1, custom_prompt_text="Second."),
+        ],
+        requires_approval=True
+    )
+
+    task = await routines.enqueue_template(template.template_id, triggered_by="manual")
+
+    assert task.state == TaskState.AWAITING_APPROVAL
+    lines, _, closed = run_log_bus.snapshot(task.task_id)
+    joined = "\n".join(lines)
+    assert "template requires approval" in joined
+    assert "ticket" in joined
+    assert "delegating to chain runner" not in joined
+    assert "chain run started" not in joined
+    assert closed is True
+
+
+@pytest.mark.asyncio
+async def test_a_gateway_level_approval_gate_mid_chain_emits_an_awaiting_approval_line_and_closes_the_bus(
+    recording_backend, monkeypatch
+):
+    """The gateway's own permission registry, not the template flag, can also mark
+    `execute_template` as ASK (`core/gateway.py`) - normally unreachable with this deployment's
+    default registry (`execute_template` is ALLOW, `core/permissions.py`), exercised here by
+    inserting an ASK rule ahead of it, the same way `tests/test_gateway_permissions.py` tests the
+    gateway's own ASK handling."""
+    from sentinel_fleet.core.gateway import gateway
+    from sentinel_fleet.core.permissions import PermissionAction, PermissionRule
+
+    monkeypatch.setattr(
+        gateway.permissions, "rules",
+        [PermissionRule(tool_pattern="execute_template", action=PermissionAction.ASK, reason="test")]
+        + gateway.permissions.rules
+    )
+
+    template = _template([
+        Step(step_id="step-1", position=0, custom_prompt_text="First."),
+        Step(step_id="step-2", position=1, custom_prompt_text="Second."),
+    ])
+
+    task = await routines.enqueue_template(template.template_id, triggered_by="manual")
+
+    assert task.state == TaskState.AWAITING_APPROVAL
+    lines, _, closed = run_log_bus.snapshot(task.task_id)
+    joined = "\n".join(lines)
+    assert "chain run started: 2 step(s)" in joined
+    assert "step 1/2 'step-1'" in joined and "started" in joined
+    assert "step 1/2 'step-1': awaiting approval (ticket" in joined
+    assert closed is True
+    # The chain stopped at step 1 - step 2 never started.
+    assert "step 2/2" not in joined
