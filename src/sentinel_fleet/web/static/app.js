@@ -46,6 +46,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // nothing happened.
   restoreScenarioBand();
 
+  renderTemplateTable(1);
+
   const input = document.getElementById("chat-input");
   if (input) {
     // Enter sends, shift+Enter keeps writing - the convention everywhere else in a chat.
@@ -84,6 +86,82 @@ function switchTab(tabId, save = true) {
   if (btn) btn.classList.add("active");
 
   if (save) localStorage.setItem("sentinel_active_tab", tabId);
+}
+
+function jumpToSection(sectionId) {
+  const target = document.getElementById(sectionId);
+  if (target) target.scrollIntoView({ block: "start" });
+}
+
+// ---------------------------------------------------------------------------
+// Template table: filter and pager over the rows the server already rendered. Client-side on
+// purpose - the rows are on the page, so a second request would buy nothing, and the history
+// panel each row can open has to stay attached to its own row through both operations.
+// ---------------------------------------------------------------------------
+
+const TEMPLATE_PAGE_SIZE = 25;
+
+function templateRows() {
+  const table = document.getElementById("template-table");
+  if (!table) return [];
+  return Array.from(table.querySelectorAll("tbody tr.template-row"));
+}
+
+function renderTemplateTable(page = 1) {
+  const rows = templateRows();
+  if (rows.length === 0) return;
+
+  const needle = (document.getElementById("template-filter")?.value || "").trim().toLowerCase();
+  const matches = rows.filter(row => !needle || (row.dataset.templateName || "").includes(needle));
+  const pageCount = Math.max(1, Math.ceil(matches.length / TEMPLATE_PAGE_SIZE));
+  const current = Math.min(Math.max(1, page), pageCount);
+  const first = (current - 1) * TEMPLATE_PAGE_SIZE;
+  const visible = new Set(matches.slice(first, first + TEMPLATE_PAGE_SIZE));
+
+  rows.forEach(row => {
+    const shown = visible.has(row);
+    row.style.display = shown ? "" : "none";
+    // A row's history panel is a sibling row; hiding one without the other leaves an orphaned
+    // panel under an unrelated template.
+    const history = row.nextElementSibling;
+    if (history && history.classList.contains("history-row") && !shown) {
+      history.style.display = "none";
+    }
+  });
+
+  const count = document.getElementById("template-count");
+  if (count) {
+    count.textContent = matches.length === rows.length
+      ? `${rows.length} templates`
+      : `${matches.length} of ${rows.length} templates`;
+  }
+
+  renderTemplatePager(current, pageCount);
+}
+
+function renderTemplatePager(current, pageCount) {
+  const pager = document.getElementById("template-pager");
+  if (!pager) return;
+  pager.replaceChildren();
+  if (pageCount <= 1) return;
+
+  const back = document.createElement("button");
+  back.className = "btn btn-sm";
+  back.textContent = "Previous";
+  back.disabled = current === 1;
+  back.onclick = () => renderTemplateTable(current - 1);
+
+  const where = document.createElement("span");
+  where.className = "item-meta numeric";
+  where.textContent = `page ${current} of ${pageCount}`;
+
+  const next = document.createElement("button");
+  next.className = "btn btn-sm";
+  next.textContent = "Next";
+  next.disabled = current === pageCount;
+  next.onclick = () => renderTemplateTable(current + 1);
+
+  pager.append(back, where, next);
 }
 
 function toggleModal(modalId) {

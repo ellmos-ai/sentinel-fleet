@@ -586,7 +586,15 @@
 
     <!-- FLEET -->
     <section id="tab-fleet" class="tab-pane" style="display: none;">
-      <div class="card" style="margin-bottom: var(--s-5)">
+      <!-- Three long sections stacked into one wall. These jump straight to them. -->
+      <nav class="section-jump">
+        <span class="eyebrow">On this tab</span>
+        <button class="btn-inline" onclick="jumpToSection('fleet-tasks')">Tasks</button>
+        <button class="btn-inline" onclick="jumpToSection('fleet-queue')">Task queue</button>
+        <button class="btn-inline" onclick="jumpToSection('fleet-directory')">Fleet directory</button>
+      </nav>
+
+      <div id="fleet-tasks" class="card" style="margin-bottom: var(--s-5)">
         <div class="card-header">
           <h3>Tasks</h3>
           <!-- Two ways to create used to sit side by side as equals, and the live test could
@@ -638,14 +646,22 @@
           <p>Create one, enqueue it once to see it run, then attach a routine or a schedule to make it fire on its own.</p>
         </div>
         {% else %}
+        <!-- The catalogue grows past the point where scrolling finds anything. Filter and pager
+             work on the rendered rows, so they need no second request and no server paging. -->
+        <div class="table-toolbar">
+          <input type="search" id="template-filter" class="text-input" style="max-width: 320px"
+                 placeholder="Filter by name, group or agent" oninput="renderTemplateTable(1)">
+          <span id="template-count" class="item-meta numeric"></span>
+          <div id="template-pager" class="table-pager"></div>
+        </div>
         <div class="table-wrap">
-          <table class="data-table">
+          <table class="data-table" id="template-table">
             <thead>
               <tr><th></th><th>Name</th><th>Group</th><th>Agent</th><th>Next due</th><th>Actions</th></tr>
             </thead>
             <tbody>
               {% for row in routine_catalog %}
-              <tr>
+              <tr class="template-row" data-template-name="{{ (row.name ~ ' ' ~ (row.group or '') ~ ' ' ~ row.assigned_agent)|lower }}">
                 <td>
                   <span
                     class="rt-dot{% if row.runtime_status == 'running' %} rt-dot-running{% elif row.runtime_status == 'preparing' %} rt-dot-preparing{% endif %}"
@@ -667,30 +683,38 @@
                 <td class="item-meta numeric">{{ row.assigned_agent }}</td>
                 <td class="item-meta numeric">{{ row.next_due_at|when }}</td>
                 <td>
-                  <div class="item-actions" style="margin: 0">
+                  <!-- Eight buttons per row made the table unreadable. The two an operator
+                       reaches for stay out; the rest live behind one disclosure, which needs no
+                       script and closes with Escape. -->
+                  <div class="item-actions row-actions" style="margin: 0">
                     <button class="btn btn-sm" onclick='enqueueTaskTemplate({{ row.template_id|tojson }})'>Enqueue now</button>
                     <button class="btn btn-sm" onclick='openStepsModal({{ row.template_id|tojson }}, {{ row.name|tojson }}, {{ row.steps|tojson }})'>Edit steps</button>
-                    <button class="btn btn-sm" onclick='toggleHistoryPanel({{ row.template_id|tojson }}, {{ row.name|tojson }})'>History</button>
-                    {% if row.routine %}
-                    <button class="btn btn-sm" onclick='removeRoutineBinding({{ row.template_id|tojson }})'>Remove routine</button>
-                    {% else %}
-                    <button class="btn btn-sm" onclick='openRoutineModal({{ row.template_id|tojson }}, {{ row.name|tojson }})'>Add routine</button>
-                    {% endif %}
-                    {% if row.schedule %}
-                    <button class="btn btn-sm" onclick='removeScheduleBinding({{ row.template_id|tojson }})'>Remove schedule</button>
-                    {% else %}
-                    <button class="btn btn-sm" onclick='openScheduleModal({{ row.template_id|tojson }}, {{ row.name|tojson }})'>Add schedule</button>
-                    {% endif %}
-                    {% if row.owner != viewer and row.visibility != 'own' %}
-                    <button class="btn btn-sm" onclick='hideTemplateForViewer({{ row.template_id|tojson }}, {{ viewer|tojson }})'>Hide from my view</button>
-                    {% endif %}
-                    {% if row.can_delete %}
-                    <button class="btn btn-sm btn-reject" onclick='deleteTaskTemplate({{ row.template_id|tojson }}, {{ row.owner|tojson }})'>Delete</button>
-                    {% endif %}
+                    <details class="row-more">
+                      <summary class="btn btn-sm" title="More actions for this template">More</summary>
+                      <div class="row-more-menu">
+                        <button class="btn btn-sm" onclick='toggleHistoryPanel({{ row.template_id|tojson }}, {{ row.name|tojson }})'>History</button>
+                        {% if row.routine %}
+                        <button class="btn btn-sm" onclick='removeRoutineBinding({{ row.template_id|tojson }})'>Remove routine</button>
+                        {% else %}
+                        <button class="btn btn-sm" onclick='openRoutineModal({{ row.template_id|tojson }}, {{ row.name|tojson }})'>Add routine</button>
+                        {% endif %}
+                        {% if row.schedule %}
+                        <button class="btn btn-sm" onclick='removeScheduleBinding({{ row.template_id|tojson }})'>Remove schedule</button>
+                        {% else %}
+                        <button class="btn btn-sm" onclick='openScheduleModal({{ row.template_id|tojson }}, {{ row.name|tojson }})'>Add schedule</button>
+                        {% endif %}
+                        {% if row.owner != viewer and row.visibility != 'own' %}
+                        <button class="btn btn-sm" onclick='hideTemplateForViewer({{ row.template_id|tojson }}, {{ viewer|tojson }})'>Hide from my view</button>
+                        {% endif %}
+                        {% if row.can_delete %}
+                        <button class="btn btn-sm btn-reject" onclick='deleteTaskTemplate({{ row.template_id|tojson }}, {{ row.owner|tojson }})'>Delete</button>
+                        {% endif %}
+                      </div>
+                    </details>
                   </div>
                 </td>
               </tr>
-              <tr id="history-row-{{ row.template_id }}" class="history-row" style="display: none;">
+              <tr id="history-row-{{ row.template_id }}" class="history-row" data-template-id="{{ row.template_id }}" style="display: none;">
                 <td colspan="6">
                   <div id="history-content-{{ row.template_id }}" class="history-panel"></div>
                 </td>
@@ -702,7 +726,7 @@
         {% endif %}
       </div>
 
-      <div class="card">
+      <div id="fleet-queue" class="card">
         <div class="card-header">
           <h3>Task queue</h3>
           <span class="badge-status badge-info numeric">{% if task_total > tasks|length %}latest {{ tasks|length }} of {{ task_total }}{% else %}{{ task_total }} tasks{% endif %}</span>
@@ -756,7 +780,7 @@
         {% endif %}
       </div>
 
-      <div class="section-head">
+      <div id="fleet-directory" class="section-head">
         <div>
           <h3>Fleet directory</h3>
           <p>Every agent carries an explicit tool scope. A call outside that scope quarantines the agent instead of running.</p>

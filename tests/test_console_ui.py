@@ -487,3 +487,52 @@ async def test_the_contacts_tab_says_whose_contacts_these_are():
     assert "counterparties your fleet writes to" in body
     # S2 and S3 were named nowhere but the dropdown; the live test asked what they meant.
     assert "S2 twelve months" in body and "S3 thirty-six months" in body
+
+
+@pytest.mark.asyncio
+async def test_the_fleet_tab_can_be_navigated_and_filtered():
+    """Three long sections stacked into one wall, and a template table that grows past the point
+    where scrolling finds anything."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    fleet = body.split('id="tab-fleet"')[1].split('id="tab-tickets"')[0]
+    for anchor in ("fleet-tasks", "fleet-queue", "fleet-directory"):
+        assert f'id="{anchor}"' in fleet, f"{anchor} has no anchor to jump to"
+        assert f"jumpToSection('{anchor}')" in fleet, f"nothing jumps to {anchor}"
+
+    assert 'id="template-filter"' in fleet, "the template table needs a name filter"
+    assert 'id="template-pager"' in fleet
+    assert 'class="template-row"' in fleet and "data-template-name=" in fleet
+
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert "TEMPLATE_PAGE_SIZE = 25" in script
+
+
+def test_paging_keeps_a_history_panel_with_its_own_row():
+    """Each template row can open a history panel as the row beneath it. Hiding one without the
+    other would leave an open panel sitting under an unrelated template."""
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    render = script.split("function renderTemplateTable(")[1].split("\n}")[0]
+    assert "nextElementSibling" in render and 'classList.contains("history-row")' in render
+
+
+@pytest.mark.asyncio
+async def test_template_rows_show_two_actions_and_fold_the_rest():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    assert 'class="row-more"' in body, "the extra row actions need a disclosure"
+    assert "row-more-menu" in body
+    row = body.split('class="item-actions row-actions"')[1].split("</td>")[0]
+    visible = row.split("<details")[0]
+    assert visible.count("<button") == 2, "only two actions belong outside the disclosure"
+    assert "enqueueTaskTemplate(" in visible and "openStepsModal(" in visible
+
+
+def test_readme_documents_the_demo_reset():
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    assert "Reset the demo data" in readme
+    assert "rm data/*.json" in readme

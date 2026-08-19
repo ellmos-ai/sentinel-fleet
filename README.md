@@ -149,7 +149,21 @@ Open **`http://localhost:8080`** for the operator console, the chat and race tab
 python -m pytest tests/ -v
 ```
 
-### 3. Deploy to Google Cloud Run
+### 3. Reset the demo data
+
+Every store the console writes to lives as JSON under `data/`, which is gitignored. Deleting
+those files puts the deployment back to its first-run state: the seeded agents, skills, prompts,
+contacts and task templates are recreated on the next start, and everything a session added —
+processed invoices, approval tickets, chat sessions, spans — is gone.
+
+```bash
+rm data/*.json     # then restart: python app.py
+```
+
+There is no script and no reset button on purpose. Wiping a governed system's evidence should
+take a deliberate act at the filesystem, not a click in the surface that produced the evidence.
+
+### 4. Deploy to Google Cloud Run
 
 These are the commands the hosted demo was actually deployed with (project ID and file
 paths generalised; secret values never leave Secret Manager):
