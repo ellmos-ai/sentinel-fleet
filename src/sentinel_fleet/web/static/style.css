@@ -326,6 +326,15 @@ a { color: var(--accent); }
   flex-wrap: wrap;
 }
 
+/* The overview shows the last three calls; the whole log lives in Telemetry, and this is the
+   way there rather than a second full copy of the same table. */
+.ledger-head-right {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+
 .ledger-title {
   display: flex;
   align-items: baseline;
@@ -1399,6 +1408,17 @@ a { color: var(--accent); }
   text-transform: uppercase;
   color: var(--ink-3);
   margin-top: 3px;
+}
+
+/* Two of these tiles look interchangeable at a glance - a count of ASK rules and a count of
+   requests those rules stopped. The note is what separates them. */
+.gov-stat-note {
+  display: block;
+  font-size: 10.5px;
+  font-style: normal;
+  line-height: 1.4;
+  color: var(--ink-2);
+  margin-top: var(--s-2);
 }
 
 .gov-stat.on-hold { border-left-color: var(--warn); }

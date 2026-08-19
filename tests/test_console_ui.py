@@ -361,3 +361,34 @@ async def test_one_primary_way_to_create_a_task():
     assert header.count("btn-primary") == 1, "only one primary button belongs in this header"
     # The wizard sells the walk, not the endpoint it happens to call.
     assert "name, prompt, skills, agent, then when it runs" in body
+
+
+@pytest.mark.asyncio
+async def test_the_overview_previews_show_their_newest_entries():
+    """Three sources, three different orderings, one promise: "the most recent".
+
+    telemetry.get_recent_spans() and ticket_master.list_all() are newest-first, so [:N] takes
+    the newest from them; processed_invoices is an insertion-ordered dict, so [-N:] does. A
+    slice copied from one to the other silently shows the oldest rows under a note that says
+    the opposite - which is exactly what happened to the ticket card once.
+    """
+    template = (TEMPLATE_DIR / "index.html").read_text(encoding="utf-8")
+    assert "{% for s in spans[:3]|reverse %}" in template, "the ledger must take the newest spans"
+    assert "{% for ticket in tickets[:3] %}" in template, "tickets arrive newest-first"
+    assert "{% for inv in invoices[-3:]|reverse %}" in template, "invoices arrive oldest-first"
+
+
+@pytest.mark.asyncio
+async def test_duplicated_surfaces_are_told_apart():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/")).text
+
+    # The overview ledger is a preview with a way to the whole log, not a second copy of it.
+    assert "Full log in Telemetry" in body
+    assert "switchTab('tab-telemetry')" in body
+    # Two governance tiles counted different things under near-identical labels.
+    assert "rules set to ASK, whether or not anything is waiting" in body
+    assert "requests those rules stopped, waiting on a person now" in body
+    # The memory table dropped the raw metadata dict it used to print at the operator.
+    assert "<th>Metadata</th>" not in body

@@ -134,7 +134,13 @@
           <h2>Gate ledger</h2>
           <span class="eyebrow">every tool call, every verdict</span>
         </div>
-        <span class="badge-status badge-info numeric">{{ spans|length }} spans retained</span>
+        <div class="ledger-head-right">
+          <span class="badge-status badge-info numeric">{{ spans|length }} spans retained</span>
+          <button class="btn btn-sm" onclick="switchTab('tab-telemetry')">
+            <span>Full log in Telemetry</span>
+            <svg class="icon"><use href="#i-arrow-right"/></svg>
+          </button>
+        </div>
       </div>
       {% if not spans %}
       <div class="ledger-idle">
@@ -143,7 +149,7 @@
       </div>
       {% else %}
       <div class="ledger-rows">
-        {% for s in spans[:7]|reverse %}
+        {% for s in spans[:3]|reverse %}
         <div class="ledger-row">
           <span class="ledger-time">{{ s.start_time|clock }}</span>
           <span class="ledger-op">{{ s.name }}</span>
@@ -216,7 +222,7 @@
               <p>When an agent hits an ask gate, the request appears here before anything leaves the building.</p>
             </div>
             {% endif %}
-            {% for ticket in tickets[-3:]|reverse %}
+            {% for ticket in tickets[:3] %}
             <div class="record pillar-uas">
               <div class="item-top">
                 <span class="item-title">{{ ticket.title }}</span>
@@ -846,14 +852,13 @@
       <div class="card">
         <div class="table-wrap">
           <table class="data-table">
-            <thead><tr><th>Category</th><th>Key</th><th>Content</th><th>Metadata</th></tr></thead>
+            <thead><tr><th>Category</th><th>Key</th><th>Content</th></tr></thead>
             <tbody>
               {% for m in memories %}
               <tr>
                 <td><span class="badge-status badge-purple">{{ m.category }}</span></td>
                 <td><code>{{ m.key }}</code></td>
                 <td>{{ m.content }}</td>
-                <td class="item-meta">{{ m.metadata }}</td>
               </tr>
               {% endfor %}
             </tbody>
@@ -1008,6 +1013,7 @@
         <div class="gov-stat on-hold">
           <b>{{ gov.permissions.summary.held_at_gate }}</b>
           <span>held at the gate</span>
+          <em class="gov-stat-note">rules set to ASK, whether or not anything is waiting</em>
         </div>
         <div class="gov-stat">
           <b>{{ gov.permissions.summary.on_default }}</b>
@@ -1024,6 +1030,7 @@
         <div class="gov-stat on-hold">
           <b>{{ gov.tickets.summary.pending }}</b>
           <span>approvals open</span>
+          <em class="gov-stat-note">requests those rules stopped, waiting on a person now</em>
         </div>
         <div class="gov-stat">
           <b>{{ gov.plans.summary.total }}</b>
