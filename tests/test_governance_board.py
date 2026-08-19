@@ -419,3 +419,73 @@ async def test_board_is_read_only(client):
     """A read federation has no write surface. If one is ever added, this test should be the
     thing that forces the decision into the open."""
     assert (await client.post("/api/governance/board")).status_code == 405
+
+
+# ---------------------------------------------------------------------------
+# The Governance tab
+#
+# Rendering assertions only - a Jinja error in index.html turns the whole entry page into a 500,
+# and the console has no other way to notice. They check that every section's loop body really
+# ran, never how many rows it produced, because the registers behind them are shared.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_governance_tab_renders_with_all_its_sections(client):
+    body = (await client.get("/")).text
+
+    assert 'id="btn-tab-governance"' in body
+    assert 'id="tab-governance"' in body
+    for heading in ("Governance board", "How a call is gated", "Permission matrix", "Policies",
+                    "Decisions", "Evidence", "Locks &amp; quarantine", "Plans", "Approvals",
+                    "Model usage"):
+        assert heading in body, f"governance section missing: {heading}"
+
+
+@pytest.mark.asyncio
+async def test_matrix_renders_identity_columns_and_a_legend(client):
+    body = (await client.get("/")).text
+
+    # Column heads carry the identity, cells carry the mark plus its explanation on hover.
+    assert 'class="mx-id"' in body
+    assert "mx-cell mx-out" in body
+    assert "outside this identity&#39;s scope" in body or "outside this identity's scope" in body
+    # The seeded fleet's ASK-gated tool and its reason both reach the page.
+    assert "execute_bank_transfer" in body
+    assert "Financial disbursements require human signoff" in body
+
+
+@pytest.mark.asyncio
+async def test_board_states_its_counting_window_on_the_page(client):
+    """The ring buffer is the one thing a governance number can quietly lie about."""
+    body = (await client.get("/")).text
+    assert "ring buffer, limit" in body
+    assert "have been exported in total" in body
+
+
+@pytest.mark.asyncio
+async def test_policy_thresholds_reach_the_page(client):
+    body = (await client.get("/")).text
+    assert f"{MATH_TOLERANCE_EUR:.2f} EUR" in body
+    assert f"at most {DEFAULT_MAX_CONSECUTIVE_STEPS} consecutive" in body
+
+
+@pytest.mark.asyncio
+async def test_usage_section_says_why_it_is_empty_in_demo_mode(client):
+    """An empty cost panel must read as "nothing was metered", never as "spend was zero"."""
+    body = (await client.get("/")).text
+    assert "Nothing metered yet" in body
+    assert "reports no" in body and "token usage" in body
+
+
+@pytest.mark.asyncio
+async def test_a_real_run_shows_up_on_the_board(client):
+    """End to end: process a document, then read its verdicts back off the board's API."""
+    await client.post("/api/omniledger/process", data={"preset_type": "missing_vat"})
+    board = (await client.get("/api/governance/board")).json()
+
+    tools = {row["tool"] for row in board["decisions"]["by_tool"]}
+    assert "validate_tax_compliance" in tools
+    # The dispute path hits the ASK gate, which parks the call rather than completing it.
+    assert board["decisions"]["by_verdict"]["held"] >= 1
+    # And Model Armor left evidence that it looked at the arguments.
+    assert any(row["event"] == "model_armor_sanitized" for row in board["evidence"]["counts"])

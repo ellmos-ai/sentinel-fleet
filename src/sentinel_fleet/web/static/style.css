@@ -1181,6 +1181,108 @@ a { color: var(--accent); }
   box-shadow: var(--lift-high);
 }
 
+/* ---------- Governance board ---------- */
+
+/* Every count on this board is read from a ring buffer or a live register, so the board states
+   its own counting window rather than letting a number read as all-time. */
+.gov-window {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  border-left: 2px solid var(--rule-strong);
+  padding-left: var(--s-3);
+  margin-bottom: var(--s-4);
+}
+
+.gov-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
+}
+
+.gov-stat {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--r-1);
+  padding: var(--s-3);
+}
+
+.gov-stat b {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 21px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: var(--ink);
+}
+
+.gov-stat span {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-top: 3px;
+}
+
+.gov-stat.on-hold { border-left-color: var(--warn); }
+.gov-stat.on-refused { border-left-color: var(--danger); }
+
+/* The gate sequence: the order the Sovereign Gateway applies its checks in. */
+.gate-seq { display: flex; flex-wrap: wrap; gap: var(--s-3); }
+
+.gate-stage {
+  flex: 1 1 168px;
+  border-left: 2px solid var(--accent);
+  padding-left: var(--s-3);
+}
+
+.gate-stage b { display: block; font-size: 12.5px; }
+.gate-stage span { display: block; font-size: 11.5px; color: var(--ink-2); margin-top: 2px; }
+.gate-stage-no {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+/* Permission matrix: one tool per row, one identity per column. Column heads run vertically -
+   twelve identity names would otherwise force a 2600px-wide table for a grid of single marks. */
+.matrix-table th.mx-id {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  height: 128px;
+  vertical-align: bottom;
+  padding: var(--s-2) 5px;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11.5px;
+}
+
+.matrix-table td.mx-mark { text-align: center; padding: 6px 5px; }
+.matrix-table .mx-tool { font-family: var(--font-mono); font-size: 12px; font-weight: 600; }
+
+.mx-cell { font-size: 13px; line-height: 1; }
+.mx-allow { color: var(--ok); }
+.mx-ask { color: var(--warn); }
+.mx-deny { color: var(--danger); }
+.mx-out { color: var(--rule-strong); }
+
+.gov-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+  margin-top: var(--s-3);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--rule);
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.gov-legend span { display: inline-flex; align-items: center; gap: 5px; }
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 900px) {

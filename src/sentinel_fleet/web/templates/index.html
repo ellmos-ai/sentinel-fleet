@@ -65,6 +65,9 @@
       <button id="btn-tab-telemetry" class="tab-btn" onclick="switchTab('tab-telemetry')">
         <svg class="icon"><use href="#i-pulse"/></svg> Telemetry <span class="tab-count">{{ spans|length }}</span>
       </button>
+      <button id="btn-tab-governance" class="tab-btn" onclick="switchTab('tab-governance')">
+        <svg class="icon"><use href="#i-shield"/></svg> Governance <span class="tab-count">{{ governance.permissions.summary.tools }}</span>
+      </button>
     </nav>
 
     <!-- OVERVIEW -->
@@ -880,6 +883,515 @@
               {% endfor %}
             </tbody>
           </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- GOVERNANCE -->
+    {% set gov = governance %}
+    <section id="tab-governance" class="tab-pane" style="display: none;">
+      <div class="section-head">
+        <div>
+          <h3>Governance board</h3>
+          <p>
+            Who may call what, which policies are enforced, what the gate decided, which
+            identities are locked out, what plans stand and what a human signed off — read live
+            from the registers that already hold it. The board stores nothing of its own.
+          </p>
+        </div>
+        <span class="badge-status badge-info numeric">{{ gov.permissions.summary.tools }} tools governed</span>
+      </div>
+
+      <div class="gov-window">
+        Verdict counts cover the {{ gov.window.retained_spans }} span records currently retained
+        (ring buffer, limit {{ gov.window.retention_limit }}); {{ gov.window.exported_total }} spans
+        have been exported in total. Scopes, policies, plans and approvals are read in full.
+      </div>
+
+      <div class="gov-stats">
+        <div class="gov-stat">
+          <b>{{ gov.permissions.summary.grants }}</b>
+          <span>tool grants</span>
+        </div>
+        <div class="gov-stat on-hold">
+          <b>{{ gov.permissions.summary.held_at_gate }}</b>
+          <span>held at the gate</span>
+        </div>
+        <div class="gov-stat">
+          <b>{{ gov.permissions.summary.on_default }}</b>
+          <span>on registry default</span>
+        </div>
+        <div class="gov-stat on-refused">
+          <b>{{ gov.decisions.by_verdict.refused }}</b>
+          <span>calls refused</span>
+        </div>
+        <div class="gov-stat on-refused">
+          <b>{{ gov.agents.quarantined }}</b>
+          <span>identities quarantined</span>
+        </div>
+        <div class="gov-stat on-hold">
+          <b>{{ gov.tickets.summary.pending }}</b>
+          <span>approvals open</span>
+        </div>
+        <div class="gov-stat">
+          <b>{{ gov.plans.summary.total }}</b>
+          <span>plans standing</span>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom: var(--s-4)">
+        <div class="card-header">
+          <h3><svg class="icon"><use href="#i-lock"/></svg> How a call is gated</h3>
+          <span class="item-meta">{{ gov.gate_sequence_source }}</span>
+        </div>
+        <div class="gate-seq">
+          {% for stage in gov.gate_sequence %}
+          <div class="gate-stage">
+            <span class="gate-stage-no">{{ "%02d"|format(loop.index) }}</span>
+            <b>{{ stage.stage }}</b>
+            <span>{{ stage.detail }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Permission matrix: the heart of the board. Tools down, identities across. -->
+      <div class="card" style="margin-bottom: var(--s-4)">
+        <div class="card-header">
+          <h3><svg class="icon"><use href="#i-shield"/></svg> Permission matrix</h3>
+          <span class="item-meta">
+            {{ gov.permissions.summary.tools }} tools × {{ gov.permissions.summary.columns }} identities,
+            {{ gov.permissions.summary.grants }} of {{ gov.permissions.summary.cells }} cells granted
+          </span>
+        </div>
+        <p class="item-desc">
+          Two controls meet in every cell and fail differently. Least privilege decides whether an
+          identity carries the tool at all — calling outside it quarantines the agent. The
+          permission registry decides what happens when a scoped call arrives: run it, hold it for
+          a person, or refuse it outright.
+        </p>
+        <div class="table-wrap">
+          <table class="data-table matrix-table">
+            <thead>
+              <tr>
+                <th>Tool</th>
+                <th>Verdict</th>
+                <th>Held by</th>
+                {% for identity in gov.permissions.identities %}
+                <th class="mx-id" title="{{ identity.agent_id }} — {{ identity.role }}, {{ identity.scope_size }} tools in scope">
+                  {{ identity.label }}
+                </th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in gov.permissions.rows %}
+              <tr>
+                <td>
+                  <span class="mx-tool">{{ row.tool }}</span>
+                  {% if row.reason %}<div class="item-meta">{{ row.reason }}</div>{% endif %}
+                </td>
+                <td>
+                  <span class="badge-status {% if row.action == 'allow' %}badge-ok{% elif row.action == 'ask' %}badge-warn{% else %}badge-danger{% endif %}">{{ row.action }}</span>
+                  <div class="item-meta">
+                    {% if row.source == 'rule' %}explicit rule{% else %}registry default{% endif %}
+                  </div>
+                </td>
+                <td class="numeric">
+                  {% if row.unheld %}
+                  <span class="badge-status stamp-quiet" title="No identity carries this tool — defence in depth">none</span>
+                  {% else %}{{ row.holder_count }}{% endif %}
+                </td>
+                {% for cell in row.cells %}
+                <td class="mx-mark">
+                  {% if cell.granted %}
+                  <span class="mx-cell mx-{{ cell.state }}" title="{{ cell.title }}">&#9679;</span>
+                  {% else %}
+                  <span class="mx-cell mx-out" title="{{ cell.title }}">&middot;</span>
+                  {% endif %}
+                </td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="gov-legend">
+          <span><b class="mx-cell mx-allow">&#9679;</b> in scope, runs on arrival</span>
+          <span><b class="mx-cell mx-ask">&#9679;</b> in scope, held for human signoff</span>
+          <span><b class="mx-cell mx-deny">&#9679;</b> in scope, refused by the registry</span>
+          <span><b class="mx-cell mx-out">&middot;</b> outside this identity's scope</span>
+        </div>
+      </div>
+
+      <div class="grid" style="margin-bottom: var(--s-4)">
+        <!-- Policies -->
+        <div class="card">
+          <div class="card-header">
+            <h3><svg class="icon"><use href="#i-document"/></svg> Policies</h3>
+            <span class="badge-status badge-info numeric">{{ gov.policies|length }} enforced</span>
+          </div>
+          <div class="card-body">
+            {% for policy in gov.policies %}
+            <div class="record pillar-control">
+              <div class="item-top">
+                <span class="item-title">{{ policy.name }}</span>
+                <span class="badge-status badge-danger">{{ policy.outcome }}</span>
+              </div>
+              <p class="item-desc">{{ policy.summary }}</p>
+              {% if policy.checks %}
+              <div class="chip-row">
+                {% for check in policy.checks %}
+                <span class="chip" title="{{ check.violation }}">{{ check.field }}</span>
+                {% endfor %}
+              </div>
+              {% endif %}
+              <div class="item-meta" style="margin-top: var(--s-2)">{{ policy.source }}</div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Decisions -->
+        <div class="card">
+          <div class="card-header">
+            <h3><svg class="icon"><use href="#i-check"/></svg> Decisions</h3>
+            <span class="badge-status badge-info numeric">{{ gov.decisions.total }} verdicts</span>
+          </div>
+          <div class="card-body">
+            {% if not gov.decisions.total %}
+            <div class="empty-state">
+              <svg class="icon"><use href="#i-empty"/></svg>
+              <h4>No governed calls yet</h4>
+              <p>Run a scenario or a task and every tool call lands here with its verdict.</p>
+            </div>
+            {% else %}
+            <div class="chip-row" style="margin-bottom: var(--s-3)">
+              <span class="badge-status badge-ok">{{ gov.decisions.by_verdict.passed }} passed</span>
+              <span class="badge-status badge-warn">{{ gov.decisions.by_verdict.held }} held</span>
+              <span class="badge-status badge-danger">{{ gov.decisions.by_verdict.refused }} refused</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Tool</th><th>Calls</th><th>Passed</th><th>Held</th><th>Refused</th></tr></thead>
+                <tbody>
+                  {% for row in gov.decisions.by_tool[:8] %}
+                  <tr>
+                    <td><code>{{ row.tool }}</code></td>
+                    <td class="numeric">{{ row.total }}</td>
+                    <td class="numeric">{{ row.passed }}</td>
+                    <td class="numeric">{{ row.held }}</td>
+                    <td class="numeric">{{ row.refused }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="item-meta" style="margin-top: var(--s-3)">Most recent decisions</div>
+            {% for row in gov.decisions.recent[:6] %}
+            <div class="ledger-row">
+              <span class="ledger-time">{{ row.at|clock }}</span>
+              <span class="ledger-op">{{ row.operation }}</span>
+              <span class="ledger-actor item-meta">{{ row.agent_id }}</span>
+              <span>
+                <span class="badge-status {% if row.verdict == 'passed' %}badge-ok{% elif row.verdict == 'held' %}badge-warn{% else %}badge-danger{% endif %}">{{ row.status }}</span>
+              </span>
+            </div>
+            {% endfor %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="grid" style="margin-bottom: var(--s-4)">
+        <!-- Evidence -->
+        <div class="card">
+          <div class="card-header">
+            <h3><svg class="icon"><use href="#i-alert"/></svg> Evidence</h3>
+            <span class="badge-status badge-info numeric">{{ gov.evidence.total }} checks recorded</span>
+          </div>
+          <div class="card-body">
+            <p class="item-desc">
+              A verdict says what the gate decided; these say what it looked at — the privacy
+              screen on an outbound document, the armor scan on tool arguments, the inspection of
+              a fetched page.
+            </p>
+            {% if not gov.evidence.total %}
+            <div class="empty-state">
+              <svg class="icon"><use href="#i-empty"/></svg>
+              <h4>Nothing inspected yet</h4>
+              <p>Process a document or read a page, and the check that ran is recorded here.</p>
+            </div>
+            {% else %}
+            <div class="chip-row" style="margin-bottom: var(--s-3)">
+              {% for row in gov.evidence.counts %}
+              <span class="chip">{{ row.event }} &times;{{ row.count }}</span>
+              {% endfor %}
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>When</th><th>Check</th><th>Subject</th><th>Finding</th></tr></thead>
+                <tbody>
+                  {% for row in gov.evidence.recent[:8] %}
+                  <tr>
+                    <td class="numeric">{{ row.at|clock }}</td>
+                    <td><b>{{ row.event }}</b><div class="item-meta">{{ row.agent_id }}</div></td>
+                    <td class="item-meta">{{ row.subject }}</td>
+                    <td class="item-meta">
+                      {% if row.verdict %}
+                      <span class="badge-status {% if row.verdict == 'green' %}badge-ok{% elif row.verdict == 'red' %}badge-danger{% else %}badge-warn{% endif %}">{{ row.verdict }}</span>
+                      {% endif %}
+                      {{ row.details }}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Locks & quarantine -->
+        <div class="card">
+          <div class="card-header">
+            <h3><svg class="icon"><use href="#i-ban"/></svg> Locks &amp; quarantine</h3>
+            <span class="badge-status {% if gov.agents.quarantined %}badge-danger{% else %}badge-ok{% endif %} numeric">
+              {{ gov.agents.quarantined }} locked out
+            </span>
+          </div>
+          <div class="card-body">
+            {% if not gov.agents.flagged %}
+            <div class="empty-state">
+              <svg class="icon"><use href="#i-check"/></svg>
+              <h4>Every identity is clear</h4>
+              <p>No agent is quarantined or waiting on an approval right now.</p>
+            </div>
+            {% else %}
+            {% for row in gov.agents.flagged %}
+            <div class="record {% if row.status == 'quarantined' %}is-quarantined{% else %}pillar-conductor{% endif %}">
+              <div class="item-top">
+                <span class="item-title">{{ row.name }}</span>
+                <span class="badge-status {% if row.status == 'quarantined' %}badge-danger{% else %}badge-warn{% endif %}">{{ row.status }}</span>
+              </div>
+              <div class="item-meta">{{ row.agent_id }} — {{ row.role }}</div>
+              {% if row.quarantine_reason %}<p class="item-desc">{{ row.quarantine_reason }}</p>{% endif %}
+              <div class="item-meta">
+                {% if row.last_refusal_at %}
+                Last refusing verdict {{ row.last_refusal_at|clock }} on {{ row.last_refusal_operation }} ({{ row.last_refusal_status }}).
+                {% else %}
+                No refusing verdict on the retained ledger — the span it came from has rolled out of the buffer.
+                {% endif %}
+              </div>
+              {% if row.status == 'quarantined' %}
+              <div class="item-actions">
+                <button class="btn btn-sm" onclick="releaseQuarantine('{{ row.agent_id }}')">
+                  <svg class="icon"><use href="#i-unlock"/></svg> Release quarantine
+                </button>
+              </div>
+              {% else %}
+              <div class="item-meta">
+                Held by the approval gate, not by a lock — decide the ticket on the Approvals tab.
+              </div>
+              {% endif %}
+            </div>
+            {% endfor %}
+            {% endif %}
+            <div class="chip-row" style="margin-top: var(--s-3)">
+              {% for row in gov.agents.by_status %}
+              <span class="chip">{{ row.count }} {{ row.status }}</span>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Plans -->
+      <div class="card" style="margin-bottom: var(--s-4)">
+        <div class="card-header">
+          <h3><svg class="icon"><use href="#i-gear"/></svg> Plans</h3>
+          <span class="item-meta">
+            {{ gov.plans.summary.total }} standing · {{ gov.plans.summary.chained }} chained ·
+            {{ gov.plans.summary.gated }} gated on approval · {{ gov.plans.summary.bound }} bound to a trigger
+          </span>
+        </div>
+        <p class="item-desc">
+          Every task template with its steps, the identities each step runs as, and what makes it
+          recur. Unfiltered: the Fleet tab honours what one viewer hid from their own list, this
+          view is the fleet's standing work.
+        </p>
+        {% if not gov.plans.rows %}
+        <div class="empty-state">
+          <svg class="icon"><use href="#i-empty"/></svg>
+          <h4>No plans yet</h4>
+          <p>Create a task template on the Fleet tab and it appears here with its steps and bindings.</p>
+        </div>
+        {% else %}
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Plan</th><th>Owner</th><th>Steps</th><th>Runs as</th><th>Gate</th><th>Bindings</th><th>Next due</th></tr>
+            </thead>
+            <tbody>
+              {% for row in gov.plans.rows[:25] %}
+              <tr>
+                <td>
+                  <b>{{ row.name }}</b>
+                  <div class="item-meta">{{ row.template_id }}{% if row.group %} · {{ row.group }}{% endif %}</div>
+                </td>
+                <td class="item-meta">{{ row.owner }}</td>
+                <td class="numeric">
+                  {{ row.step_count }}
+                  {% if row.step_count > 1 %}<span class="badge-status stamp-quiet">chain</span>{% endif %}
+                </td>
+                <td class="item-meta">
+                  {% for agent in row.agents %}<div>{{ agent }}</div>{% endfor %}
+                </td>
+                <td>
+                  {% if row.requires_approval %}
+                  <span class="badge-status badge-warn">approval</span>
+                  {% else %}
+                  <span class="badge-status stamp-quiet">autonomous</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% for binding in row.bindings %}<span class="chip">{{ binding }}</span>{% endfor %}
+                  {% if not row.bindings %}<span class="item-meta">—</span>{% endif %}
+                </td>
+                <td class="item-meta">{{ row.next_due_at|when }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if gov.plans.rows|length > 25 %}
+        <div class="item-meta" style="margin-top: var(--s-2)">
+          Showing the first 25 of {{ gov.plans.rows|length }} plans, status first.
+        </div>
+        {% endif %}
+        {% endif %}
+      </div>
+
+      <div class="grid">
+        <!-- Tickets & approvals -->
+        <div class="card">
+          <div class="card-header">
+            <h3><svg class="icon"><use href="#i-inbox"/></svg> Approvals</h3>
+            <span class="item-meta">
+              {{ gov.tickets.summary.pending }} open ·
+              {{ gov.tickets.summary.approved }} approved ·
+              {{ gov.tickets.summary.rejected }} rejected
+            </span>
+          </div>
+          <div class="card-body">
+            <p class="item-desc">
+              What a person actually decided. An ASK verdict at the gate parks the agent and opens
+              one of these; nothing external happens until someone signs it off.
+            </p>
+            {% if gov.tickets.pending %}
+            <div class="item-meta">Open</div>
+            {% for row in gov.tickets.pending[:6] %}
+            <div class="record pillar-uas">
+              <div class="item-top">
+                <span class="item-title">{{ row.title }}</span>
+                <span class="badge-status badge-warn">{{ row.priority }}</span>
+              </div>
+              <div class="item-meta">{{ row.ticket_id }} · {{ row.agent_id }} · <code>{{ row.tool_name }}</code> · opened {{ row.created_at|clock }}</div>
+            </div>
+            {% endfor %}
+            {% endif %}
+            {% if gov.tickets.decided %}
+            <div class="item-meta" style="margin-top: var(--s-3)">Decided</div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Ticket</th><th>Tool</th><th>Outcome</th><th>Decided</th></tr></thead>
+                <tbody>
+                  {% for row in gov.tickets.decided[:8] %}
+                  <tr>
+                    <td><code>{{ row.ticket_id }}</code><div class="item-meta">{{ row.title }}</div></td>
+                    <td class="item-meta"><code>{{ row.tool_name }}</code></td>
+                    <td>
+                      <span class="badge-status {% if row.status == 'approved' %}badge-ok{% elif row.status == 'rejected' %}badge-danger{% else %}badge-info{% endif %}">{{ row.status }}</span>
+                    </td>
+                    <td class="item-meta">{% if row.resolved_at %}{{ row.resolved_at|clock }}{% else %}—{% endif %}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% endif %}
+            {% if not gov.tickets.pending and not gov.tickets.decided %}
+            <div class="empty-state">
+              <svg class="icon"><use href="#i-empty"/></svg>
+              <h4>Nothing has needed a signature yet</h4>
+              <p>An ASK verdict at the gate opens an approval here.</p>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Cost & usage -->
+        <div class="card">
+          <div class="card-header">
+            <h3><svg class="icon"><use href="#i-pulse"/></svg> Model usage</h3>
+            <span class="badge-status badge-info numeric">{{ gov.usage.metered_calls }} metered calls</span>
+          </div>
+          <div class="card-body">
+            <p class="item-desc">
+              Token spend as the provider reported it, attributed to the gate-ledger row the call
+              ran under. Only live calls through the gateway are metered.
+            </p>
+            {% if not gov.usage.metered_calls %}
+            <div class="empty-state">
+              <svg class="icon"><use href="#i-empty"/></svg>
+              <h4>Nothing metered yet</h4>
+              <p>
+                {% if gemini_live %}
+                No live model call has run in this window yet.
+                {% else %}
+                This deployment runs on the demo backend, which calls no model and reports no
+                token usage. A zero here would be a made-up number, so the column stays empty.
+                {% endif %}
+              </p>
+            </div>
+            {% else %}
+            <div class="gov-stats">
+              <div class="gov-stat">
+                <b>{{ gov.usage.total_tokens }}</b>
+                <span>total tokens</span>
+              </div>
+              <div class="gov-stat">
+                <b>{{ gov.usage.prompt_tokens }}</b>
+                <span>prompt tokens</span>
+              </div>
+              <div class="gov-stat">
+                <b>{{ gov.usage.output_tokens }}</b>
+                <span>output tokens</span>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Model</th><th>Calls</th><th>Prompt</th><th>Output</th><th>Total</th></tr></thead>
+                <tbody>
+                  {% for row in gov.usage.by_model %}
+                  <tr>
+                    <td><code>{{ row.model }}</code></td>
+                    <td class="numeric">{{ row.calls }}</td>
+                    <td class="numeric">{{ row.prompt_tokens }}</td>
+                    <td class="numeric">{{ row.output_tokens }}</td>
+                    <td class="numeric">{{ row.total_tokens }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="item-meta" style="margin-top: var(--s-2)">
+              Each column sums the calls that reported that field:
+              {{ gov.usage.reported.prompt_tokens }} reported a prompt count,
+              {{ gov.usage.reported.total_tokens }} a total.
+            </div>
+            {% endif %}
+          </div>
         </div>
       </div>
     </section>
