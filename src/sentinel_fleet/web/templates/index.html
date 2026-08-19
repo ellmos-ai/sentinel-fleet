@@ -454,41 +454,6 @@
 
     <!-- FLEET -->
     <section id="tab-fleet" class="tab-pane" style="display: none;">
-      <div class="section-head">
-        <div>
-          <h3>Fleet directory</h3>
-          <p>Every agent carries an explicit tool scope. A call outside that scope quarantines the agent instead of running.</p>
-        </div>
-        <button class="btn btn-primary" onclick="toggleModal('modal-task')">
-          <svg class="icon"><use href="#i-plus"/></svg> Queue a task
-        </button>
-      </div>
-
-      <div class="grid" style="margin-bottom: var(--s-5)">
-        {% for agent in agents %}
-        <div class="record pillar-control {% if agent.status.value == 'quarantined' %}is-quarantined{% endif %}">
-          <div class="item-top">
-            <span class="item-title">{{ agent.name }}</span>
-            <span class="badge-status {% if agent.status.value == 'quarantined' %}badge-danger{% elif agent.status.value == 'active' %}badge-ok{% elif agent.status.value == 'waiting_approval' %}badge-warn{% else %}badge-info{% endif %}">
-              {{ agent.status.value }}
-            </span>
-          </div>
-          <div class="item-meta numeric">{{ agent.agent_id }}</div>
-          <div class="item-desc">{{ agent.description }}</div>
-          <div class="chip-row">
-            {% for tool in agent.allowed_tools %}<span class="chip">{{ tool }}</span>{% endfor %}
-          </div>
-          {% if agent.status.value == 'quarantined' %}
-          <div class="item-actions">
-            <button class="btn btn-sm btn-approve" onclick='releaseQuarantine({{ agent.agent_id|tojson }})'>
-              <svg class="icon"><use href="#i-unlock"/></svg> Release quarantine
-            </button>
-          </div>
-          {% endif %}
-        </div>
-        {% endfor %}
-      </div>
-
       <div class="card" style="margin-bottom: var(--s-5)">
         <div class="card-header">
           <h3>Tasks</h3>
@@ -653,6 +618,41 @@
           </table>
         </div>
         {% endif %}
+      </div>
+
+      <div class="section-head">
+        <div>
+          <h3>Fleet directory</h3>
+          <p>Every agent carries an explicit tool scope. A call outside that scope quarantines the agent instead of running.</p>
+        </div>
+        <button class="btn btn-primary" onclick="toggleModal('modal-task')">
+          <svg class="icon"><use href="#i-plus"/></svg> Queue a task
+        </button>
+      </div>
+
+      <div class="grid" style="margin-bottom: var(--s-5)">
+        {% for agent in agents %}
+        <div class="record pillar-control {% if agent.status.value == 'quarantined' %}is-quarantined{% endif %}">
+          <div class="item-top">
+            <span class="item-title">{{ agent.name }}</span>
+            <span class="badge-status {% if agent.status.value == 'quarantined' %}badge-danger{% elif agent.status.value == 'active' %}badge-ok{% elif agent.status.value == 'waiting_approval' %}badge-warn{% else %}badge-info{% endif %}">
+              {{ agent.status.value }}
+            </span>
+          </div>
+          <div class="item-meta numeric">{{ agent.agent_id }}</div>
+          <div class="item-desc">{{ agent.description }}</div>
+          <div class="chip-row">
+            {% for tool in agent.allowed_tools %}<span class="chip">{{ tool }}</span>{% endfor %}
+          </div>
+          {% if agent.status.value == 'quarantined' %}
+          <div class="item-actions">
+            <button class="btn btn-sm btn-approve" onclick='releaseQuarantine({{ agent.agent_id|tojson }})'>
+              <svg class="icon"><use href="#i-unlock"/></svg> Release quarantine
+            </button>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
       </div>
     </section>
 
