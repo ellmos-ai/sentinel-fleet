@@ -6,7 +6,7 @@
 [![Gemini 3.5](https://img.shields.io/badge/Gemini-3.5%20Flash%20Vision-orange.svg)](https://deepmind.google/technologies/gemini/)
 [![Zero-Trust Model Armor](https://img.shields.io/badge/Security-Model%20Armor%20%26%20Zero--Trust-green.svg)](#security--governance)
 [![Google GenAI SDK](https://img.shields.io/badge/SDK-google--genai-4285F4.svg)](https://googleapis.github.io/python-genai/)
-[![Pytest](https://img.shields.io/badge/pytest-447%2F447%20passed-brightgreen.svg)](tests/)
+[![Pytest](https://img.shields.io/badge/pytest-448%2F448%20passed-brightgreen.svg)](tests/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
 > Built for the **Google Cloud All Things Agentic Hackathon** (Track 3: The Fortified Enterprise Fleet & Track 1: The Taskmaster).
@@ -245,5 +245,5 @@ SentinelFleet is licensed under the **GNU Affero General Public License v3.0** (
 ## Scope, Provenance & Data Notes
 
 * **Demo, not advice.** The OmniLedger domain validates demo invoices against German statutory rules (§ 14 UStG, GoBD) as a technical showcase. It is an AI-assisted engineering demo — not tax, accounting or legal advice; whether any concrete use meets statutory requirements depends on the individual case.
-* **Provenance.** Built by Lukas Geiger for the Google Cloud All Things Agentic Hackathon with substantial AI coding assistance (Google Gemini, Anthropic Claude); all AI-generated code was human-directed and is covered by the currently verified 447-test suite. Some skill definitions are English rebrands of the author's private skills library.
+* **Provenance.** Built by Lukas Geiger for the Google Cloud All Things Agentic Hackathon with substantial AI coding assistance (Google Gemini, Anthropic Claude); all AI-generated code was human-directed and is covered by the currently verified 448-test suite. Some skill definitions are English rebrands of the author's private skills library.
 * **Data.** Chat messages and privacy-screened GREEN/YELLOW document uploads may be sent to the Gemini API when a `GEMINI_API_KEY` is configured. RED, UNSCREENED and truncated documents stay on the local extraction path; without a key, no model payload is sent to Gemini. The Web reader still performs operator-requested external GETs, and configured Firestore/Cloud Trace backends still receive their documented records. Do not upload real invoices or personal data to a demo deployment, and please do not post case data in issues.

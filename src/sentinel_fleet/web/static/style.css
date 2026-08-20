@@ -36,6 +36,18 @@
   --danger: #a32218;
   --danger-wash: #f8e6e4;
 
+  /* Workspace navigation. The tints bind related links into one readable layer; the stronger
+     line and ink remain available when colour perception is reduced. */
+  --nav-work: #2b3a8f;
+  --nav-work-layer: #f0f2fa;
+  --nav-work-rule: #c8cfea;
+  --nav-control: #0b6e6e;
+  --nav-control-layer: #edf6f5;
+  --nav-control-rule: #bddbd8;
+  --nav-reference: #56616c;
+  --nav-reference-layer: #f1f3f5;
+  --nav-reference-rule: #d0d6dc;
+
   /* Pillar index. Used as a 2px spine and a label colour, never as a background fill. */
   --pillar-control: #2b3a8f;
   --pillar-conductor: #0b6e6e;
@@ -88,6 +100,16 @@
   --warn-wash: #322511;
   --danger: #e8776b;
   --danger-wash: #351a17;
+
+  --nav-work: #9daaf0;
+  --nav-work-layer: #171d35;
+  --nav-work-rule: #3b4775;
+  --nav-control: #5fc8c2;
+  --nav-control-layer: #102c2c;
+  --nav-control-rule: #2d5958;
+  --nav-reference: #a9b4bf;
+  --nav-reference-layer: #1b222a;
+  --nav-reference-rule: #3b4651;
 
   --pillar-control: #8fa0ee;
   --pillar-conductor: #4fbdbd;
@@ -421,55 +443,79 @@ a { color: var(--accent); }
 /* ---------- Tab rail ---------- */
 
 .tab-rail {
+  margin-bottom: var(--s-5);
+  overflow: visible;
+}
+
+/* Each group is one visual and wrapping unit. Flex wrapping moves a whole category to the next
+   row before any individual link can create a horizontal scrollbar. */
+.tab-groups {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+}
+
+.tab-group {
+  --group-accent: var(--ink-2);
+  --group-layer: var(--surface-sunk);
+  --group-rule: var(--rule);
+  min-width: 0;
+  border: 1px solid var(--group-rule);
+  border-top: 3px solid var(--group-accent);
+  border-radius: var(--r-2);
+  background: var(--group-layer);
+}
+
+.tab-group.on-work {
+  --group-accent: var(--nav-work);
+  --group-layer: var(--nav-work-layer);
+  --group-rule: var(--nav-work-rule);
+  flex: 0.72 1 190px;
+}
+
+.tab-group.on-control {
+  --group-accent: var(--nav-control);
+  --group-layer: var(--nav-control-layer);
+  --group-rule: var(--nav-control-rule);
+  flex: 2 1 510px;
+}
+
+.tab-group.on-reference {
+  --group-accent: var(--nav-reference);
+  --group-layer: var(--nav-reference-layer);
+  --group-rule: var(--nav-reference-rule);
+  flex: 1.2 1 340px;
+}
+
+.tab-group-title {
+  display: block;
+  padding: 7px 11px 6px;
+  color: var(--group-accent);
+  border-bottom: 1px solid var(--group-rule);
+}
+
+.tab-group-toggle { display: none; }
+
+.tab-group-links {
   display: flex;
   align-items: center;
-  gap: var(--s-1);
-  margin-bottom: var(--s-5);
-  border-bottom: 1px solid var(--rule);
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
-
-/* Three groups: where work is done, where the fleet is run and governed, and what only answers
-   questions. The colour is an index carried by the group label and by the active tab's
-   underline - never a fill, in line with the pillar hues elsewhere. */
-.tab-group-label {
-  align-self: center;
-  padding: 0 var(--s-2) 0 0;
-  white-space: nowrap;
-  color: var(--ink-3);
-}
-
-.tab-group-label.on-work { color: var(--accent); }
-.tab-group-label.on-control { color: var(--pillar-conductor); }
-.tab-group-label.on-reference { color: var(--ink-3); }
-
-.tab-btn.on-work.active { color: var(--accent); border-bottom-color: var(--accent); }
-.tab-btn.on-work.active .tab-count { color: var(--accent); border-color: var(--accent); }
-.tab-btn.on-control.active { color: var(--pillar-conductor); border-bottom-color: var(--pillar-conductor); }
-.tab-btn.on-control.active .tab-count { color: var(--pillar-conductor); border-color: var(--pillar-conductor); }
-.tab-btn.on-reference.active { color: var(--ink); border-bottom-color: var(--rule-strong); }
-.tab-btn.on-reference.active .tab-count { color: var(--ink-2); border-color: var(--rule-strong); }
-
-.tab-group-sep {
-  align-self: center;
-  flex: 0 0 auto;
-  width: 1px;
-  height: 18px;
-  margin: 0 var(--s-3);
-  background: var(--rule);
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 5px;
 }
 
 .tab-btn {
   appearance: none;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
   color: var(--ink-2);
   font-family: var(--font-body);
   font-size: 12.5px;
   font-weight: 500;
-  padding: 10px 12px;
+  min-height: 36px;
+  padding: 7px 9px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -477,11 +523,16 @@ a { color: var(--accent); }
   white-space: nowrap;
 }
 
-.tab-btn:hover { color: var(--ink); }
+.tab-btn:hover {
+  color: var(--ink);
+  background: var(--surface);
+}
 
 .tab-btn.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+  color: var(--group-accent);
+  border-color: var(--group-rule);
+  background: var(--surface);
+  box-shadow: inset 0 -2px 0 var(--group-accent);
   font-weight: 600;
 }
 
@@ -495,7 +546,7 @@ a { color: var(--accent); }
   padding: 0 4px;
 }
 
-.tab-btn.active .tab-count { color: var(--accent); border-color: var(--accent); }
+.tab-btn.active .tab-count { color: var(--group-accent); border-color: var(--group-accent); }
 
 /* ---------- Panels & records ---------- */
 
@@ -1633,6 +1684,74 @@ a { color: var(--accent); }
   .session-list { max-height: 220px; }
   .ledger-row { grid-template-columns: 74px 1fr auto; }
   .ledger-actor { display: none; }
+}
+
+@media (max-width: 800px) {
+  .tab-groups {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--s-2);
+  }
+
+  .tab-group {
+    width: 100%;
+  }
+
+  .tab-group-title { display: none; }
+
+  .tab-group-toggle {
+    appearance: none;
+    width: 100%;
+    min-height: 44px;
+    padding: var(--s-2) var(--s-3);
+    border: 0;
+    background: transparent;
+    color: var(--group-accent);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .tab-group-toggle:hover { background: var(--surface); }
+  .tab-group-toggle .eyebrow { color: inherit; }
+
+  .tab-group-indicator {
+    position: relative;
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+  }
+
+  .tab-group-indicator::before,
+  .tab-group-indicator::after {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: 2px;
+    width: 10px;
+    height: 1.5px;
+    background: currentColor;
+    transition: transform 120ms ease;
+  }
+
+  .tab-group-indicator::after { transform: rotate(90deg); }
+  .tab-group.is-open .tab-group-indicator::after { transform: rotate(0deg); }
+
+  .tab-group-links {
+    display: none;
+    border-top: 1px solid var(--group-rule);
+    padding: var(--s-1);
+  }
+
+  .tab-group.is-open .tab-group-links { display: flex; }
+
+  .tab-btn {
+    flex: 1 1 calc(50% - var(--s-1));
+    min-height: 44px;
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 640px) {

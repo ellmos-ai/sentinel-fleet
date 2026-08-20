@@ -298,7 +298,7 @@ async def test_the_scenarios_come_before_their_evidence():
 
 
 @pytest.mark.asyncio
-async def test_the_tab_rail_is_split_into_work_and_reference():
+async def test_the_tab_rail_uses_three_layered_groups_without_horizontal_overflow():
     """Ten equally weighted tabs told the operator nothing about where to start. The cut is by
     what they are there to do; "Control" is the operator's own word for the middle group - the
     tabs where the fleet is run and governed."""
@@ -307,12 +307,14 @@ async def test_the_tab_rail_is_split_into_work_and_reference():
         body = (await client.get("/")).text
 
     rail = body.split('class="tab-rail"')[1].split("</nav>")[0]
-    assert rail.count("tab-group-sep") == 2, "three groups need two visible boundaries"
+    assert rail.count('data-tab-group="') == 3
     assert rail.index(">Work<") < rail.index(">Control<") < rail.index(">Reference<")
-    # The colour is an index, so every tab has to declare which group it belongs to.
+    # Each category owns a heading, a shared link layer and its colour role.
     for group in ("on-work", "on-control", "on-reference"):
-        assert f"tab-group-label eyebrow {group}" in rail
+        assert f'class="tab-group {group}' in rail
         assert f'class="tab-btn {group}' in rail
+    assert rail.count('class="tab-group-title eyebrow"') == 3
+    assert rail.count('class="tab-group-links"') == 3
 
     order = re.findall(r'id="btn-(tab-[a-z]+)"', rail)
     assert order == [
@@ -323,6 +325,29 @@ async def test_the_tab_rail_is_split_into_work_and_reference():
     # switchTab derives the button id from the pane id, so a rename here breaks every tab.
     for tab in order:
         assert f"switchTab('{tab}')" in rail
+        assert f'aria-controls="{tab}"' in rail
+
+    stylesheet = (STATIC_DIR / "style.css").read_text(encoding="utf-8")
+    rail_rule = stylesheet.split(".tab-rail {", 1)[1].split("}", 1)[0]
+    assert "overflow-x: auto" not in rail_rule
+    assert "overflow: visible" in rail_rule
+    assert "flex-wrap: wrap" in stylesheet
+
+
+def test_compact_tab_groups_are_an_accessible_accordion():
+    template = (TEMPLATE_DIR / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    stylesheet = (STATIC_DIR / "style.css").read_text(encoding="utf-8")
+    rail = template.split('class="tab-rail"', 1)[1].split("</nav>", 1)[0]
+
+    for group in ("work", "control", "reference"):
+        assert f"toggleTabGroup('{group}')" in rail
+        assert f'aria-controls="tab-group-{group}-links"' in rail
+    assert rail.count('aria-expanded="') == 3
+    assert 'COMPACT_TAB_GROUP_QUERY = "(max-width: 800px)"' in script
+    assert "revealTabGroupFor(tabId)" in script
+    assert 'btn.setAttribute("aria-current", "page")' in script
+    assert ".tab-group.is-open .tab-group-links { display: flex; }" in stylesheet
 
 
 @pytest.mark.asyncio

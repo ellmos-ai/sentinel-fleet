@@ -38,51 +38,95 @@
 
   <div class="container">
 
-    <!-- Ten equally weighted tabs gave no clue where to start. The split is by what the operator
-         is there to do - act on something, or look something up - not by architecture pillar:
-         the live test called Domains "just an overview, it need not be this prominent". -->
-    <!-- Three groups, named by what the operator is there to do. "Control" is the operator's
-         own word from the live test: the tabs where the fleet is run and governed belong
-         together, separate from the surfaces that only answer questions. Each group carries a
-         quiet colour on its label and on the active tab's underline - an index, not a fill. -->
-    <nav class="tab-rail" role="tablist">
-      <span class="tab-group-label eyebrow on-work">Work</span>
-      <button id="btn-tab-overview" class="tab-btn on-work active" onclick="switchTab('tab-overview')">
-        <svg class="icon"><use href="#i-grid"/></svg> Overview
-      </button>
-      <button id="btn-tab-chat" class="tab-btn on-work" onclick="switchTab('tab-chat')">
-        <svg class="icon"><use href="#i-chat"/></svg> Chat
-      </button>
+    <!-- The categories are headings over link groups, not peers in one long tab stream. Each
+         group owns a quiet surface and wraps as a unit, so the rail never becomes a horizontal
+         scrollbar. On compact screens the same headings become an accordion; switchTab() opens
+         the group containing the active destination. -->
+    <nav class="tab-rail" aria-label="Workspace">
+      <div class="tab-groups">
+        <div class="tab-group on-work is-open" data-tab-group="work">
+          <span id="tab-group-work-title" class="tab-group-title eyebrow">Work</span>
+          <button type="button"
+                  class="tab-group-toggle"
+                  aria-controls="tab-group-work-links"
+                  aria-expanded="true"
+                  onclick="toggleTabGroup('work')">
+            <span class="eyebrow">Work</span>
+            <span class="tab-group-indicator" aria-hidden="true"></span>
+          </button>
+          <div id="tab-group-work-links" class="tab-group-links" aria-label="Work">
+            <button id="btn-tab-overview" class="tab-btn on-work active"
+                    aria-controls="tab-overview" aria-current="page"
+                    onclick="switchTab('tab-overview')">
+              <svg class="icon"><use href="#i-grid"/></svg> Overview
+            </button>
+            <button id="btn-tab-chat" class="tab-btn on-work"
+                    aria-controls="tab-chat" onclick="switchTab('tab-chat')">
+              <svg class="icon"><use href="#i-chat"/></svg> Chat
+            </button>
+          </div>
+        </div>
 
-      <span class="tab-group-sep" aria-hidden="true"></span>
-      <span class="tab-group-label eyebrow on-control">Control</span>
-      <button id="btn-tab-fleet" class="tab-btn on-control" onclick="switchTab('tab-fleet')">
-        <svg class="icon"><use href="#i-fleet"/></svg> Fleet <span class="tab-count">{{ agents|length }}</span>
-      </button>
-      <button id="btn-tab-tickets" class="tab-btn on-control" onclick="switchTab('tab-tickets')">
-        <svg class="icon"><use href="#i-inbox"/></svg> Approvals <span class="tab-count">{{ pending_tickets|length }}</span>
-      </button>
-      <button id="btn-tab-prompts" class="tab-btn on-control" onclick="switchTab('tab-prompts')">
-        <svg class="icon"><use href="#i-document"/></svg> Prompts &amp; skills <span class="tab-count">{{ skills|length }}</span>
-      </button>
-      <button id="btn-tab-memory" class="tab-btn on-control" onclick="switchTab('tab-memory')">
-        <svg class="icon"><use href="#i-memory"/></svg> Memory <span class="tab-count">{{ memories|length }}</span>
-      </button>
-      <button id="btn-tab-governance" class="tab-btn on-control" onclick="switchTab('tab-governance')">
-        <svg class="icon"><use href="#i-shield"/></svg> Governance <span class="tab-count">{{ governance.permissions.summary.tools }}</span>
-      </button>
+        <div class="tab-group on-control" data-tab-group="control">
+          <span id="tab-group-control-title" class="tab-group-title eyebrow">Control</span>
+          <button type="button"
+                  class="tab-group-toggle"
+                  aria-controls="tab-group-control-links"
+                  aria-expanded="false"
+                  onclick="toggleTabGroup('control')">
+            <span class="eyebrow">Control</span>
+            <span class="tab-group-indicator" aria-hidden="true"></span>
+          </button>
+          <div id="tab-group-control-links" class="tab-group-links" aria-label="Control">
+            <button id="btn-tab-fleet" class="tab-btn on-control"
+                    aria-controls="tab-fleet" onclick="switchTab('tab-fleet')">
+              <svg class="icon"><use href="#i-fleet"/></svg> Fleet <span class="tab-count">{{ agents|length }}</span>
+            </button>
+            <button id="btn-tab-tickets" class="tab-btn on-control"
+                    aria-controls="tab-tickets" onclick="switchTab('tab-tickets')">
+              <svg class="icon"><use href="#i-inbox"/></svg> Approvals <span class="tab-count">{{ pending_tickets|length }}</span>
+            </button>
+            <button id="btn-tab-prompts" class="tab-btn on-control"
+                    aria-controls="tab-prompts" onclick="switchTab('tab-prompts')">
+              <svg class="icon"><use href="#i-document"/></svg> Prompts &amp; skills <span class="tab-count">{{ skills|length }}</span>
+            </button>
+            <button id="btn-tab-memory" class="tab-btn on-control"
+                    aria-controls="tab-memory" onclick="switchTab('tab-memory')">
+              <svg class="icon"><use href="#i-memory"/></svg> Memory <span class="tab-count">{{ memories|length }}</span>
+            </button>
+            <button id="btn-tab-governance" class="tab-btn on-control"
+                    aria-controls="tab-governance" onclick="switchTab('tab-governance')">
+              <svg class="icon"><use href="#i-shield"/></svg> Governance <span class="tab-count">{{ governance.permissions.summary.tools }}</span>
+            </button>
+          </div>
+        </div>
 
-      <span class="tab-group-sep" aria-hidden="true"></span>
-      <span class="tab-group-label eyebrow on-reference">Reference</span>
-      <button id="btn-tab-domains" class="tab-btn on-reference" onclick="switchTab('tab-domains')">
-        <svg class="icon"><use href="#i-building"/></svg> Domains <span class="tab-count">{{ domains|length }}</span>
-      </button>
-      <button id="btn-tab-contacts" class="tab-btn on-reference" onclick="switchTab('tab-contacts')">
-        <svg class="icon"><use href="#i-contacts"/></svg> Contacts <span class="tab-count">{{ contact_total }}</span>
-      </button>
-      <button id="btn-tab-telemetry" class="tab-btn on-reference" onclick="switchTab('tab-telemetry')">
-        <svg class="icon"><use href="#i-pulse"/></svg> Telemetry <span class="tab-count">{{ spans|length }}</span>
-      </button>
+        <div class="tab-group on-reference" data-tab-group="reference">
+          <span id="tab-group-reference-title" class="tab-group-title eyebrow">Reference</span>
+          <button type="button"
+                  class="tab-group-toggle"
+                  aria-controls="tab-group-reference-links"
+                  aria-expanded="false"
+                  onclick="toggleTabGroup('reference')">
+            <span class="eyebrow">Reference</span>
+            <span class="tab-group-indicator" aria-hidden="true"></span>
+          </button>
+          <div id="tab-group-reference-links" class="tab-group-links" aria-label="Reference">
+            <button id="btn-tab-domains" class="tab-btn on-reference"
+                    aria-controls="tab-domains" onclick="switchTab('tab-domains')">
+              <svg class="icon"><use href="#i-building"/></svg> Domains <span class="tab-count">{{ domains|length }}</span>
+            </button>
+            <button id="btn-tab-contacts" class="tab-btn on-reference"
+                    aria-controls="tab-contacts" onclick="switchTab('tab-contacts')">
+              <svg class="icon"><use href="#i-contacts"/></svg> Contacts <span class="tab-count">{{ contact_total }}</span>
+            </button>
+            <button id="btn-tab-telemetry" class="tab-btn on-reference"
+                    aria-controls="tab-telemetry" onclick="switchTab('tab-telemetry')">
+              <svg class="icon"><use href="#i-pulse"/></svg> Telemetry <span class="tab-count">{{ spans|length }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
     </nav>
 
     <!-- OVERVIEW -->

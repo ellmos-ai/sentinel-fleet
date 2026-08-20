@@ -28,6 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
     "data-theme",
     localStorage.getItem("sentinel_theme") || "light"
   );
+  initTabGroups();
   switchTab(localStorage.getItem("sentinel_active_tab") || "tab-overview", false);
 
   state.prompts = readCatalog("prompt-catalog");
@@ -76,14 +77,73 @@ function toggleTheme() {
   localStorage.setItem("sentinel_theme", next);
 }
 
+const COMPACT_TAB_GROUP_QUERY = "(max-width: 800px)";
+
+function compactTabGroups() {
+  return window.matchMedia(COMPACT_TAB_GROUP_QUERY).matches;
+}
+
+function syncTabGroupAria() {
+  const compact = compactTabGroups();
+  document.querySelectorAll(".tab-group").forEach(group => {
+    const toggle = group.querySelector(".tab-group-toggle");
+    if (toggle) toggle.setAttribute("aria-expanded", String(!compact || group.classList.contains("is-open")));
+  });
+}
+
+function revealTabGroupFor(tabId) {
+  if (!compactTabGroups()) {
+    syncTabGroupAria();
+    return;
+  }
+
+  const button = document.getElementById("btn-" + tabId);
+  const targetGroup = button ? button.closest(".tab-group") : null;
+  if (!targetGroup) return;
+
+  document.querySelectorAll(".tab-group").forEach(group => {
+    group.classList.toggle("is-open", group === targetGroup);
+  });
+  syncTabGroupAria();
+}
+
+function toggleTabGroup(groupId) {
+  if (!compactTabGroups()) return;
+  const target = document.querySelector(`[data-tab-group="${groupId}"]`);
+  if (!target) return;
+  const shouldOpen = !target.classList.contains("is-open");
+  document.querySelectorAll(".tab-group").forEach(group => group.classList.remove("is-open"));
+  if (shouldOpen) target.classList.add("is-open");
+  syncTabGroupAria();
+}
+
+function initTabGroups() {
+  const media = window.matchMedia(COMPACT_TAB_GROUP_QUERY);
+  const sync = () => {
+    const active = document.querySelector(".tab-btn.active");
+    if (active) revealTabGroupFor(active.id.replace("btn-", ""));
+    else syncTabGroupAria();
+  };
+  if (media.addEventListener) media.addEventListener("change", sync);
+  else if (media.addListener) media.addListener(sync);
+  sync();
+}
+
 function switchTab(tabId, save = true) {
   document.querySelectorAll(".tab-pane").forEach(el => { el.style.display = "none"; });
-  document.querySelectorAll(".tab-btn").forEach(el => el.classList.remove("active"));
+  document.querySelectorAll(".tab-btn").forEach(el => {
+    el.classList.remove("active");
+    el.removeAttribute("aria-current");
+  });
 
   const target = document.getElementById(tabId);
   if (target) target.style.display = "block";
   const btn = document.getElementById("btn-" + tabId);
-  if (btn) btn.classList.add("active");
+  if (btn) {
+    btn.classList.add("active");
+    btn.setAttribute("aria-current", "page");
+  }
+  revealTabGroupFor(tabId);
 
   if (save) localStorage.setItem("sentinel_active_tab", tabId);
 }
