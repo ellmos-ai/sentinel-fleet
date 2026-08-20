@@ -3,7 +3,9 @@
 import pytest
 from sentinel_fleet.core.identity import AgentIdentity, AgentRole, AgentStatus
 from sentinel_fleet.core.gateway import SovereignGateway
+from sentinel_fleet.core.permissions import PermissionAction, PermissionRegistry, PermissionRule
 from sentinel_fleet.core.errors import SecurityViolationError, QuarantineLockError
+from sentinel_fleet.conductor.lifecycle import LifecycleManager
 
 
 @pytest.mark.asyncio
@@ -110,3 +112,42 @@ async def test_gateway_triggers_hitl_approval_for_ask_permission():
     assert result.success is True
     assert result.requires_approval is True
     assert agent.status == AgentStatus.WAITING_APPROVAL
+
+
+@pytest.mark.asyncio
+async def test_gateway_uses_an_injected_permission_registry_and_unknown_tools_fail_closed():
+    registry = PermissionRegistry(rules=[
+        PermissionRule(
+            tool_pattern="custom_tool",
+            action=PermissionAction.ALLOW,
+            reason="Explicit test grant",
+        )
+    ])
+    service = SovereignGateway(permission_registry=registry)
+    agent = AgentIdentity(
+        agent_id="test:injected-registry",
+        name="Injected registry",
+        role=AgentRole.ORCHESTRATOR,
+        description="Tests real gateway dependency injection",
+        allowed_tools={"custom_tool", "unknown_tool"},
+    )
+
+    async def tool(**kwargs):
+        return "ran"
+
+    assert (await service.execute_tool_call(agent, "custom_tool", {}, tool)).output == "ran"
+    with pytest.raises(SecurityViolationError):
+        await service.execute_tool_call(agent, "unknown_tool", {}, tool)
+
+
+def test_every_seed_identity_tool_has_an_explicit_permission_rule():
+    registry = PermissionRegistry()
+    scoped_tools = {
+        tool
+        for identity in LifecycleManager().list_fleet()
+        for tool in identity.allowed_tools
+        if tool != "*"
+    }
+
+    missing = sorted(tool for tool in scoped_tools if registry.explain(tool).source != "rule")
+    assert not missing, f"seeded tools without explicit permission rules: {missing}"

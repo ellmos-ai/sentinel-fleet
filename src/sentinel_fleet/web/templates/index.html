@@ -717,7 +717,13 @@
         </p>
         <form method="get" action="/" class="viewer-switch">
           <label class="field-label" for="viewer-input">Viewing as</label>
-          <input type="text" id="viewer-input" name="viewer" class="text-input" value="{{ viewer }}">
+          <select id="viewer-input" name="user" class="select-input">
+            {% for identity in users %}
+            <option value="{{ identity.user_id }}" {% if identity.user_id == viewer %}selected{% endif %}>
+              {{ identity.name }} · {{ identity.profile_id }}
+            </option>
+            {% endfor %}
+          </select>
           <button type="submit" class="btn btn-sm">Switch</button>
           {% if hidden_templates %}
           <button type="button" class="btn btn-sm" onclick="toggleModal('hidden-templates-panel')">Hidden for you ({{ hidden_templates|length }})</button>
@@ -734,7 +740,7 @@
                   <td><b>{{ h.name }}</b></td>
                   <td class="item-meta numeric">{{ h.owner }}</td>
                   <td>
-                    <button class="btn btn-sm" onclick='restoreTemplateForViewer({{ h.template_id|tojson }}, {{ viewer|tojson }})'>Restore</button>
+                    <button class="btn btn-sm" {% if viewer == demo_mutation_user_id %}onclick='restoreTemplateForViewer({{ h.template_id|tojson }}, {{ viewer|tojson }})'{% else %}disabled title="Display aliases cannot mutate another user’s view"{% endif %}>Restore</button>
                   </td>
                 </tr>
                 {% endfor %}
@@ -808,7 +814,7 @@
                         <button class="btn btn-sm" onclick='openScheduleModal({{ row.template_id|tojson }}, {{ row.name|tojson }})'>Add schedule</button>
                         {% endif %}
                         {% if row.owner != viewer and row.visibility != 'own' %}
-                        <button class="btn btn-sm" onclick='hideTemplateForViewer({{ row.template_id|tojson }}, {{ viewer|tojson }})'>Hide from my view</button>
+                        <button class="btn btn-sm" {% if viewer == demo_mutation_user_id %}onclick='hideTemplateForViewer({{ row.template_id|tojson }}, {{ viewer|tojson }})'{% else %}disabled title="Display aliases cannot mutate another user’s view"{% endif %}>Hide from my view</button>
                         {% endif %}
                         {% if row.can_delete %}
                         <button class="btn btn-sm btn-reject" onclick='deleteTaskTemplate({{ row.template_id|tojson }}, {{ row.owner|tojson }})'>Delete</button>
@@ -938,6 +944,12 @@
               </span>
             </div>
             <div class="item-meta numeric">{{ ticket.ticket_id }} / {{ ticket.agent_id }} / {{ ticket.tool_name }} / {{ ticket.priority.value }}</div>
+            {% if ticket.requested_by or ticket.assigned_to_role or ticket.assigned_to_user %}
+            <div class="item-meta">
+              Requested by {{ ticket.requested_by or 'system' }} · forwarded to
+              {{ ticket.assigned_to_user or ticket.assigned_to_role or 'operator' }}
+            </div>
+            {% endif %}
             <p class="item-desc">{{ ticket.description }}</p>
             {% if ticket.payload.doc_id %}
             <div class="item-actions">
@@ -949,12 +961,16 @@
             {% endif %}
             {% if ticket.status.value == 'pending_approval' %}
             <div class="item-actions">
-              <button class="btn btn-approve" onclick='approveTicket({{ ticket.ticket_id|tojson }})'>
+              {% set locked_policy_decision = ticket.tool_name in ('policy_binding_request', 'policy_binding_removal_request') %}
+              <button class="btn btn-approve" onclick='approveTicket({{ ticket.ticket_id|tojson }})'
+                      {% if locked_policy_decision %}disabled title="Requires authenticated administrator"{% endif %}>
                 <svg class="icon"><use href="#i-check"/></svg> Approve and release
               </button>
-              <button class="btn btn-reject" onclick='rejectTicket({{ ticket.ticket_id|tojson }})'>
+              <button class="btn btn-reject" onclick='rejectTicket({{ ticket.ticket_id|tojson }})'
+                      {% if locked_policy_decision %}disabled title="Requires authenticated administrator"{% endif %}>
                 <svg class="icon"><use href="#i-close"/></svg> Reject and block
               </button>
+              {% if locked_policy_decision %}<span class="item-meta">Decision controls are locked in this unauthenticated build.</span>{% endif %}
             </div>
             {% elif ticket.resolution_comment %}
             <div class="item-meta"><b>Decision:</b> {{ ticket.resolution_comment }}</div>
@@ -1017,8 +1033,8 @@
         <div>
           <h3>Prompts and skills</h3>
           <p>Both are versioned. Copy any version to reuse it elsewhere, or load it into the chat
-             console. Deleting is refused while a task or a recorded conversation still points at
-             what you are deleting - the refusal names them.</p>
+             console. New demo components are created locked; version, permission and deletion
+             administration requires an authenticated administrator and is disabled in this build.</p>
         </div>
         <div class="item-actions" style="margin: 0">
           <button class="btn btn-primary" onclick="toggleModal('modal-prompt-new')">
@@ -1061,18 +1077,18 @@
             <div class="mono-block" style="margin-top: var(--s-2)">{{ p.current_text }}</div>
             <div class="item-actions">
               <span class="badge-status">{{ p.visibility }}</span>
-              <button class="btn btn-sm" onclick='openPromptVersionModal({{ p.id|tojson }}, {{ p.title|tojson }}, {{ p.current_text|tojson }})'>
+              <button class="btn btn-sm" {% if admin_mutations_enabled %}onclick='openPromptVersionModal({{ p.id|tojson }}, {{ p.title|tojson }}, {{ p.current_text|tojson }})'{% else %}disabled title="Authenticated administration is not configured"{% endif %}>
                 <svg class="icon"><use href="#i-version"/></svg> Add version
               </button>
-              <button class="btn btn-sm" onclick='openPromptPermsModal({{ p.id|tojson }}, {{ p.title|tojson }}, {{ p.visibility|tojson }}, {{ p.requires_approval|tojson }})'>
+              <button class="btn btn-sm" {% if admin_mutations_enabled %}onclick='openPromptPermsModal({{ p.id|tojson }}, {{ p.title|tojson }}, {{ p.visibility|tojson }}, {{ p.requires_approval|tojson }})'{% else %}disabled title="Authenticated administration is not configured"{% endif %}>
                 <svg class="icon"><use href="#i-lock"/></svg> Permissions
               </button>
               {% if p.versions|length > 1 %}
-              <button class="btn btn-sm btn-reject" onclick="deletePromptVersion({{ p.id|tojson }}, 'pcopy-{{ loop.index }}')">
+              <button class="btn btn-sm btn-reject" {% if admin_mutations_enabled %}onclick="deletePromptVersion({{ p.id|tojson }}, 'pcopy-{{ loop.index }}')"{% else %}disabled title="Authenticated administration is not configured"{% endif %}>
                 Delete version
               </button>
               {% endif %}
-              <button class="btn btn-sm btn-reject" onclick='deletePrompt({{ p.id|tojson }}, {{ p.title|tojson }})'>
+              <button class="btn btn-sm btn-reject" {% if admin_mutations_enabled %}onclick='deletePrompt({{ p.id|tojson }}, {{ p.title|tojson }})'{% else %}disabled title="Authenticated administration is not configured"{% endif %}>
                 Delete prompt
               </button>
             </div>
@@ -1099,10 +1115,10 @@
                         onclick='copySkill({{ s.skill_id|tojson }}, this)'>
                   <svg class="icon"><use href="#i-copy"/></svg>
                 </button>
-                <button class="btn btn-sm" onclick='openSkillVersionModal({{ s.skill_id|tojson }}, {{ s.name|tojson }}, {{ s.required_tools|join(", ")|tojson }})'>
+                <button class="btn btn-sm" {% if admin_mutations_enabled %}onclick='openSkillVersionModal({{ s.skill_id|tojson }}, {{ s.name|tojson }}, {{ s.required_tools|join(", ")|tojson }})'{% else %}disabled title="Authenticated administration is not configured"{% endif %}>
                   <svg class="icon"><use href="#i-version"/></svg> Add version
                 </button>
-                <button class="btn btn-sm btn-reject" onclick='deleteSkill({{ s.skill_id|tojson }}, {{ s.name|tojson }})'>
+                <button class="btn btn-sm btn-reject" {% if admin_mutations_enabled %}onclick='deleteSkill({{ s.skill_id|tojson }}, {{ s.name|tojson }})'{% else %}disabled title="Authenticated administration is not configured"{% endif %}>
                   Delete
                 </button>
               </div>
@@ -1163,6 +1179,18 @@
         <span class="badge-status badge-info numeric">{{ gov.permissions.summary.tools }} tools governed</span>
       </div>
 
+      <div class="gov-window authorization-banner" data-demo-mode="{{ demo_mode|lower }}">
+        <b>{{ current_user.name }}</b> · {{ current_user.profile_id }}. {{ authorization_note }}
+        {% if current_user.profile_id == 'viewer' %}
+        Policy controls in this authorization demo are read-only for the selected Viewer.
+        Other console controls sit outside this simulated user-policy model and continue only as
+        bounded demo actions, never as this display alias.
+        {% elif demo_mode %}
+        Safe demo writes run only as <code>member:demo</code>; organization-wide requests are
+        forwarded, and security-root edits remain locked.
+        {% endif %}
+      </div>
+
       <div class="gov-window">
         Verdict counts cover the {{ gov.window.retained_spans }} span records currently retained
         (ring buffer, limit {{ gov.window.retention_limit }}); {{ gov.window.exported_total }} spans
@@ -1200,6 +1228,11 @@
           <b>{{ gov.plans.summary.total }}</b>
           <span>plans standing</span>
         </div>
+        <div class="gov-stat">
+          <b>{{ gov.policies.summary.total }}</b>
+          <span>catalogued policies</span>
+          <em class="gov-stat-note">{{ gov.policies.summary.enforcing }} enforced · {{ gov.policies.summary.advisory }} advisory</em>
+        </div>
       </div>
 
       <!-- An explanation, not a control - but it sat among controls, so the live test took it
@@ -1219,6 +1252,211 @@
           {% endfor %}
         </div>
       </details>
+
+      <div class="grid" style="margin-bottom: var(--s-4)">
+        <div class="card">
+          <div class="card-header">
+            <h3><svg class="icon"><use href="#i-fleet"/></svg> Users &amp; roles</h3>
+            <span class="badge-status badge-info numeric">{{ gov.users.users|length }} identities</span>
+          </div>
+          <p class="item-desc">
+            Profiles supply baseline capabilities; reasoned per-user deviations take precedence.
+            These are authorization identities, not login sessions. A “declared” chip documents
+            the planned role model but does not claim an HTTP enforcement point.
+          </p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>User</th><th>Profile</th><th>Granted capabilities</th></tr></thead>
+              <tbody>
+                {% for identity in gov.users.users %}
+                <tr {% if identity.user_id == current_user.user_id %}class="is-current-user"{% endif %}>
+                  <td><b>{{ identity.name }}</b><div class="item-meta">{{ identity.user_id }}</div></td>
+                  <td><span class="badge-status badge-info">{{ identity.profile_id }}</span></td>
+                  <td>
+                    <div class="chip-row">
+                      {% for capability, verdict in identity.capabilities.items() %}
+                      {% if verdict == 'allow' %}<span class="chip" title="{{ gov.users.capability_status[capability] }}">{{ capability }}{% if gov.users.capability_status[capability] != 'enforced' %} · declared{% endif %}</span>{% endif %}
+                      {% endfor %}
+                    </div>
+                    {% if identity.deviations %}
+                    <details><summary class="item-meta">{{ identity.deviations|length }} reasoned deviation(s)</summary>
+                      {% for pattern, deviation in identity.deviations.items() %}
+                      <div class="item-meta"><code>{{ pattern }}</code> &rarr; {{ deviation.action }} · {{ deviation.reason }} · by {{ deviation.granted_by }}</div>
+                      {% endfor %}
+                    </details>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <details style="margin-top: var(--s-3)">
+            <summary>Role profile definitions</summary>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Profile</th><th>Description</th><th>Declared grants</th></tr></thead>
+                <tbody>
+                  {% for profile in gov.users.profiles %}
+                  <tr>
+                    <td><b>{{ profile.name }}</b><div class="item-meta">{{ profile.profile_id }}</div></td>
+                    <td>{{ profile.description }}</td>
+                    <td><div class="chip-row">{% for grant in profile.grants|sort %}<span class="chip">{{ grant }}</span>{% else %}<span class="item-meta">none</span>{% endfor %}</div></td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3><svg class="icon"><use href="#i-circuit"/></svg> Who may bind what</h3>
+            <span class="badge-status stamp-quiet">R1–R7 · {{ current_user.profile_id }}</span>
+          </div>
+          <p class="item-desc">
+            Supported target cells come from the same <code>explain_binding</code> function the API enforces.
+            Allow runs now, forward creates an approval ticket, deny refuses. Process bindings remain
+            visible as a planned rule dimension but are not writable until a process registry exists.
+          </p>
+          <div class="table-wrap">
+            <table class="data-table matrix-table binding-matrix">
+              <thead>
+                <tr><th>Target</th>{% for scope in gov.binding_matrix.scopes %}<th>{{ scope }}</th>{% endfor %}</tr>
+              </thead>
+              <tbody>
+                {% for row in gov.binding_matrix.rows %}
+                <tr>
+                  <td><b>{{ row.target_kind }}</b></td>
+                  {% for cell in row.cells %}
+                  <td class="mx-mark">
+                    <span class="badge-status {% if not cell.supported_by_api %}stamp-quiet{% elif cell.verdict == 'allow' %}badge-ok{% elif cell.verdict == 'forward' %}badge-warn{% else %}badge-danger{% endif %}"
+                          title="{% if not cell.supported_by_api %}Unsupported by API: no process registry exists{% else %}{{ cell.reason }} · decisive {{ cell.decisive_rule }} · {{ cell.applied_rules|join(', ') }}{% endif %}">
+                      {% if cell.supported_by_api %}{{ cell.verdict }}{% else %}unsupported{% endif %}
+                    </span>
+                  </td>
+                  {% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="item-meta">{{ gov.binding_matrix.source }}</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom: var(--s-4)">
+        <div class="card-header">
+          <h3><svg class="icon"><use href="#i-document"/></svg> Federated policy catalogue</h3>
+          <span class="badge-status badge-info numeric">
+            {{ gov.policies.summary.enforcing }} enforced · {{ gov.policies.summary.advisory }} advisory
+          </span>
+        </div>
+        <p class="item-desc">
+          Permission rules and PolicyEngine checks are projected from their real sources on every
+          read. Only the user slot is writable, and its entries remain advisory until a real
+          executor enforces them.
+        </p>
+        <form class="inline-author-form" onsubmit="submitNewPolicy(event)">
+          <input type="text" name="title" class="text-input" placeholder="Policy title" required
+                 {% if current_user.profile_id == 'viewer' %}disabled{% endif %}>
+          <input type="text" name="statement" class="text-input" placeholder="Advisory statement" required
+                 {% if current_user.profile_id == 'viewer' %}disabled{% endif %}>
+          <select name="policy_type" class="select-input" {% if current_user.profile_id == 'viewer' %}disabled{% endif %}>
+            <option value="preference">Preference</option>
+            <option value="rule">Rule</option>
+            <option value="decision">Decision</option>
+          </select>
+          <button type="submit" class="btn btn-primary"
+                  {% if current_user.profile_id == 'viewer' %}disabled title="Viewer is read-only"{% endif %}>
+            Create advisory policy
+          </button>
+        </form>
+        <div class="table-wrap">
+          <table class="data-table" id="policy-catalog-table">
+            <thead><tr><th>Policy</th><th>Type</th><th>Honesty</th><th>Source</th><th>Bind</th></tr></thead>
+            <tbody>
+              {% for policy in gov.policies.entries %}
+              <tr>
+                <td><b>{{ policy.title }}</b><div class="item-meta">{{ policy.policy_id }} · {{ policy.statement }}</div></td>
+                <td><span class="badge-status badge-info">{{ policy.type }}</span></td>
+                <td>
+                  <span class="badge-status {% if policy.enforcement == 'advisory' %}badge-warn{% else %}badge-ok{% endif %}">{{ policy.enforcement }}</span>
+                  <div class="item-meta">{{ policy.enforced_by }}</div>
+                </td>
+                <td>{{ policy.source }}<div class="item-meta">{{ policy.source_ref or 'writable user slot' }}</div><div class="item-meta">declared visibility: {{ policy.visibility }} · metadata only, not access control</div></td>
+                <td>
+                  {% if policy.source == 'user-slot' %}
+                  <div class="item-actions">
+                    <button class="btn btn-sm btn-approve" onclick='bindPolicy({{ policy.policy_id|tojson }}, "user")'
+                            {% if current_user.profile_id == 'viewer' %}disabled title="Viewer is read-only"{% endif %}>Bind to my runs</button>
+                    <button class="btn btn-sm" onclick='bindPolicy({{ policy.policy_id|tojson }}, "organization")'
+                            {% if current_user.profile_id == 'viewer' %}disabled title="Viewer is read-only"{% else %}title="Creates an administrator forwarding ticket"{% endif %}>Request org-wide</button>
+                    <button class="btn btn-sm" onclick='bindPolicy({{ policy.policy_id|tojson }}, "other_user")'
+                            {% if current_user.profile_id == 'viewer' %}disabled title="Viewer is read-only"{% else %}title="Forwards to the target user"{% endif %}>Request for operator</button>
+                    <button class="btn btn-sm" onclick='bindPolicy({{ policy.policy_id|tojson }}, "department")'
+                            {% if current_user.profile_id == 'viewer' %}disabled title="Viewer is read-only"{% else %}title="Forwards to administrator"{% endif %}>Request finance group</button>
+                  </div>
+                  {% else %}<span class="item-meta">projected · read-only</span>{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="card-header" style="margin-top: var(--s-4)">
+          <h4>Binding ledger</h4>
+          <span class="badge-status badge-info numeric">
+            {{ gov.policies.summary.active_bindings }} active ·
+            {{ gov.policies.summary.pending_bindings }} awaiting bind review ·
+            {{ gov.policies.summary.pending_removals }} awaiting removal review
+          </span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="policy-binding-ledger">
+            <thead><tr><th>Binding</th><th>Target</th><th>Scope</th><th>State</th><th>Decision evidence</th><th>Action</th></tr></thead>
+            <tbody>
+              {% for binding in gov.policies.bindings %}
+              <tr>
+                <td><code>{{ binding.binding_id }}</code><div class="item-meta">{{ binding.policy_id }} · by {{ binding.bound_by }}</div></td>
+                <td><b>{{ binding.target_kind }}:{{ binding.target_id }}</b>
+                  {% if binding.target_user_id %}<div class="item-meta">user {{ binding.target_user_id }}</div>{% endif %}
+                  {% if binding.target_department_id %}<div class="item-meta">department {{ binding.target_department_id }}</div>{% endif %}
+                </td>
+                <td>{{ binding.scope_level }}</td>
+                <td>
+                  <span class="badge-status {% if binding.state == 'active' %}badge-ok{% elif binding.state == 'pending_forward' %}badge-warn{% else %}stamp-quiet{% endif %}">{{ binding.state }}</span>
+                  {% if binding.removal_state %}<div class="item-meta">removal: {{ binding.removal_state }}</div>{% endif %}
+                </td>
+                <td>
+                  <b>{{ binding.decisive_rule }}</b> · {{ binding.applied_rules|join(', ') }}
+                  <div class="item-meta">{{ binding.verdict_reason }}</div>
+                  {% if binding.forwarded_ticket_id %}<div class="item-meta">bind ticket {{ binding.forwarded_ticket_id }} &rarr; {{ binding.forwarded_to_user or binding.forwarded_to_role or 'unassigned' }}</div>{% endif %}
+                  {% if binding.removal_ticket_id %}<div class="item-meta">removal ticket {{ binding.removal_ticket_id }} &rarr; {{ binding.removal_forwarded_to_user or binding.removal_forwarded_to_role or 'unassigned' }}</div>{% endif %}
+                </td>
+                <td>
+                  {% if binding.bound_by == demo_mutation_user_id and binding.state in ('active', 'pending_forward') and binding.removal_state != 'pending_forward' %}
+                  <button class="btn btn-sm btn-reject" onclick='removePolicyBinding({{ binding.binding_id|tojson }})'
+                          {% if current_user.profile_id == 'viewer' %}disabled title="Viewer policy controls are read-only"{% endif %}>
+                    {% if binding.state == 'pending_forward' %}Withdraw{% else %}Remove{% endif %}
+                  </button>
+                  {% else %}<span class="item-meta">no available action</span>{% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="6" class="item-meta">No policy bindings yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="item-actions">
+          <button class="btn btn-sm" disabled title="Security-root mutation requires authenticated administration">
+            Edit permission rule (locked)
+          </button>
+          <span class="item-meta">Visible by design; server-side locked in this unauthenticated build.</span>
+        </div>
+      </div>
 
       <!-- Permission matrix: the heart of the board. Tools down, identities across. -->
       <div class="card" style="margin-bottom: var(--s-4)">
@@ -1293,11 +1531,11 @@
         <!-- Policies -->
         <div class="card">
           <div class="card-header">
-            <h3><svg class="icon"><use href="#i-document"/></svg> Policies <span class="badge-status stamp-quiet">read-only view</span></h3>
-            <span class="badge-status badge-info numeric">{{ gov.policies|length }} enforced</span>
+            <h3><svg class="icon"><use href="#i-document"/></svg> Engine checks <span class="badge-status stamp-quiet">read-only view</span></h3>
+            <span class="badge-status badge-info numeric">{{ gov.engine_checks|length }} enforced</span>
           </div>
           <div class="card-body">
-            {% for policy in gov.policies %}
+            {% for policy in gov.engine_checks %}
             <div class="record pillar-control">
               <div class="item-top">
                 <span class="item-title">{{ policy.name }}</span>
@@ -1874,8 +2112,8 @@
             </select>
           </div>
           <div class="form-group">
-            <label>Text used for this task (editing it forks a new version)</label>
-            <textarea id="wz-prompt-fork-text" class="textarea-input"></textarea>
+            <label>Text pinned from this prompt version (read-only in the public demo)</label>
+            <textarea id="wz-prompt-fork-text" class="textarea-input" {% if not admin_mutations_enabled %}readonly title="Authenticated administration is not configured"{% endif %}></textarea>
           </div>
           <div id="wz-prompt-fork-fields" style="display: none;">
             <p class="item-meta">Changed from the picked version - this saves a new version via the prompt registry before the task is created.</p>
@@ -1905,10 +2143,10 @@
           </div>
         </div>
         <div class="form-group">
-          <button type="button" class="btn btn-sm" onclick="addWizardSkillFork()">
+          <button type="button" class="btn btn-sm" {% if admin_mutations_enabled %}onclick="addWizardSkillFork()"{% else %}disabled title="Authenticated administration is not configured"{% endif %}>
             <svg class="icon"><use href="#i-plus"/></svg> Fork a skill before attaching
           </button>
-          <p class="item-desc">Saves a new version of an existing skill (via the skill registry) before this task attaches it - the same version bump the Skills tab's own "New version" action makes.</p>
+          <p class="item-desc">Skill forking requires authenticated administration. The public demo can attach an existing locked skill version.</p>
           <div id="wz-skill-forks" class="wizard-fork-list"></div>
         </div>
       </div>

@@ -26,10 +26,12 @@ from sentinel_fleet.domains.omniledger.models import (
 )
 from sentinel_fleet.domains.omniledger import local_text
 from sentinel_fleet.core.config import settings
-from sentinel_fleet.core.privacy_screen import ScreenLevel, screen_text
+from sentinel_fleet.core.privacy_screen import PrivacyVerdict, ScreenLevel, screen_text
 from sentinel_fleet.core.telemetry import telemetry
 
 logger = logging.getLogger(__name__)
+
+_GEMINI_CONCURRENCY = asyncio.Semaphore(2)
 
 # Mime types accepted by the Gemini multimodal file part
 SUPPORTED_MIME_TYPES = {
@@ -59,7 +61,9 @@ class MultimodalExtractor:
     @staticmethod
     def guess_mime_type(filename: str) -> str:
         ext = os.path.splitext(filename or "")[1].lower()
-        return SUPPORTED_MIME_TYPES.get(ext, "application/pdf")
+        if ext not in SUPPORTED_MIME_TYPES:
+            raise ValueError(f"Unsupported document extension '{ext or '(none)'}'.")
+        return SUPPORTED_MIME_TYPES[ext]
 
     @staticmethod
     def _strip_code_fence(raw: str) -> str:
@@ -84,12 +88,31 @@ class MultimodalExtractor:
 
         # The local text view is read first even when the model is available: it is what the
         # privacy screen inspects, and the screen has to run before the content travels.
-        local = local_text.extract_text_layer(filename, file_bytes)
-        screen_notes = self._screen_before_dispatch(filename, local, text_content)
+        try:
+            local = await asyncio.wait_for(
+                asyncio.to_thread(local_text.extract_text_layer, filename, file_bytes),
+                timeout=8.0,
+            )
+        except asyncio.TimeoutError:
+            local = local_text.LocalTextResult(note="local parser exceeded the 8 second limit")
+        screen_verdict, screen_notes = self._screen_before_dispatch(filename, local, text_content)
 
         if not self.api_key:
             logger.warning("No GEMINI_API_KEY - using the local extraction path")
             return self._extract_without_model(doc_id, filename, local, text_content, screen_notes)
+
+        if (
+            screen_verdict.level in {ScreenLevel.RED, ScreenLevel.UNSCREENED}
+            or screen_verdict.truncated
+        ):
+            reason = (
+                "model dispatch blocked by privacy policy: RED, UNSCREENED and partially "
+                "screened documents stay local"
+            )
+            logger.warning("%s (%s)", reason, filename)
+            return self._extract_without_model(
+                doc_id, filename, local, text_content, screen_notes + [reason]
+            )
 
         try:
             doc = await self._extract_with_gemini(doc_id, filename, file_bytes, text_content)
@@ -108,13 +131,12 @@ class MultimodalExtractor:
         filename: str,
         local: local_text.LocalTextResult,
         text_content: Optional[str]
-    ) -> List[str]:
+    ) -> tuple[PrivacyVerdict, List[str]]:
         """Classify the document's content before it can reach a model, and log the verdict.
 
-        The verdict is recorded, not enforced: refusing a call on a regex hit would be a new
-        policy, and policy in this fleet lives in the permission registry and the approval gate.
-        What it buys is that an operator can see, on the gate-ledger row of the extraction
-        itself, what kind of data was about to leave.
+        RED, UNSCREENED and truncated content is recorded here and kept on the local path by the
+        caller. AMBER content may travel because ordinary invoices necessarily contain business
+        addresses and billing mailboxes; the verdict remains visible in the ledger.
         """
         readable = local.text or text_content
         verdict = screen_text(
@@ -127,7 +149,7 @@ class MultimodalExtractor:
         )
         if verdict.level is ScreenLevel.RED:
             logger.warning("Privacy screen RED for %s: %s", filename, verdict.summary())
-        return [verdict.summary()]
+        return verdict, [verdict.summary()]
 
     def _extract_without_model(
         self,
@@ -208,11 +230,12 @@ class MultimodalExtractor:
         else:
             payload = text_content or filename
 
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=settings.gemini_default_model,
-            contents=[EXTRACTION_PROMPT, payload]
-        )
+        async with _GEMINI_CONCURRENCY:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=settings.gemini_default_model,
+                contents=[EXTRACTION_PROMPT, payload]
+            )
 
         data = json.loads(self._strip_code_fence(response.text))
         doc = self._dict_to_document(doc_id, filename, data)

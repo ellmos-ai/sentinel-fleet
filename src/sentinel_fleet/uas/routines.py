@@ -11,6 +11,7 @@ TaskMaster queue) carrying `source_template_id`/`source_binding_id`/`triggered_b
 queue table already IS the view of every run, template-triggered or not.
 """
 
+import asyncio
 import time
 import uuid
 from datetime import date, datetime, timezone
@@ -264,10 +265,13 @@ def sorted_catalog(templates: List[TaskTemplate]) -> List[Dict[str, Any]]:
 def _build_prompt(template: TaskTemplate) -> tuple:
     if template.prompt_source == "library" and template.prompt_id:
         system_prompt, digest = chat_service.build_system_prompt(
-            template.skill_ids, template.prompt_id, template.prompt_version
+            template.skill_ids, template.prompt_id, template.prompt_version,
+            agent_id=template.assigned_agent,
         )
     else:
-        system_prompt, digest = chat_service.build_system_prompt(template.skill_ids)
+        system_prompt, digest = chat_service.build_system_prompt(
+            template.skill_ids, agent_id=template.assigned_agent
+        )
         if template.custom_prompt_text:
             system_prompt += f"\n\n# Task instructions\n{template.custom_prompt_text}"
             digest.append("prompt source         custom inline text")
@@ -369,18 +373,23 @@ async def enqueue_template(
 
     task_master.update_task_state(task.task_id, TaskState.IN_PROGRESS)
 
-    # A research step reads pages before it answers, which the flat single-step path below knows
-    # nothing about. Rather than a second copy of that orchestration, a lone research step is
-    # handed to the same runner the multi-step path uses - it loops over one step just as well.
-    needs_runner = len(template.steps) > 1 or template.steps[0].execution_pattern == "research"
+    # Non-single patterns have their orchestration in the chain runner.  It intentionally loops
+    # over one step as well: otherwise a one-step race would silently take the flat single-model
+    # path, while the exact same step inside a two-step template would really race its lanes.
+    needs_runner = len(template.steps) > 1 or template.steps[0].execution_pattern != "single"
 
     if needs_runner:
         if len(template.steps) > 1:
             run_log_bus.emit(task.task_id, f"multi-step template ({len(template.steps)} steps) - delegating to chain runner")
-        else:
+        elif template.steps[0].execution_pattern == "research":
             run_log_bus.emit(
                 task.task_id,
                 f"research step reading {len(template.steps[0].research_urls)} page(s) - delegating to chain runner"
+            )
+        else:
+            run_log_bus.emit(
+                task.task_id,
+                f"{template.steps[0].execution_pattern} step - delegating to chain runner"
             )
         # Not closed here - chain_runner.run_chain() closes the bus itself on every one of its
         # own terminal returns (see its docstring). A raised gateway refusal is the exception:
@@ -399,7 +408,12 @@ async def enqueue_template(
             task.task_id, TaskState.FAILED, error=f"Agent '{template.assigned_agent}' is not registered"
         )
 
-    system_prompt, user_message, digest = _build_prompt(template)
+    try:
+        system_prompt, user_message, digest = _build_prompt(template)
+    except ValueError as exc:
+        run_log_bus.emit(task.task_id, f"step 1/1: failed - {exc}")
+        run_log_bus.close(task.task_id)
+        return task_master.update_task_state(task.task_id, TaskState.FAILED, error=str(exc))
     run_log_bus.emit(
         task.task_id, f"step 1/1 via {template.assigned_agent}, model {settings.gemini_default_model} - started"
     )
@@ -463,6 +477,8 @@ async def enqueue_template(
 # The Cloud Scheduler trigger (concept doc, section C.4 / D Phase 1).
 # ---------------------------------------------------------------------------
 
+_FIRE_DUE_LOCK = asyncio.Lock()
+
 async def _fire_routine(binding: RoutineBinding, now: datetime) -> Dict[str, Any]:
     if task_template_registry.get_template(binding.template_id) is None:
         return {"binding_id": binding.binding_id, "template_id": binding.template_id, "status": "orphaned"}
@@ -521,6 +537,12 @@ async def fire_due(now: Optional[datetime] = None) -> Dict[str, Any]:
     ScheduleBinding only fires while `status == "pending"` and is flipped to fired/skipped in
     the very same call, so it cannot fire twice either.
     """
+    async with _FIRE_DUE_LOCK:
+        return await _fire_due_locked(now)
+
+
+async def _fire_due_locked(now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Claim and advance due work under the process-wide Scheduler lock."""
     now = now or _now()
     fired: List[Dict[str, Any]] = []
     skipped: List[Dict[str, Any]] = []

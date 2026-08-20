@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from sentinel_fleet.core.config import settings
 from sentinel_fleet.web.server import app
 
 
@@ -42,14 +43,16 @@ async def test_index_renders_html(client):
     assert "Gate ledger" in body
     # Loop bodies really ran: agents, prompts and skills each render their controls
     assert "agent:invoice-extractor" in body
-    assert "openPromptVersionModal(" in body
-    assert "openSkillVersionModal(" in body
+    assert "Authenticated administration is not configured" in body
+    assert "Add version" in body
+    assert "Copy this skill" in body
     assert "extraction-mode-badge" in body
     # Task wizard entry point and the per-viewer "removed_by" controls (concept doc, section
     # D Phase 2) render unconditionally, even with no templates hidden yet.
     assert "openWizard()" in body
     assert 'id="viewer-input"' in body
-    assert 'value="operator"' in body  # default viewer, no ?viewer= query string on this request
+    assert 'value="member:demo" selected' in body
+    assert "Authorization model, not authentication" in body
 
 
 def test_all_templates_compile():
@@ -97,6 +100,35 @@ async def test_omniledger_process_api():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("filename", "content", "content_type", "expected"),
+    [
+        ("invoice.exe", b"MZ", "application/octet-stream", 415),
+        ("invoice.pdf", b"not a pdf", "application/pdf", 415),
+        ("invoice.pdf", b"%PDF-1.4", "image/png", 415),
+    ],
+)
+async def test_invoice_upload_rejects_unknown_mismatched_or_forged_documents(
+    client, filename, content, content_type, expected
+):
+    response = await client.post(
+        "/api/omniledger/process",
+        files={"file": (filename, content, content_type)},
+    )
+    assert response.status_code == expected
+
+
+@pytest.mark.asyncio
+async def test_invoice_upload_has_a_hard_byte_limit(client, monkeypatch):
+    monkeypatch.setattr(settings, "max_upload_bytes", 16)
+    response = await client.post(
+        "/api/omniledger/process",
+        files={"file": ("invoice.txt", b"A" * 17, "text/plain")},
+    )
+    assert response.status_code == 413
+
+
+@pytest.mark.asyncio
 async def test_ticket_create_and_approve(client):
     created = await client.post("/api/tickets/create", data={
         "title": "Release vendor payment",
@@ -136,7 +168,7 @@ async def test_contact_create(client):
 
 
 @pytest.mark.asyncio
-async def test_prompt_create_and_version(client):
+async def test_prompt_create_is_advisory_but_admin_versioning_is_locked(client):
     created = await client.post("/api/prompts/create", data={
         "title": "Ledger Reconciliation Prompt",
         "purpose": "Match booked invoices against bank statements.",
@@ -154,10 +186,8 @@ async def test_prompt_create_and_version(client):
         "new_text": "Reconcile invoice {{invoice_number}} and flag partial payments.",
         "change_summary": "Handle partial payments"
     })
-    assert bumped.status_code == 200
-    updated = bumped.json()["prompt"]
-    assert updated["active_version"] == "2.0.0"
-    assert len(updated["versions"]) > len(prompt["versions"])
+    assert bumped.status_code == 403
+    assert "Authenticated administration is not configured" in bumped.json()["detail"]
 
 
 @pytest.mark.asyncio

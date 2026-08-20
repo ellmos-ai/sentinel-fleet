@@ -538,36 +538,38 @@ async def test_remove_for_me_endpoint_hides_and_restore_for_me_undoes_it(client)
 
     hide = await client.post(f"/api/task-templates/{template.template_id}/remove-for-me", data={"viewer": "yara"})
     assert hide.status_code == 200
-    assert "yara" in hide.json()["template"]["removed_by"]
+    assert "member:demo" in hide.json()["template"]["removed_by"]
+    assert "yara" not in hide.json()["template"]["removed_by"]
 
-    listing = await client.get("/api/task-templates", params={"viewer": "yara"})
+    listing = await client.get("/api/task-templates", params={"viewer": "member:demo"})
     assert template.template_id not in {r["template_id"] for r in listing.json()}
 
     restore = await client.post(f"/api/task-templates/{template.template_id}/restore-for-me", data={"viewer": "yara"})
     assert restore.status_code == 200
-    assert "yara" not in restore.json()["template"]["removed_by"]
+    assert "member:demo" not in restore.json()["template"]["removed_by"]
 
-    listing_after = await client.get("/api/task-templates", params={"viewer": "yara"})
+    listing_after = await client.get("/api/task-templates", params={"viewer": "member:demo"})
     assert template.template_id in {r["template_id"] for r in listing_after.json()}
 
 
 @pytest.mark.asyncio
 async def test_index_viewer_query_param_filters_the_tasks_card_and_shows_the_hidden_panel(client):
-    template = task_template_registry.create_template(name="Zeds shared checklist", owner="zed")
+    template = task_template_registry.create_template(
+        name="Zeds shared checklist", owner="zed", visibility="organization"
+    )
     await client.post(f"/api/task-templates/{template.template_id}/remove-for-me", data={"viewer": "amir"})
 
-    # Default viewer ("operator") never hid it - still visible there.
-    default_view = await client.get("/")
-    assert "Zeds shared checklist" in default_view.text
+    operator_view = await client.get("/", params={"user": "operator"})
+    assert "Zeds shared checklist" in operator_view.text
 
-    # amir hid it - gone from the Tasks card, but surfaced in the "hidden for you" panel with
+    # The fixed demo member hid it - gone from that Tasks card, but surfaced in the panel with
     # a Restore action, not silently dropped. The panel accumulates across every test that has
     # ever hidden something for "amir" (LocalJsonStore persists to disk, concept doc, section
     # A.2's storage pattern), so this checks the specific row, not an exact count.
-    amir_view = await client.get("/", params={"viewer": "amir"})
-    assert "Hidden for you (" in amir_view.text
-    assert f'restoreTemplateForViewer("{template.template_id}", "amir")' in amir_view.text
-    assert 'value="amir"' in amir_view.text  # the "Viewing as" input reflects the query param
+    member_view = await client.get("/", params={"viewer": "member:demo"})
+    assert "Hidden for you (" in member_view.text
+    assert f'restoreTemplateForViewer("{template.template_id}", "member:demo")' in member_view.text
+    assert 'value="member:demo"' in member_view.text
 
 
 @pytest.mark.asyncio
@@ -576,12 +578,12 @@ async def test_index_only_offers_hide_for_shared_not_own_templates(client):
     a template still on its default `visibility="own"` is not shared yet, no matter who owns
     it, so the button must stay off even when someone else is viewing.
     """
-    own = task_template_registry.create_template(name="Amirs own draft", owner="amir")
+    own = task_template_registry.create_template(name="Demo member draft", owner="member:demo")
     shared = task_template_registry.create_template(
         name="Amir sees this shared one", owner="brynn", visibility="organization"
     )
 
-    body = (await client.get("/", params={"viewer": "amir"})).text.replace('"', "'")
+    body = (await client.get("/", params={"viewer": "member:demo"})).text.replace('"', "'")
     assert f"hideTemplateForViewer('{own.template_id}'" not in body
     assert f"hideTemplateForViewer('{shared.template_id}'" in body
 
@@ -596,39 +598,34 @@ async def test_index_only_offers_hide_for_shared_not_own_templates(client):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_wizard_call_chain_forks_a_prompt_then_pins_the_new_version_on_the_template(client):
+async def test_wizard_prompt_fork_is_locked_but_existing_version_can_be_pinned(client):
     prompt = prompt_registry.get_prompt("prompt:deep-task-solver")
     assert prompt is not None
     original_version_count = len(prompt.versions)
+    original_version = prompt.active_version
 
     fork = await client.post(f"/api/prompts/{prompt.id}/version", data={
         "new_version_number": "9.9.0",
         "new_text": "Forked for a one-off wizard task: {{task_title}} / {{memory_context}}",
         "change_summary": "Adjusted from the task wizard"
     })
-    assert fork.status_code == 200
-    forked = fork.json()["prompt"]
-    assert forked["active_version"] == "9.9.0"
-    assert len(forked["versions"]) == original_version_count + 1
+    assert fork.status_code == 403
+    assert len(prompt.versions) == original_version_count
 
     create = await client.post("/api/task-templates", data={
         "name": "Wizard-forked prompt task",
         "owner": "priya",
         "steps": '[{"step_id": "step-1", "position": 0, "assigned_agent": "agent:task-solver", '
-                 f'"prompt_source": "library", "prompt_id": "{prompt.id}", "prompt_version": "9.9.0"}}]'
+                 f'"prompt_source": "library", "prompt_id": "{prompt.id}", "prompt_version": "{original_version}"}}]'
     })
     assert create.status_code == 200
     template = create.json()["template"]
     assert template["prompt_id"] == prompt.id
-    assert template["prompt_version"] == "9.9.0"
-
-    # The registry, not a second copy on the template, still holds the version's text - pinning
-    # only stores the version number (concept doc, section A.2 "gepinnte Version").
-    assert prompt_registry.get_version(prompt.id, "9.9.0").text.startswith("Forked for a one-off wizard task")
+    assert template["prompt_version"] == original_version
 
 
 @pytest.mark.asyncio
-async def test_wizard_call_chain_forks_a_skill_then_attaches_it_to_a_new_template(client):
+async def test_wizard_skill_fork_is_locked_but_existing_skill_can_be_attached(client):
     skill = skill_registry.create_skill(
         name="wizard fork source", pillar="domain", description="Base skill for a wizard fork test"
     )
@@ -638,10 +635,8 @@ async def test_wizard_call_chain_forks_a_skill_then_attaches_it_to_a_new_templat
         "change_summary": "Adjusted from the task wizard",
         "required_tools": "inspect_prompt, sanitize_pii"
     })
-    assert fork.status_code == 200
-    forked = fork.json()["skill"]
-    assert forked["version"] == "1.1.0"
-    assert forked["required_tools"] == ["inspect_prompt", "sanitize_pii"]
+    assert fork.status_code == 403
+    assert skill_registry.get_skill(skill.skill_id).version == "1.0.0"
 
     create = await client.post("/api/task-templates", data={
         "name": "Wizard-forked skill task",
@@ -651,6 +646,4 @@ async def test_wizard_call_chain_forks_a_skill_then_attaches_it_to_a_new_templat
     assert create.status_code == 200
     assert skill.skill_id in create.json()["template"]["skill_ids"]
 
-    # The fork is a real, independent version bump on the skill registry - visible there too,
-    # not something only the template remembers.
-    assert skill_registry.get_skill(skill.skill_id).version == "1.1.0"
+    assert skill_registry.get_skill(skill.skill_id).version == "1.0.0"

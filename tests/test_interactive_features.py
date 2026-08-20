@@ -54,7 +54,7 @@ async def test_create_custom_memory():
 
 
 @pytest.mark.asyncio
-async def test_prompt_version_bump_and_permissions():
+async def test_prompt_version_and_permission_admin_are_locked():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # Bump version
@@ -63,19 +63,14 @@ async def test_prompt_version_bump_and_permissions():
             "new_text": "Updated vision prompt for 2026",
             "change_summary": "Added support for electronic e-invoice formats"
         })
-        assert res_bump.status_code == 200
-        data_bump = res_bump.json()
-        assert data_bump["prompt"]["active_version"] == "1.3.0"
+        assert res_bump.status_code == 403
 
         # Update permissions
         res_perm = await ac.post("/api/prompts/prompt:invoice-vision-multimodal/permissions", data={
             "visibility": "public",
             "requires_approval": "true"
         })
-        assert res_perm.status_code == 200
-        data_perm = res_perm.json()
-        assert data_perm["prompt"]["visibility"] == "public"
-        assert data_perm["prompt"]["requires_approval"] is True
+        assert res_perm.status_code == 403
 
 
 @pytest.mark.asyncio

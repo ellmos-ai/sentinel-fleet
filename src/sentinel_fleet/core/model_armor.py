@@ -42,6 +42,19 @@ class ModelArmor:
             if pattern.search(text_to_scan):
                 detected.append(pattern.pattern)
 
+        # A small canonical pass catches spacing/punctuation evasions without pretending this
+        # regex layer is a complete semantic defence. Authorization and least privilege remain
+        # separate gates.
+        canonical = re.sub(r"[^a-z]", "", text_to_scan.lower())
+        for phrase in (
+            "ignorepreviousinstructions",
+            "ignorepriorinstructions",
+            "disregardearlierdirections",
+            "revealsystemprompt",
+        ):
+            if phrase in canonical:
+                detected.append(f"canonical:{phrase}")
+
         if detected:
             return ArmorInspectionResult(
                 is_safe=False,
@@ -53,6 +66,33 @@ class ModelArmor:
             is_safe=True,
             sanitized_data=prompt_text
         )
+
+    @classmethod
+    def inspect_arguments(cls, value: Any, depth: int = 0) -> ArmorInspectionResult:
+        """Inspect every untrusted string in a nested argument payload."""
+        if depth > cls.MAX_RECURSION_DEPTH:
+            return ArmorInspectionResult(
+                is_safe=False,
+                blocked_patterns=["argument nesting exceeds inspection depth"],
+            )
+        strings: List[str] = []
+        if isinstance(value, str):
+            strings.append(value)
+        elif isinstance(value, dict):
+            for item in value.values():
+                result = cls.inspect_arguments(item, depth + 1)
+                if not result.is_safe:
+                    return result
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                result = cls.inspect_arguments(item, depth + 1)
+                if not result.is_safe:
+                    return result
+        for text in strings:
+            result = cls.inspect_prompt(text)
+            if not result.is_safe:
+                return result
+        return ArmorInspectionResult(is_safe=True, sanitized_data=value)
 
     @classmethod
     def sanitize_pii(cls, text: str) -> Tuple[str, List[str]]:

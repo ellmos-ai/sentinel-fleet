@@ -1,6 +1,7 @@
 """FastAPI Web Server for SentinelFleet & OmniLedger Operator Dashboard."""
 
 import asyncio
+import hmac
 import os
 import json
 import logging
@@ -17,14 +18,21 @@ from pydantic import ValidationError as PydanticValidationError
 
 from sentinel_fleet.chat import export as chat_export
 from sentinel_fleet.chat.backends import SUPPORTED_MODELS
-from sentinel_fleet.chat.service import chat_service
+from sentinel_fleet.chat.service import ComponentAuthorizationError, chat_service
 from sentinel_fleet.web import governance
 from sentinel_fleet.web.blueprint_graph import build_circuit
 from sentinel_fleet.core.config import settings
 from sentinel_fleet.core.identity import AgentStatus
 from sentinel_fleet.core.gateway import gateway
+from sentinel_fleet.core.policy_catalog import (
+    Enforcement,
+    PolicyType,
+    policy_catalog,
+)
 from sentinel_fleet.core.prompts import prompt_registry
 from sentinel_fleet.core.skills import skill_registry
+from sentinel_fleet.core.storage import requested_backend
+from sentinel_fleet.core.users import DEMO_USER_ID, UserIdentity, user_registry
 from sentinel_fleet.core.domains import domain_registry
 from sentinel_fleet.core.privacy_contacts import privacy_contact_hub
 from sentinel_fleet.core.web_reader import read_page
@@ -93,6 +101,27 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+
+@app.middleware("http")
+async def fail_closed_without_deployment_auth(request: Request, call_next):
+    """Expose only health and the token-gated scheduler when demo mode is disabled.
+
+    This build deliberately has no login or verified HTTP principal. Demo mode permits bounded
+    interactive writes; disabling it must not silently turn those routes into anonymous
+    production administration.
+    """
+    if not settings.demo_mode and request.url.path not in {"/api/health", "/api/routines/fire"}:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": (
+                    "Authenticated deployment access is not configured; non-demo routes are "
+                    "locked. Put the service behind Cloud Run IAM/IAP before enabling them."
+                )
+            },
+        )
+    return await call_next(request)
 
 # Exception handlers for SentinelFleet errors
 @app.exception_handler(TaskNotFoundError)
@@ -361,17 +390,57 @@ def _routine_catalog(viewer: Optional[str] = None) -> List[Dict[str, Any]]:
     return rows
 
 
+def _registered_user(user_id: str) -> UserIdentity:
+    try:
+        return user_registry.require_user(user_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _mutation_actor() -> UserIdentity:
+    """Return the only principal this build can prove for a mutation.
+
+    Query strings and form fields are display claims, never authentication. The public demo is
+    therefore pinned to its deliberately low-privilege member. A non-demo deployment fails
+    closed until an identity provider supplies a verified principal.
+    """
+    if not settings.demo_mode:
+        raise HTTPException(
+            status_code=403,
+            detail="No authenticated mutation principal is configured; operation denied.",
+        )
+    return user_registry.require_user(DEMO_USER_ID)
+
+
+def _require_authenticated_admin_mutation() -> None:
+    """Block security-root authoring surfaces until the project has real authentication."""
+    raise HTTPException(
+        status_code=403,
+        detail="Authenticated administration is not configured; this mutation is locked.",
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
-async def index_view(request: Request, viewer: str = "operator"):
+async def index_view(
+    request: Request,
+    user: Optional[str] = None,
+    viewer: Optional[str] = None,
+):
     """Render the Main Operator Control Dashboard.
 
-    `viewer` names whose own view of the Tasks card this is (concept doc, section A.4/D
-    Phase 2 "removed_by"). This deployment has no login, so the URL query string is the one
-    source of that identity - no localStorage mirror, no redirect: the "Viewing as" control
-    just navigates to `/?viewer=...`, and `location.reload()` elsewhere on this page keeps the
-    query string as-is. Defaults to "operator", the same default every template's `owner` and
-    every create form already uses.
+    This is an authorization demonstration, not authentication. ``?user=`` selects one named
+    registry identity so reviewers can inspect the resulting capabilities. The old ``viewer``
+    parameter remains an alias for links that predate the user registry. In demo mode the member
+    identity is the default and sensitive administration stays locked server-side.
     """
+    current_user = _registered_user(user or viewer or DEMO_USER_ID)
+    viewer_id = current_user.user_id
+    capability_board = user_registry.capability_matrix()
+    current_capabilities = next(
+        entry["capabilities"]
+        for entry in capability_board["users"]
+        if entry["user_id"] == viewer_id
+    )
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -392,9 +461,20 @@ async def index_view(request: Request, viewer: str = "operator"):
             "pending_tickets": ticket_master.get_pending_tickets(),
             "tasks": _tail(task_master.list_all()),
             "task_total": len(task_master.list_all()),
-            "viewer": viewer,
-            "routine_catalog": _routine_catalog(viewer=viewer),
-            "hidden_templates": task_template_registry.list_hidden_for_viewer(viewer),
+            "viewer": viewer_id,
+            "current_user": current_user,
+            "users": user_registry.list_users(),
+            "role_profiles": user_registry.list_profiles(),
+            "current_capabilities": current_capabilities,
+            "demo_mode": settings.demo_mode,
+            "admin_mutations_enabled": False,
+            "demo_mutation_user_id": DEMO_USER_ID,
+            "authorization_note": (
+                "Authorization model, not authentication: ?user= is an unauthenticated "
+                "identity claim for this public demo."
+            ),
+            "routine_catalog": _routine_catalog(viewer=viewer_id),
+            "hidden_templates": task_template_registry.list_hidden_for_viewer(viewer_id),
             "memories": _tail(memory_bank.list_all()),
             "prompts": prompt_registry.list_all(),
             "skills": skill_registry.list_all(),
@@ -408,7 +488,7 @@ async def index_view(request: Request, viewer: str = "operator"):
             "spans": telemetry.get_recent_spans(),
             # Recomputed on every render from the live registers, like every other derived view
             # on this page - the board has no store of its own (see web/governance.py).
-            "governance": governance.build_board()
+            "governance": governance.build_board(viewer_id)
         }
     )
 
@@ -447,7 +527,8 @@ async def api_health():
         "environment": settings.environment,
         "cloud_project": settings.google_cloud_project,
         "active_agents": len(lifecycle_manager.list_fleet()),
-        "pending_approvals": len(ticket_master.get_pending_tickets())
+        "pending_approvals": len(ticket_master.get_pending_tickets()),
+        "storage_backend": requested_backend(),
     }
 
 
@@ -509,20 +590,180 @@ async def api_get_telemetry_status():
 # ---------------------------------------------------------
 
 @app.get("/api/governance/board")
-async def api_governance_board():
+async def api_governance_board(user: str = DEMO_USER_ID):
     """Policies, verdicts, locks, plans and approvals in one aggregated read.
 
     The same object the Governance tab renders from, exposed as JSON so an auditor can take the
     board's numbers away and check them against the registers themselves. Read-only by
     construction: this module writes to nothing.
     """
-    return governance.build_board()
+    return governance.build_board(_registered_user(user).user_id)
 
 
 @app.get("/api/governance/permissions")
 async def api_governance_permissions():
     """Just the agent × tool matrix, for a caller that wants the scope map on its own."""
     return governance.permission_matrix(lifecycle_manager.list_fleet(), gateway.permissions)
+
+
+@app.put("/api/governance/permissions/{tool_pattern}")
+async def api_update_governance_permission(
+    tool_pattern: str,
+    action: str = Form(...),
+):
+    """Expose the designed control without pretending an unauthenticated demo can use it."""
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Permission editing is locked: the public build demonstrates authorization but "
+            "has no authentication authority for this security-root mutation."
+        ),
+    )
+
+
+@app.get("/api/users")
+async def api_users():
+    return user_registry.capability_matrix()
+
+
+@app.get("/api/policies")
+async def api_policies():
+    return policy_catalog.summary(gateway.permissions)
+
+
+@app.post("/api/policies")
+async def api_create_policy(
+    title: str = Form(...),
+    statement: str = Form(...),
+    policy_type: str = Form("preference"),
+    enforcement: str = Form("advisory"),
+    workflow_ref: Optional[str] = Form(None),
+    visibility: str = Form("own"),
+):
+    actor = _mutation_actor()
+    try:
+        policy = policy_catalog.create_policy(
+            actor,
+            title=title,
+            statement=statement,
+            type=PolicyType(policy_type),
+            enforcement=Enforcement(enforcement),
+            workflow_ref=workflow_ref or None,
+            visibility=visibility,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "created", "policy": policy.model_dump()}
+
+
+@app.put("/api/policies/{policy_id}")
+async def api_update_policy(
+    policy_id: str,
+    title: Optional[str] = Form(None),
+    statement: Optional[str] = Form(None),
+    visibility: Optional[str] = Form(None),
+):
+    actor = _mutation_actor()
+    changes = {
+        key: value
+        for key, value in {"title": title, "statement": statement, "visibility": visibility}.items()
+        if value is not None
+    }
+    try:
+        policy = policy_catalog.update_policy(actor, policy_id, **changes)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "updated", "policy": policy.model_dump()}
+
+
+@app.post("/api/policies/{policy_id}/bindings")
+async def api_bind_policy(
+    policy_id: str,
+    target_kind: str = Form(...),
+    target_id: str = Form(...),
+    scope_level: str = Form("user"),
+    target_user_id: Optional[str] = Form(None),
+    target_department_id: Optional[str] = Form(None),
+):
+    actor = _mutation_actor()
+    policy = policy_catalog.get_policy(policy_id, gateway.permissions)
+    if policy is None:
+        raise HTTPException(status_code=404, detail=f"Policy '{policy_id}' does not exist.")
+    target_owner = None
+    if target_kind == "template":
+        template = task_template_registry.get_template(target_id)
+        if template is None:
+            raise HTTPException(status_code=404, detail=f"Template '{target_id}' does not exist.")
+        target_owner = template.owner
+    elif target_kind == "agent":
+        if lifecycle_manager.get_agent(target_id) is None:
+            raise HTTPException(status_code=404, detail=f"Agent '{target_id}' does not exist.")
+    elif target_kind == "skill":
+        if skill_registry.get_skill(target_id) is None:
+            raise HTTPException(status_code=404, detail=f"Skill '{target_id}' does not exist.")
+    elif target_kind == "domain":
+        if domain_registry.get_domain(target_id) is None:
+            raise HTTPException(status_code=404, detail=f"Domain '{target_id}' does not exist.")
+    elif target_kind == "process":
+        raise HTTPException(
+            status_code=422,
+            detail="Process bindings are not writable until a process registry exists.",
+        )
+    if scope_level == "other_user":
+        if not target_user_id:
+            raise HTTPException(status_code=422, detail="other_user scope needs target_user_id.")
+        _registered_user(target_user_id)
+    elif target_user_id:
+        raise HTTPException(status_code=422, detail="target_user_id is valid only for other_user scope.")
+    if scope_level == "department":
+        if not target_department_id:
+            raise HTTPException(status_code=422, detail="department scope needs target_department_id.")
+        if target_department_id not in user_registry.list_departments():
+            raise HTTPException(
+                status_code=404, detail=f"Department '{target_department_id}' does not exist."
+            )
+    elif target_department_id:
+        raise HTTPException(
+            status_code=422, detail="target_department_id is valid only for department scope."
+        )
+    try:
+        binding = policy_catalog.bind(
+            actor,
+            policy,
+            target_kind=target_kind,
+            target_id=target_id,
+            scope_level=scope_level,
+            target_owner=target_owner,
+            target_user_id=target_user_id or None,
+            target_department_id=target_department_id or None,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": binding.state, "binding": binding.model_dump()}
+
+
+@app.delete("/api/policy-bindings/{binding_id}")
+async def api_remove_policy_binding(
+    binding_id: str,
+):
+    actor = _mutation_actor()
+    try:
+        binding = policy_catalog.remove_binding(actor, binding_id, registry=gateway.permissions)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": binding.removal_state or "removed", "binding": binding.model_dump()}
 
 
 @app.get("/api/memory")
@@ -629,7 +870,7 @@ async def api_create_prompt(
         variables=[],
         tags=[],
         visibility=visibility,
-        requires_approval=requires_approval
+        requires_approval=True if settings.demo_mode else requires_approval
     )
     return {"status": "created", "prompt": prompt.model_dump()}
 
@@ -641,6 +882,7 @@ async def api_add_prompt_version(
     new_text: str = Form(...),
     change_summary: str = Form(...)
 ):
+    _require_authenticated_admin_mutation()
     prompt = prompt_registry.add_prompt_version(
         prompt_id=prompt_id,
         new_version_number=new_version_number,
@@ -688,6 +930,7 @@ def _references_to(prompt_id: Optional[str] = None,
 
 @app.delete("/api/prompts/{prompt_id}")
 async def api_delete_prompt(prompt_id: str):
+    _require_authenticated_admin_mutation()
     if not prompt_registry.get_prompt(prompt_id):
         raise PromptNotFoundError(prompt_id)
     users = _references_to(prompt_id=prompt_id)
@@ -699,6 +942,7 @@ async def api_delete_prompt(prompt_id: str):
 
 @app.delete("/api/prompts/{prompt_id}/versions/{version_number}")
 async def api_delete_prompt_version(prompt_id: str, version_number: str):
+    _require_authenticated_admin_mutation()
     users = _references_to(prompt_id=prompt_id, version_number=version_number)
     if users:
         raise ComponentInUseError(f"version {version_number} of prompt", prompt_id, users)
@@ -708,6 +952,7 @@ async def api_delete_prompt_version(prompt_id: str, version_number: str):
 
 @app.delete("/api/skills/{skill_id}")
 async def api_delete_skill(skill_id: str):
+    _require_authenticated_admin_mutation()
     if not skill_registry.get_skill(skill_id):
         raise SkillNotFoundError(skill_id)
     users = _references_to(skill_id=skill_id)
@@ -723,6 +968,7 @@ async def api_update_prompt_permissions(
     visibility: str = Form("organization"),
     requires_approval: bool = Form(False)
 ):
+    _require_authenticated_admin_mutation()
     prompt = prompt_registry.update_permissions(
         prompt_id=prompt_id,
         visibility=visibility,
@@ -767,7 +1013,8 @@ async def api_create_skill(
         pillar=pillar,
         description=description,
         body=body,
-        required_tools=tools
+        required_tools=tools,
+        execution_gate="locked" if settings.demo_mode else "auto",
     )
     return {"status": "created", "skill": skill.model_dump()}
 
@@ -779,6 +1026,7 @@ async def api_add_skill_version(
     change_summary: str = Form(...),
     required_tools: str = Form("")
 ):
+    _require_authenticated_admin_mutation()
     tools = [t.strip() for t in required_tools.split(",") if t.strip()]
     try:
         skill = skill_registry.add_skill_version(
@@ -798,6 +1046,7 @@ async def api_update_skill_permissions(
     visibility: str = Form("organization"),
     execution_gate: str = Form("auto")
 ):
+    _require_authenticated_admin_mutation()
     try:
         skill = skill_registry.update_permissions(
             skill_id=skill_id,
@@ -841,8 +1090,21 @@ async def api_create_ticket(
     return {"status": "created", "ticket": ticket.model_dump()}
 
 
+@app.get("/api/tickets")
+async def api_list_tickets():
+    return [ticket.model_dump() for ticket in ticket_master.list_all()]
+
+
 @app.post("/api/tickets/{ticket_id}/approve")
 async def api_approve_ticket(ticket_id: str):
+    pending = ticket_master.get_ticket(ticket_id)
+    if pending and pending.tool_name in {
+        "policy_binding_request", "policy_binding_removal_request"
+    }:
+        raise HTTPException(
+            status_code=403,
+            detail="Policy-binding approvals are locked in the unauthenticated public demo.",
+        )
     try:
         ticket = ticket_master.approve_ticket(ticket_id)
     except TicketNotFoundError:
@@ -859,11 +1121,21 @@ async def api_approve_ticket(ticket_id: str):
     if agent and agent.status == AgentStatus.WAITING_APPROVAL:
         lifecycle_manager.update_agent_status(ticket.agent_id, AgentStatus.IDLE)
 
+    policy_catalog.resolve_forward(ticket_id, approved=True)
+
     return {"status": "approved", "ticket": ticket.model_dump()}
 
 
 @app.post("/api/tickets/{ticket_id}/reject")
 async def api_reject_ticket(ticket_id: str, reason: str = Form("Rejected by operator")):
+    pending = ticket_master.get_ticket(ticket_id)
+    if pending and pending.tool_name in {
+        "policy_binding_request", "policy_binding_removal_request"
+    }:
+        raise HTTPException(
+            status_code=403,
+            detail="Policy-binding decisions are locked in the unauthenticated public demo.",
+        )
     try:
         ticket = ticket_master.reject_ticket(ticket_id, reason)
     except TicketNotFoundError:
@@ -872,6 +1144,8 @@ async def api_reject_ticket(ticket_id: str, reason: str = Form("Rejected by oper
     agent = lifecycle_manager.get_agent(ticket.agent_id)
     if agent and agent.status == AgentStatus.WAITING_APPROVAL:
         lifecycle_manager.update_agent_status(ticket.agent_id, AgentStatus.IDLE)
+
+    policy_catalog.resolve_forward(ticket_id, approved=False)
 
     return {"status": "rejected", "ticket": ticket.model_dump()}
 
@@ -1016,10 +1290,8 @@ async def api_create_task_template(
     visibility: str = Form("own"),
     requires_approval: bool = Form(False),
     group: str = Form(""),
-    # Optional Phase-2 chain shape (concept doc, section E.4): a JSON array of Step objects.
-    # MVP accepts it, but TaskTemplate's own field validator still requires exactly one
-    # element - this is schema future-proofing, not multi-step behaviour. Empty/omitted falls
-    # back to the flat fields above, folded into a single default Step as before.
+    # Optional linear-chain shape (concept doc, section E.4): a JSON array of Step objects.
+    # Empty/omitted falls back to the flat fields above, folded into one default Step.
     steps: str = Form("")
 ):
     explicit_steps: Optional[List[Step]] = None
@@ -1051,8 +1323,8 @@ async def api_create_task_template(
             steps=explicit_steps
         )
     except PydanticValidationError as exc:
-        # Only reachable via the explicit `steps` path above - the flat-field path always
-        # builds exactly one Step, so it can never trip the "exactly one step" validator.
+        # Only reachable via the explicit `steps` path above; the flat-field path builds one
+        # already-validated Step.
         raise HTTPException(status_code=422, detail=str(exc))
     return {"status": "created", "template": template.model_dump()}
 
@@ -1120,17 +1392,23 @@ async def api_delete_task_template(template_id: str, requested_by: str = "operat
 
 
 @app.post("/api/task-templates/{template_id}/remove-for-me")
-async def api_remove_task_template_for_viewer(template_id: str, viewer: str = Form("operator")):
+async def api_remove_task_template_for_viewer(
+    template_id: str, viewer: Optional[str] = Form(None)
+):
     """Hides a shared template from one viewer's own list without touching the template
     itself - "remove a shared item" is not "delete it" (concept doc, section A.4)."""
-    template = task_template_registry.remove_for_viewer(template_id, viewer)
+    actor = _mutation_actor()
+    template = task_template_registry.remove_for_viewer(template_id, actor.user_id)
     return {"status": "removed_for_viewer", "template": template.model_dump()}
 
 
 @app.post("/api/task-templates/{template_id}/restore-for-me")
-async def api_restore_task_template_for_viewer(template_id: str, viewer: str = Form("operator")):
+async def api_restore_task_template_for_viewer(
+    template_id: str, viewer: Optional[str] = Form(None)
+):
     """Undoes `remove-for-me` - the action behind the "hidden for you" panel's Restore row."""
-    template = task_template_registry.restore_for_viewer(template_id, viewer)
+    actor = _mutation_actor()
+    template = task_template_registry.restore_for_viewer(template_id, actor.user_id)
     return {"status": "restored_for_viewer", "template": template.model_dump()}
 
 
@@ -1197,8 +1475,13 @@ async def api_fire_routines(request: Request):
     """
     expected_token = os.getenv("ROUTINES_FIRE_TOKEN", "")
     if expected_token:
-        if request.headers.get("X-Fire-Token", "") != expected_token:
+        if not hmac.compare_digest(request.headers.get("X-Fire-Token", ""), expected_token):
             raise HTTPException(status_code=401, detail="Missing or invalid X-Fire-Token header")
+    elif os.getenv("K_SERVICE"):
+        raise HTTPException(
+            status_code=503,
+            detail="ROUTINES_FIRE_TOKEN is required on Cloud Run; scheduler trigger disabled.",
+        )
     else:
         logger.warning(
             "POST /api/routines/fire was called without ROUTINES_FIRE_TOKEN set - the endpoint "
@@ -1238,6 +1521,12 @@ async def ws_run_console(websocket: WebSocket, run_id: str):
     the same run while it is mid-flight, and a template with `requires_approval` sitting in
     AWAITING_APPROVAL, which this route also treats as closed (see `_RUN_CONSOLE_TERMINAL_STATES`).
     """
+    if not settings.demo_mode:
+        await websocket.close(
+            code=1008,
+            reason="Authenticated deployment access is not configured.",
+        )
+        return
     task = task_master.get_task(run_id)
     if task is None:
         # Denies the handshake outright (no `accept()` was ever sent) - the ASGI-level
@@ -1361,14 +1650,17 @@ async def api_chat_send(payload: ChatSendRequest):
     if payload.model:
         _reject_unsupported_models([payload.model])
 
-    session, reply = await chat_service.send(
-        message=payload.message,
-        session_id=payload.session_id,
-        model=payload.model,
-        skill_ids=payload.skill_ids,
-        prompt_id=payload.prompt_id,
-        prompt_version=payload.prompt_version
-    )
+    try:
+        session, reply = await chat_service.send(
+            message=payload.message,
+            session_id=payload.session_id,
+            model=payload.model,
+            skill_ids=payload.skill_ids,
+            prompt_id=payload.prompt_id,
+            prompt_version=payload.prompt_version
+        )
+    except ComponentAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return {
         "session_id": session.session_id,
         "title": session.title,
@@ -1393,8 +1685,10 @@ async def api_chat_race(payload: ChatRaceRequest):
             prompt_id=payload.prompt_id,
             prompt_version=payload.prompt_version
         )
+    except ComponentAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {"session_id": session.session_id, "race": record.model_dump()}
 
@@ -1436,10 +1730,36 @@ async def api_process_invoice(
     upload_bytes: Optional[bytes] = None
     upload_text: Optional[str] = None
     if file is not None:
-        upload_bytes = await file.read()
-        # Best-effort text view for the guardrail scan; no PDF parser is bundled
-        upload_text = upload_bytes.decode("utf-8", errors="ignore")
         filename = file.filename or "uploaded_document.pdf"
+        extension = os.path.splitext(filename)[1].lower()
+        try:
+            expected_mime = extractor.guess_mime_type(filename)
+        except ValueError as exc:
+            raise HTTPException(status_code=415, detail=str(exc)) from exc
+        accepted_content_types = {expected_mime, "application/octet-stream"}
+        if file.content_type and file.content_type not in accepted_content_types:
+            raise HTTPException(
+                status_code=415,
+                detail=f"Content type '{file.content_type}' does not match '{extension}'.",
+            )
+        upload_bytes = await file.read(settings.max_upload_bytes + 1)
+        if len(upload_bytes) > settings.max_upload_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload exceeds the {settings.max_upload_bytes}-byte limit.",
+            )
+        signatures = {
+            ".pdf": lambda data: data.startswith(b"%PDF-"),
+            ".png": lambda data: data.startswith(b"\x89PNG\r\n\x1a\n"),
+            ".jpg": lambda data: data.startswith(b"\xff\xd8\xff"),
+            ".jpeg": lambda data: data.startswith(b"\xff\xd8\xff"),
+            ".webp": lambda data: data.startswith(b"RIFF") and data[8:12] == b"WEBP",
+            ".txt": lambda data: b"\x00" not in data[:4096],
+        }
+        if not upload_bytes or not signatures[extension](upload_bytes):
+            raise HTTPException(status_code=415, detail="Document signature does not match its extension.")
+        if extension == ".txt":
+            upload_text = upload_bytes.decode("utf-8", errors="replace")
     elif preset_type == "missing_vat":
         filename = "Invoice_MissingVAT_CS.pdf"
     elif preset_type == "math_error":

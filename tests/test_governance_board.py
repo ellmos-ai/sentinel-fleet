@@ -124,18 +124,16 @@ def test_permission_matrix_separates_scope_from_registry_verdict():
     assert matrix["summary"]["grants"] == 3
 
 
-def test_matrix_marks_grants_that_rest_on_the_registry_default():
-    """Several tools agents really carry have no rule of their own and inherit the registry's
-    fall-through. The board says which, because "allowed by a rule" and "allowed because no rule
-    matched" are different governance facts."""
+def test_every_seeded_tool_has_an_explicit_rule_and_registry_has_no_fail_open_cells():
+    """A new tool must receive a reviewed rule instead of inheriting an ALLOW fall-through."""
     agents = [_agent("agent:alpha", {"dispatch_swarm", "extract_invoice_multimodal"})]
     matrix = governance.permission_matrix(agents, PermissionRegistry())
     rows = {row["tool"]: row for row in matrix["rows"]}
 
-    assert rows["dispatch_swarm"]["source"] == "default"
+    assert rows["dispatch_swarm"]["source"] == "rule"
     assert rows["dispatch_swarm"]["action"] == PermissionAction.ALLOW.value
     assert rows["extract_invoice_multimodal"]["source"] == "rule"
-    assert matrix["summary"]["on_default"] == 1
+    assert matrix["summary"]["on_default"] == 0
 
 
 def test_matrix_verdict_never_disagrees_with_the_gateway_s_own_evaluation():
@@ -402,7 +400,9 @@ async def test_board_endpoint_serves_the_whole_federation(client):
     assert response.status_code == 200
     board = response.json()
     assert board["permissions"]["summary"]["tools"] > 0
-    assert len(board["policies"]) == 3
+    assert len(board["engine_checks"]) == 3
+    assert board["policies"]["summary"]["total"] >= 3
+    assert board["policies"]["summary"]["enforcing"] >= 3
     assert board["gate_sequence"][0]["stage"] == "Quarantine"
 
 

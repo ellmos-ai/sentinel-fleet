@@ -1,10 +1,9 @@
-"""Tests for the chain runner: sequential step execution, context handoff between steps, the
-single/race execution patterns, and failure/approval handling for a multi-step TaskTemplate
+"""Tests for the chain runner: sequential execution, untrusted context handoff, the
+single/race/research patterns, and failure/approval handling for TaskTemplates
 (concept doc, section E.4 "Minimaler Ketten-Schnitt").
 
-A single-step template is deliberately NOT exercised here beyond one regression guard - it
-keeps running through `routines.enqueue_template()`'s original, unchanged code path, already
-covered end to end by `tests/test_routines.py`.
+One-step races are exercised here because specialised patterns delegate to the runner regardless
+of chain length. The ordinary one-step `single` path stays covered end to end in routines tests.
 """
 
 import pytest
@@ -90,10 +89,10 @@ async def test_two_single_pattern_steps_run_in_order_and_hand_off_context(record
     assert task.state == TaskState.COMPLETED
     assert len(recording_backend.calls) == 2
     first_reply = "reply #1 from"
-    # Step 2's prompt carries step 1's output as context - this is the chain, not two
-    # independent runs.
-    assert "reply #1" in recording_backend.calls[1]["system_prompt"]
-    assert first_reply not in recording_backend.calls[0]["system_prompt"]
+    # Step 2 carries step 1's output as untrusted user context, never as system instructions.
+    assert "reply #1" in recording_backend.calls[1]["user_message"]
+    assert "untrusted data" in recording_backend.calls[1]["user_message"]
+    assert first_reply not in recording_backend.calls[0]["user_message"]
 
     steps = task.output_data["steps"]
     assert [s["step_id"] for s in steps] == ["step-1", "step-2"]
@@ -180,6 +179,29 @@ RACE_MODELS = ["gemini-3.5-flash", "gemini-3.7-flash"]
 
 
 @pytest.mark.asyncio
+async def test_one_step_race_uses_the_chain_runner_and_runs_every_lane(recording_backend):
+    """A pattern belongs to the step, not to the number of steps around it.
+
+    Finding #39: routines.py used to delegate only multi-step templates (and later research),
+    so a one-step race quietly made one default-model call through the flat path.
+    """
+    template = _template([
+        Step(
+            step_id="step-1", position=0, execution_pattern="race", race_models=RACE_MODELS,
+            custom_prompt_text="Summarise the invoice."
+        )
+    ])
+
+    task = await routines.enqueue_template(template.template_id, triggered_by="manual")
+
+    assert task.state == TaskState.COMPLETED
+    assert len(recording_backend.calls) == len(RACE_MODELS)
+    assert task.output_data["steps"][0]["execution_pattern"] == "race"
+    for model in RACE_MODELS:
+        assert f"## {model}" in task.output_data["steps"][0]["content"]
+
+
+@pytest.mark.asyncio
 async def test_race_step_runs_every_model_and_forwards_labelled_output(recording_backend):
     template = _template([
         Step(
@@ -202,7 +224,7 @@ async def test_race_step_runs_every_model_and_forwards_labelled_output(recording
         assert f"## {model}" in step_records[0]["content"]
 
     # Step 2 sees both lanes' labelled content as context - not just one arbitrarily chosen lane.
-    step_2_prompt = recording_backend.calls[-1]["system_prompt"]
+    step_2_prompt = recording_backend.calls[-1]["user_message"]
     for model in RACE_MODELS:
         assert f"## {model}" in step_2_prompt
 
@@ -212,7 +234,7 @@ async def test_race_step_records_its_chat_session_and_race_id_for_audit(recordin
     template = _template([
         Step(step_id="step-1", position=0, execution_pattern="race", race_models=RACE_MODELS)
     ])
-    # Force a second step so the run goes through the chain runner, not the single-step path.
+    # Keep a second step so this case also proves the race output handoff.
     template = task_template_registry.update_template(
         template.template_id,
         steps=[

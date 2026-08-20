@@ -27,10 +27,15 @@ class GatewayExecutionResult:
 
 
 class SovereignGateway:
-    def __init__(self):
-        self.permissions = PermissionRegistry()
-        self.model_armor = ModelArmor()
-        self.policy_engine = PolicyEngine()
+    def __init__(
+        self,
+        permission_registry: Optional[PermissionRegistry] = None,
+        model_armor: Optional[ModelArmor] = None,
+        policy_engine: Optional[PolicyEngine] = None,
+    ):
+        self.permissions = permission_registry or PermissionRegistry()
+        self.model_armor = model_armor or ModelArmor()
+        self.policy_engine = policy_engine or PolicyEngine()
         self._agent_locks: Dict[str, asyncio.Lock] = {}
         self._master_lock = asyncio.Lock()
 
@@ -74,6 +79,18 @@ class SovereignGateway:
 
                 # 3. Model Armor Inspection (Anti-Injection & PII Redaction Async Offloaded)
                 sanitized_args = await self.model_armor.sanitize_arguments_async(tool_args)
+                inspection = await asyncio.to_thread(self.model_armor.inspect_arguments, sanitized_args)
+                if not inspection.is_safe:
+                    error_msg = (
+                        f"Model Armor refused tool arguments for '{tool_name}': "
+                        f"{', '.join(inspection.blocked_patterns)}"
+                    )
+                    telemetry.end_span(span, status="BLOCKED", error=error_msg)
+                    raise SecurityViolationError(
+                        agent.agent_id,
+                        tool_name,
+                        "Tool arguments contain a prompt-injection pattern.",
+                    )
                 telemetry.add_event(span, "model_armor_sanitized", {"redactions": "completed"})
 
                 # 4. Permission Registry Check (allow / deny / ask)

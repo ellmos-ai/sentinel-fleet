@@ -92,6 +92,10 @@ class ChatBlockedError(Exception):
         super().__init__("Message blocked by Model Armor")
 
 
+class ComponentAuthorizationError(ValueError):
+    """A selected prompt or skill is not executable by the calling agent."""
+
+
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{os.urandom(5).hex().upper()}"
 
@@ -133,7 +137,8 @@ class ChatService:
         self,
         skill_ids: Sequence[str] = (),
         prompt_id: str = "",
-        prompt_version: str = ""
+        prompt_version: str = "",
+        agent_id: str = CHAT_AGENT_ID,
     ) -> Tuple[str, List[str]]:
         """Compose the system prompt from the fleet base, the loaded skills and one prompt version.
 
@@ -142,12 +147,30 @@ class ChatService:
         """
         parts = [FLEET_BASE_PROMPT]
         digest: List[str] = []
+        agent = lifecycle_manager.get_agent(agent_id)
+        if agent is None:
+            raise ComponentAuthorizationError(f"Agent '{agent_id}' is not registered.")
 
         loaded = []
         for skill_id in skill_ids:
             skill = skill_registry.get_skill(skill_id)
             if not skill:
-                continue
+                raise ComponentAuthorizationError(f"Skill '{skill_id}' is not registered.")
+            if skill.execution_gate != "auto":
+                raise ComponentAuthorizationError(
+                    f"Skill '{skill_id}' is {skill.execution_gate}; it is not approved for execution."
+                )
+            if "*" not in skill.allowed_agents and agent.agent_id not in skill.allowed_agents:
+                raise ComponentAuthorizationError(
+                    f"Skill '{skill_id}' is not allowed for agent '{agent.agent_id}'."
+                )
+            skill_inspection = gateway.model_armor.inspect_prompt(
+                f"{skill.description}\n{skill.body}"
+            )
+            if not skill_inspection.is_safe:
+                raise ComponentAuthorizationError(
+                    f"Skill '{skill_id}' contains a blocked instruction pattern."
+                )
             loaded.append(f"{skill.skill_id} v{skill.version}")
             block = [f"# Skill: {skill.name} (v{skill.version}, pillar {skill.pillar})",
                      skill.description]
@@ -161,16 +184,29 @@ class ChatService:
         if prompt_id:
             prompt = prompt_registry.get_prompt(prompt_id)
             if prompt:
+                if prompt.requires_approval:
+                    raise ComponentAuthorizationError(
+                        f"Prompt '{prompt_id}' requires approval and has no approved execution grant."
+                    )
+                if agent.role.value not in prompt.allowed_roles:
+                    raise ComponentAuthorizationError(
+                        f"Prompt '{prompt_id}' is not allowed for role '{agent.role.value}'."
+                    )
                 version = (
                     prompt_registry.get_version(prompt_id, prompt_version)
                     if prompt_version else None
                 )
                 text = version.text if version else prompt.current_text
+                inspection = gateway.model_armor.inspect_prompt(text)
+                if not inspection.is_safe:
+                    raise ComponentAuthorizationError(
+                        f"Prompt '{prompt_id}' contains a blocked instruction pattern."
+                    )
                 shown = version.version_number if version else prompt.active_version
                 parts.append(f"# Prompt template: {prompt.title} (v{shown})\n{text}")
                 digest.append(f"prompt template      {prompt.id} v{shown}")
             else:
-                digest.append(f"prompt template      {prompt_id} (not registered, skipped)")
+                raise ComponentAuthorizationError(f"Prompt '{prompt_id}' is not registered.")
         else:
             digest.append("prompt template      none selected")
 

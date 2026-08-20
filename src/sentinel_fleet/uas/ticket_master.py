@@ -35,6 +35,9 @@ class Ticket(BaseModel):
     created_at: float = Field(default_factory=time.time)
     resolved_at: Optional[float] = None
     resolution_comment: Optional[str] = None
+    requested_by: Optional[str] = None
+    assigned_to_role: Optional[str] = None
+    assigned_to_user: Optional[str] = None
 
 
 class TicketMaster:
@@ -48,7 +51,10 @@ class TicketMaster:
         agent_id: str,
         tool_name: str,
         payload: Dict[str, Any],
-        priority: TicketPriority = TicketPriority.NORMAL
+        priority: TicketPriority = TicketPriority.NORMAL,
+        requested_by: Optional[str] = None,
+        assigned_to_role: Optional[str] = None,
+        assigned_to_user: Optional[str] = None,
     ) -> Ticket:
         # Collision-free: a counter over a shared store races and repeats ids after deletions
         ticket_id = f"TICK-{uuid.uuid4().hex[:8].upper()}"
@@ -60,7 +66,10 @@ class TicketMaster:
             tool_name=tool_name,
             payload=payload,
             priority=priority,
-            status=TicketStatus.PENDING_APPROVAL
+            status=TicketStatus.PENDING_APPROVAL,
+            requested_by=requested_by,
+            assigned_to_role=assigned_to_role,
+            assigned_to_user=assigned_to_user,
         )
         self._store.put(ticket_id, ticket)
         return ticket

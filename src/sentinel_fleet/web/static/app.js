@@ -1086,6 +1086,30 @@ function submitForm(event, url, failure) {
 const submitNewTicket = e => submitForm(e, "/api/tickets/create", "Could not create the ticket");
 const submitNewTask = e => submitForm(e, "/api/tasks/create", "Could not queue the task");
 const submitNewMemory = e => submitForm(e, "/api/memory/create", "Could not store the entry");
+const submitNewPolicy = e => submitForm(e, "/api/policies", "Could not create the policy");
+
+function bindPolicy(policyId, scopeLevel) {
+  const body = new FormData();
+  body.append("target_kind", "agent");
+  body.append("target_id", "agent:orchestrator");
+  body.append("scope_level", scopeLevel);
+  if (scopeLevel === "other_user") body.append("target_user_id", "operator");
+  if (scopeLevel === "department") body.append("target_department_id", "finance");
+  postAndReload(
+    `/api/policies/${encodeURIComponent(policyId)}/bindings`,
+    { method: "POST", body },
+    "Could not bind the policy"
+  );
+}
+
+function removePolicyBinding(bindingId) {
+  if (!confirm("Remove this binding, or withdraw it if it is still awaiting review?")) return;
+  postAndReload(
+    `/api/policy-bindings/${encodeURIComponent(bindingId)}`,
+    { method: "DELETE" },
+    "Could not remove the policy binding"
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Memory entries are correctable. They were not, and the live test read that as the same

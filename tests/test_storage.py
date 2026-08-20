@@ -6,7 +6,13 @@ import types
 import pytest
 from pydantic import BaseModel
 
-from sentinel_fleet.core.storage import FirestoreStore, LocalJsonStore, get_store
+from sentinel_fleet.core.storage import (
+    FirestoreStore,
+    LocalJsonStore,
+    StorageBackendError,
+    get_store,
+    requested_backend,
+)
 
 
 class Sample(BaseModel):
@@ -151,21 +157,16 @@ def test_firestore_store_uses_the_cloud_client(fake_firestore):
     assert store.get("a") is None
 
 
-def test_firestore_store_falls_back_when_the_client_is_unavailable(monkeypatch):
-    """Without GCP credentials the store must silently keep working on the local fallback."""
+def test_firestore_store_fails_closed_when_the_client_is_unavailable(monkeypatch):
     monkeypatch.delenv("K_SERVICE", raising=False)
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
 
-    store = FirestoreStore("samples", Sample)
-    assert store._client is None
-
-    store.put("a", Sample(id="a", label="local"))
-    assert store.get("a").label == "local"
-    assert store.count() == 1
+    monkeypatch.setitem(sys.modules, "google.cloud.firestore", None)
+    with pytest.raises(StorageBackendError, match="initialization failed"):
+        FirestoreStore("samples", Sample)
 
 
-def test_firestore_store_survives_a_failing_client(fake_firestore, monkeypatch):
-    """A cloud outage must not lose the write: the local fallback still answers."""
+def test_firestore_store_fails_closed_on_a_cloud_write_error(fake_firestore, monkeypatch):
     store = FirestoreStore("samples", Sample)
 
     def _boom(*args, **kwargs):
@@ -173,5 +174,12 @@ def test_firestore_store_survives_a_failing_client(fake_firestore, monkeypatch):
 
     monkeypatch.setattr(store._client, "collection", _boom)
 
-    store.put("a", Sample(id="a", label="degraded"))
-    assert store.get("a").label == "degraded"
+    with pytest.raises(StorageBackendError, match="write failed"):
+        store.put("a", Sample(id="a", label="degraded"))
+
+
+def test_cloud_run_automatically_requests_firestore(monkeypatch):
+    monkeypatch.setenv("K_SERVICE", "sentinel-fleet")
+    monkeypatch.setenv("USE_FIRESTORE", "false")
+    monkeypatch.setattr("sentinel_fleet.core.storage.settings.environment", "development")
+    assert requested_backend() == "firestore"

@@ -411,8 +411,17 @@ async def test_fire_endpoint_requires_the_token_when_configured(client, monkeypa
 @pytest.mark.asyncio
 async def test_fire_endpoint_stays_open_without_a_configured_token(client, monkeypatch):
     monkeypatch.delenv("ROUTINES_FIRE_TOKEN", raising=False)
+    monkeypatch.delenv("K_SERVICE", raising=False)
     response = await client.post("/api/routines/fire")
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_fire_endpoint_fails_closed_on_cloud_run_without_token(client, monkeypatch):
+    monkeypatch.delenv("ROUTINES_FIRE_TOKEN", raising=False)
+    monkeypatch.setenv("K_SERVICE", "sentinel-fleet")
+    response = await client.post("/api/routines/fire")
+    assert response.status_code == 503
 
 
 # ---------------------------------------------------------------------------

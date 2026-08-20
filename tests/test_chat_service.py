@@ -5,7 +5,7 @@ from httpx import AsyncClient, ASGITransport
 
 from sentinel_fleet.chat.backends import DeterministicDemoBackend, simulated_latency
 from sentinel_fleet.chat.models import ChatMode, ChatRole, ChatSession
-from sentinel_fleet.chat.service import CHAT_AGENT_ID, ChatService
+from sentinel_fleet.chat.service import CHAT_AGENT_ID, ChatService, ComponentAuthorizationError
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.core.storage import LocalJsonStore
 from sentinel_fleet.web.server import app
@@ -89,22 +89,28 @@ def test_system_prompt_carries_skill_bodies_and_the_pinned_prompt_version():
     service = make_service()
     system_prompt, digest = service.build_system_prompt(
         skill_ids=["skill:model-armor-sentry"],
-        prompt_id="prompt:invoice-vision-multimodal",
+        prompt_id="prompt:deep-task-solver",
         prompt_version="1.0.0"
     )
 
     assert "SentinelFleet operator console" in system_prompt
     assert "model-armor-sentry" in system_prompt
-    # v1.0.0 is the baseline prompt; the active version 1.2.0 must not leak in instead.
-    assert "Extract data from invoice" in system_prompt
+    assert "Analyse the task" in system_prompt
     assert "v1.0.0" in " ".join(digest)
 
 
-def test_unknown_skill_ids_are_skipped_rather_than_faked():
+def test_unknown_skill_ids_fail_closed_instead_of_being_silently_skipped():
     service = make_service()
-    system_prompt, digest = service.build_system_prompt(skill_ids=["skill:does-not-exist"])
-    assert "does-not-exist" not in system_prompt
-    assert "skills loaded        0" in " ".join(digest)
+    with pytest.raises(ComponentAuthorizationError, match="not registered"):
+        service.build_system_prompt(skill_ids=["skill:does-not-exist"])
+
+
+def test_prompt_role_and_approval_metadata_are_enforced_before_assembly():
+    service = make_service()
+    with pytest.raises(ComponentAuthorizationError, match="not allowed for role"):
+        service.build_system_prompt(prompt_id="prompt:invoice-vision-multimodal")
+    with pytest.raises(ComponentAuthorizationError, match="requires approval"):
+        service.build_system_prompt(prompt_id="prompt:vendor-dispute-resolution")
 
 
 @pytest.mark.asyncio

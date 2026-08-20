@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient, ASGITransport
 
+from sentinel_fleet.core.errors import LastVersionError
+from sentinel_fleet.core.prompts import prompt_registry
 from sentinel_fleet.core.skills import skill_registry
 from sentinel_fleet.web.server import DASHBOARD_ROW_LIMIT, app
 
@@ -673,7 +675,7 @@ async def test_memory_entries_can_be_reached_from_the_table():
 
 
 @pytest.mark.asyncio
-async def test_a_prompt_can_be_created_from_the_console():
+async def test_a_prompt_can_be_created_but_admin_actions_stay_locked_in_the_console():
     """The create endpoint existed all along; there was simply no way in, so the operator could
     not author a prompt at all."""
     transport = ASGITransport(app=app)
@@ -695,13 +697,14 @@ async def test_a_prompt_can_be_created_from_the_console():
         assert "Console Authored Probe" in listing
 
         removed = await client.delete(f"/api/prompts/{prompt_id}")
-        assert removed.status_code == 200
+        assert removed.status_code == 403
+        assert prompt_registry.get_prompt(prompt_id) is not None
+        prompt_registry.delete_prompt(prompt_id)
 
 
 @pytest.mark.asyncio
-async def test_deleting_something_a_task_still_uses_is_refused_by_name():
-    """A silent delete would leave a template pointing at a prompt that no longer exists - a
-    broken reference the operator would only meet at the next run."""
+async def test_prompt_deletion_is_locked_before_reference_state_is_disclosed():
+    """Without authenticated administration, reference details cannot weaken the outer lock."""
     from sentinel_fleet.uas.task_templates import task_template_registry
 
     transport = ASGITransport(app=app)
@@ -722,20 +725,15 @@ async def test_deleting_something_a_task_still_uses_is_refused_by_name():
         )
         try:
             refused = await client.delete(f"/api/prompts/{prompt_id}")
-            assert refused.status_code == 409, "a used prompt must not just disappear"
-            payload = refused.json()
-            assert "Uses the referenced prompt" in payload["error"], \
-                "the refusal has to name what is still using it"
-            assert payload["details"]["used_by"]
+            assert refused.status_code == 403
+            assert prompt_registry.get_prompt(prompt_id) is not None
         finally:
             task_template_registry.delete_template(template.template_id, requested_by="operator")
-
-        # With the reference gone, the same delete goes through.
-        assert (await client.delete(f"/api/prompts/{prompt_id}")).status_code == 200
+            prompt_registry.delete_prompt(prompt_id)
 
 
 @pytest.mark.asyncio
-async def test_the_last_version_of_a_prompt_cannot_be_deleted():
+async def test_version_admin_is_locked_while_registry_keeps_last_version_invariant():
     """A prompt with no version is a name with no text behind it."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -745,17 +743,17 @@ async def test_the_last_version_of_a_prompt_cannot_be_deleted():
         prompt_id = created.json()["prompt"]["id"]
         try:
             refused = await client.delete(f"/api/prompts/{prompt_id}/versions/1.0.0")
-            assert refused.status_code == 409
-            assert "no text to run" in refused.json()["error"]
+            assert refused.status_code == 403
+            with pytest.raises(LastVersionError):
+                prompt_registry.delete_version(prompt_id, "1.0.0")
 
-            # A second version makes the first one removable.
-            await client.post(f"/api/prompts/{prompt_id}/version", data={
-                "new_version_number": "1.1.0", "new_text": "Better text.",
-                "change_summary": "Sharper wording."
-            })
-            assert (await client.delete(f"/api/prompts/{prompt_id}/versions/1.0.0")).status_code == 200
+            prompt_registry.add_prompt_version(
+                prompt_id, "1.1.0", "Better text.", "Sharper wording."
+            )
+            updated = prompt_registry.delete_version(prompt_id, "1.0.0")
+            assert updated.active_version == "1.1.0"
         finally:
-            await client.delete(f"/api/prompts/{prompt_id}")
+            prompt_registry.delete_prompt(prompt_id)
 
 
 @pytest.mark.asyncio

@@ -97,80 +97,89 @@ class LocalJsonStore(BaseStore[T]):
             self._save_to_disk()
 
 
+class StorageBackendError(RuntimeError):
+    """The requested durable backend is unavailable or rejected an operation."""
+
+
 class FirestoreStore(BaseStore[T]):
-    """Google Cloud Firestore entity store with local fallback."""
+    """Strict Google Cloud Firestore store.
+
+    Once cloud persistence is selected, losing it is a startup/runtime error. Falling back to
+    an instance-local dictionary would acknowledge a write that another Cloud Run instance can
+    never see and that a cold start erases.
+    """
     def __init__(self, collection_name: str, model_cls: Type[T]):
         self.collection_name = collection_name
         self.model_cls = model_cls
-        self._fallback_store = LocalJsonStore(collection_name, model_cls)
-        self._client = None
         self._init_firestore()
 
     def _init_firestore(self):
-        # Attempt to initialize Firestore if environment is production or gcp project is set
-        if os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("K_SERVICE"):
-            try:
-                from google.cloud import firestore
-                self._client = firestore.Client(project=settings.google_cloud_project)
-            except Exception:
-                self._client = None
+        try:
+            from google.cloud import firestore
+            self._client = firestore.Client(project=settings.google_cloud_project)
+        except Exception as exc:
+            raise StorageBackendError(
+                f"Firestore backend required for '{self.collection_name}' but initialization failed: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
 
     def get(self, key: str) -> Optional[T]:
-        if self._client:
-            try:
-                doc_ref = self._client.collection(self.collection_name).document(key)
-                doc = doc_ref.get()
-                if doc.exists:
-                    return self.model_cls.model_validate(doc.to_dict())
-                return None
-            except Exception:
-                pass
-        return self._fallback_store.get(key)
+        try:
+            doc = self._client.collection(self.collection_name).document(key).get()
+            return self.model_cls.model_validate(doc.to_dict()) if doc.exists else None
+        except Exception as exc:
+            raise StorageBackendError(f"Firestore read failed for {self.collection_name}/{key}: {exc}") from exc
 
     def put(self, key: str, item: T) -> T:
-        if self._client:
-            try:
-                doc_ref = self._client.collection(self.collection_name).document(key)
-                doc_ref.set(item.model_dump())
-            except Exception:
-                pass
-        return self._fallback_store.put(key, item)
+        try:
+            self._client.collection(self.collection_name).document(key).set(item.model_dump())
+            return item
+        except Exception as exc:
+            raise StorageBackendError(f"Firestore write failed for {self.collection_name}/{key}: {exc}") from exc
 
     def delete(self, key: str) -> bool:
-        if self._client:
-            try:
-                self._client.collection(self.collection_name).document(key).delete()
-            except Exception:
-                pass
-        return self._fallback_store.delete(key)
+        existed = self.get(key) is not None
+        if not existed:
+            return False
+        try:
+            self._client.collection(self.collection_name).document(key).delete()
+            return True
+        except Exception as exc:
+            raise StorageBackendError(f"Firestore delete failed for {self.collection_name}/{key}: {exc}") from exc
 
     def list_all(self) -> List[T]:
-        if self._client:
-            try:
-                docs = self._client.collection(self.collection_name).stream()
-                results = []
-                for d in docs:
-                    results.append(self.model_cls.model_validate(d.to_dict()))
-                return results
-            except Exception:
-                pass
-        return self._fallback_store.list_all()
+        try:
+            return [
+                self.model_cls.model_validate(snapshot.to_dict())
+                for snapshot in self._client.collection(self.collection_name).stream()
+            ]
+        except Exception as exc:
+            raise StorageBackendError(f"Firestore list failed for {self.collection_name}: {exc}") from exc
 
     def count(self) -> int:
-        if self._client:
-            try:
-                return len(list(self._client.collection(self.collection_name).stream()))
-            except Exception:
-                pass
-        return self._fallback_store.count()
+        return len(self.list_all())
 
     def clear(self):
-        self._fallback_store.clear()
+        try:
+            for snapshot in self._client.collection(self.collection_name).stream():
+                snapshot.reference.delete()
+        except Exception as exc:
+            raise StorageBackendError(f"Firestore clear failed for {self.collection_name}: {exc}") from exc
+
+
+def requested_backend() -> str:
+    if (
+        settings.environment == "production"
+        or bool(os.getenv("K_SERVICE"))
+        or os.getenv("USE_FIRESTORE", "false").lower() == "true"
+    ):
+        return "firestore"
+    return "local-json"
 
 
 def get_store(collection_name: str, model_cls: Type[T]) -> BaseStore[T]:
     """Factory creating appropriate storage engine based on settings."""
-    if settings.environment == "production" or os.getenv("USE_FIRESTORE", "false").lower() == "true":
+    if requested_backend() == "firestore":
         return FirestoreStore(collection_name, model_cls)
     
     # In local/test mode, use thread-safe LocalJsonStore

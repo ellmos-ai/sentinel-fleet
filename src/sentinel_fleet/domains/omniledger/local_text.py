@@ -20,6 +20,7 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
+from sentinel_fleet.core.config import settings
 
 # Suffixes the local path can read at all. Images and scanned PDFs carry pixels, not text; they
 # are reported as unreadable rather than guessed at.
@@ -72,11 +73,21 @@ def _read_pdf(file_bytes: bytes) -> LocalTextResult:
 
     try:
         reader = PdfReader(io.BytesIO(file_bytes))
+        if len(reader.pages) > settings.max_pdf_pages:
+            return LocalTextResult(
+                backend="pypdf",
+                note=f"PDF exceeds the {settings.max_pdf_pages}-page local parser limit",
+            )
         pages = [page.extract_text() or "" for page in reader.pages]
     except Exception as exc:
         return LocalTextResult(note=f"PDF could not be parsed locally ({type(exc).__name__})")
 
     text = "\n".join(pages).strip()
+    if len(text) > settings.max_extracted_chars:
+        return LocalTextResult(
+            backend="pypdf",
+            note=f"PDF text exceeds the {settings.max_extracted_chars}-character limit",
+        )
     if not text:
         return LocalTextResult(
             backend="pypdf",
@@ -89,6 +100,10 @@ def _read_pdf(file_bytes: bytes) -> LocalTextResult:
 
 
 def _read_plain(file_bytes: bytes) -> LocalTextResult:
+    if len(file_bytes) > settings.max_extracted_chars:
+        return LocalTextResult(
+            note=f"text document exceeds the {settings.max_extracted_chars}-byte local parser limit"
+        )
     for encoding in TEXT_ENCODINGS:
         try:
             return LocalTextResult(text=file_bytes.decode(encoding), backend=f"decoded-{encoding}")

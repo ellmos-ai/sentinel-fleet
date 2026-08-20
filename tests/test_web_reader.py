@@ -265,40 +265,41 @@ def test_an_oversized_body_is_cut_at_the_limit(monkeypatch, public_dns):
     assert page["text_truncated"] is True
 
 
-def test_a_non_text_content_type_is_refused():
-    """The refusal lives in the real fetcher, so it is exercised against a stub HTTP response."""
-    import io
-    import urllib.request
-    from email.message import Message
+def test_a_non_text_content_type_is_refused(monkeypatch, public_dns):
+    """The refusal is applied after a pinned connection returns its headers."""
+    monkeypatch.setattr(web_reader, "_fetch_from_ip", lambda url, ip: (
+        RawResponse(
+            url=url, status=200, content_type="application/pdf", charset="utf-8",
+            body=b"%PDF-1.7 binary",
+        ), None
+    ))
+    with pytest.raises(WebReadError, match="not a readable page type"):
+        web_reader._fetch_once("https://example.com/file.pdf")
 
-    class _Response(io.BytesIO):
-        status = 200
 
-        def __init__(self):
-            super().__init__(b"%PDF-1.7 binary")
-            self.headers = Message()
-            self.headers["content-type"] = "application/pdf"
+def test_dns_answer_is_pinned_and_not_resolved_again_at_connect(monkeypatch):
+    resolver_calls = []
+    connected = []
 
-        def geturl(self):
-            return "https://example.com/file.pdf"
+    def resolver(host, *_args, **_kwargs):
+        resolver_calls.append(host)
+        # A hypothetical second lookup would rebind privately. The fetch must never make it.
+        address = "93.184.216.34" if len(resolver_calls) == 1 else "127.0.0.1"
+        return [(2, 1, 6, "", (address, 0))]
 
-        def __enter__(self):
-            return self
+    def fetch(url, pinned_ip):
+        connected.append(pinned_ip)
+        return RawResponse(
+            url=url, status=200, content_type="text/plain", body=b"pinned",
+        ), None
 
-        def __exit__(self, *_exc):
-            return False
+    monkeypatch.setattr(web_reader.socket, "getaddrinfo", resolver)
+    monkeypatch.setattr(web_reader, "_fetch_from_ip", fetch)
 
-    class _Opener:
-        def open(self, *_args, **_kwargs):
-            return _Response()
-
-    original = urllib.request.build_opener
-    urllib.request.build_opener = lambda *_a, **_k: _Opener()
-    try:
-        with pytest.raises(WebReadError, match="not a readable page type"):
-            web_reader._fetch_once("https://example.com/file.pdf")
-    finally:
-        urllib.request.build_opener = original
+    page = read_page("https://example.com/terms")
+    assert page["text"] == "pinned"
+    assert resolver_calls == ["example.com"]
+    assert connected == ["93.184.216.34"]
 
 
 # ---------------------------------------------------------------------------

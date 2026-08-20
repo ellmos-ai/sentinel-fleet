@@ -6,6 +6,7 @@ what the test claims it contains.
 """
 
 import pytest
+from unittest.mock import AsyncMock
 from fpdf import FPDF
 
 from sentinel_fleet.domains.omniledger import local_text
@@ -181,3 +182,30 @@ async def test_extraction_carries_the_privacy_verdict_of_the_document():
     # The fixture carries a vendor mailbox and a street address, both amber patterns
     assert "amber" in verdict_note
     assert "email address" in verdict_note
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("filename", "file_bytes", "text_content"),
+    [
+        ("secret.txt", b"password=super-secret-value", "password=super-secret-value"),
+        ("scan.png", b"\x89PNG\r\n\x1a\n", None),
+    ],
+)
+async def test_red_or_unscreened_upload_never_reaches_gemini(
+    filename, file_bytes, text_content, monkeypatch
+):
+    from sentinel_fleet.core.config import settings
+
+    service = MultimodalExtractor()
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key")
+    send = AsyncMock()
+    monkeypatch.setattr(service, "_extract_with_gemini", send)
+
+    doc = await service.extract_invoice(
+        filename=filename, file_bytes=file_bytes, text_content=text_content
+    )
+
+    send.assert_not_awaited()
+    assert doc.extraction_mode is not ExtractionMode.GEMINI
+    assert any("model dispatch blocked" in note for note in doc.extraction_notes)

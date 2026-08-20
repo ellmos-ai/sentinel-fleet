@@ -6,7 +6,7 @@
 [![Gemini 3.5](https://img.shields.io/badge/Gemini-3.5%20Flash%20Vision-orange.svg)](https://deepmind.google/technologies/gemini/)
 [![Zero-Trust Model Armor](https://img.shields.io/badge/Security-Model%20Armor%20%26%20Zero--Trust-green.svg)](#security--governance)
 [![Google GenAI SDK](https://img.shields.io/badge/SDK-google--genai-4285F4.svg)](https://googleapis.github.io/python-genai/)
-[![Pytest](https://img.shields.io/badge/pytest-409%2F409%20passed-brightgreen.svg)](tests/)
+[![Pytest](https://img.shields.io/badge/pytest-447%2F447%20passed-brightgreen.svg)](tests/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
 > Built for the **Google Cloud All Things Agentic Hackathon** (Track 3: The Fortified Enterprise Fleet & Track 1: The Taskmaster).
@@ -15,7 +15,7 @@
 
 ## 🌟 Executive Summary
 
-**SentinelFleet** is an enterprise-grade AI agent control plane and autonomous taskmaster platform built with **Gemini 3.5 Flash Vision** via the **Google GenAI SDK (`google-genai`)**, **Google Cloud Run**, and **Google Cloud Firestore**.
+**SentinelFleet** is a hackathon-ready demonstration of an enterprise AI agent control plane and autonomous taskmaster, built with **Gemini 3.5 Flash Vision** via the **Google GenAI SDK (`google-genai`)**, **Google Cloud Run**, and **Google Cloud Firestore**. The controls are real and tested; authentication is deliberately not claimed by this public demo.
 
 It solves the two largest challenges of enterprise agent adoption:
 1. **Governance & Zero-Trust Security (Platform Layer):** Centralized Agent Lifecycle Registry, Zero-Trust Model Armor against Prompt Injections, granular Principle of Least Privilege (PoLP) tool isolation, USMC Memory Bank, DSGVO Privacy Contact Hub, and OpenTelemetry reasoning traces.
@@ -107,6 +107,12 @@ queue (tagged with its `source_template_id`, so a template run is a view of that
 a second list). Without `GEMINI_API_KEY` it answers in the same honest deterministic-demo mode
 as everywhere else in this app.
 
+Templates may contain a validated linear chain of steps. The step editor supports `single`
+model calls and `race` steps; outputs are handed to the next step as clearly marked untrusted
+user context. Multi-step templates and one-step races use the audited chain runner. A one-step
+`single` template keeps the original direct execution path and response shape. Parallel groups
+and loops are schema-reserved but rejected until they have an executor.
+
 **`POST /api/routines/fire`** is the trigger target for **Google Cloud Scheduler**: SentinelFleet
 runs on Cloud Run with scale-to-zero, so there is no in-process tick loop — Cloud Scheduler wakes
 the service and calls `/fire`, which enqueues whatever routine or one-off schedule is due and
@@ -114,7 +120,30 @@ applies each binding's `skip`/`catch_up` policy to anything missed while the ser
 down. The endpoint is idempotent by construction (firing always pushes the next due time
 forward) and, for local development, open with a logged warning unless `ROUTINES_FIRE_TOKEN` is
 set — a real deployment should set it and have Cloud Scheduler send it as `X-Fire-Token`, or call
-the endpoint through an OIDC-authenticated Cloud Run invocation instead.
+the endpoint through an OIDC-authenticated Cloud Run invocation instead. `fire_due()` serialises
+concurrent calls inside one process. The documented Cloud Run deployment therefore uses one
+maximum instance; there is no claim of a cross-instance Firestore lease yet.
+
+---
+
+## 👤 Users & Federated Policy Governance
+
+The Governance tab projects tool permissions, code-level PolicyEngine checks and user-authored
+policies into one catalogue without copying their enforcement state. Permission and engine
+entries are read-only. The only writable slot accepts advisory user declarations and labels
+them `not-enforced (user declaration)` until a real executor exists.
+
+Four role profiles (administrator, operator, member and viewer) and reasoned per-user deviations
+feed one `explain_binding()` decision function. Its R1–R7 verdict is used by the API, the
+5-target × 4-scope matrix and the binding ledger: `allow` activates, `forward` creates a ticket
+for the target user or an administrator, and `deny` refuses. Process bindings remain visible as
+a planned matrix dimension but are not writable until a process registry exists.
+
+This is authorization modelling, not authentication. `?user=` and legacy `?viewer=` change only
+the displayed registered identity. In `DEMO_MODE=true`, safe writes are pinned server-side to
+`member:demo`; prompt/skill administration, permission edits and policy-ticket decisions remain
+locked. In `DEMO_MODE=false`, every HTTP/WebSocket route except health and the token-gated
+scheduler fails closed until Cloud Run IAM/IAP or another verified identity layer is installed.
 
 ---
 
@@ -175,8 +204,9 @@ gcloud secrets create routines-fire-token --data-file=fire_token.txt
 
 # Build from source (the Dockerfile copies sources BEFORE `pip install .`) and deploy
 gcloud run deploy sentinel-fleet --source . --region europe-west3 \
+  --set-env-vars "DEMO_MODE=true" \
   --update-secrets "GEMINI_API_KEY=gemini-api-key:latest,ROUTINES_FIRE_TOKEN=routines-fire-token:latest" \
-  --max-instances 2
+  --max-instances 1
 
 # Recurring agent work: ONE idempotent Cloud Scheduler job walks all due bindings.
 # Note the explicit empty JSON body — Google's front end answers 411 to body-less POSTs.
@@ -188,15 +218,21 @@ gcloud scheduler jobs create http routines-fire --location europe-west3 \
 ```
 
 Scale-to-zero stays intact: there is no in-process tick loop, the Scheduler wakes the
-service only when bindings may be due, and `fire_due()` is idempotent by construction.
+service only when bindings may be due. One process-wide lock plus `--max-instances 1` prevents
+overlapping claims in this deployment. Scaling beyond one instance requires a distributed
+Firestore lease/transaction first.
 
 ---
 
 ## 🔒 Security & Model Armor
 
 * **Zero-Trust Tool Scoping:** Agents only have access to their assigned tools via `gateway.py`.
-* **Adversarial Injection Detection:** Regex and semantic boundary matching in `model_armor.py`.
+* **Fail-closed permissions:** Every seeded tool has an explicit rule; unknown tools are denied.
+* **Adversarial Injection Detection:** Canonicalised boundary matching scans nested string arguments, selected prompts and skills, previous outputs and web context before model use.
 * **Quarantine Protocol:** Malicious inputs immediately quarantine the executing agent and notify the operator via high-priority TicketMaster tickets.
+* **Bounded document intake:** Upload size, type, PDF page count, extracted text and Gemini concurrency are capped. RED, UNSCREENED or truncated privacy screens stay on the local extraction path and are never sent as raw files to Gemini.
+* **Pinned web transport:** Every redirect hop is revalidated and the HTTP/TLS connection is pinned to the validated public IP, closing DNS-rebinding TOCTOU.
+* **Deployment boundary:** The public interactive build has no login. Use only synthetic demo data; production access remains fail-closed until IAM/IAP or equivalent verified authentication is configured.
 
 ---
 
@@ -209,5 +245,5 @@ SentinelFleet is licensed under the **GNU Affero General Public License v3.0** (
 ## Scope, Provenance & Data Notes
 
 * **Demo, not advice.** The OmniLedger domain validates demo invoices against German statutory rules (§ 14 UStG, GoBD) as a technical showcase. It is an AI-assisted engineering demo — not tax, accounting or legal advice; whether any concrete use meets statutory requirements depends on the individual case.
-* **Provenance.** Built by Lukas Geiger for the Google Cloud All Things Agentic Hackathon with substantial AI coding assistance (Google Gemini, Anthropic Claude); all AI-generated code was human-directed and is covered by the 159-test suite. Some skill definitions are English rebrands of the author's private skills library.
-* **Data.** Chat and document uploads may be sent to the Gemini API when a `GEMINI_API_KEY` is configured; without a key the console runs in a labelled deterministic demo mode and nothing leaves the process. Do not upload real invoices or personal data to a demo deployment, and please do not post case data in issues.
+* **Provenance.** Built by Lukas Geiger for the Google Cloud All Things Agentic Hackathon with substantial AI coding assistance (Google Gemini, Anthropic Claude); all AI-generated code was human-directed and is covered by the currently verified 447-test suite. Some skill definitions are English rebrands of the author's private skills library.
+* **Data.** Chat messages and privacy-screened GREEN/YELLOW document uploads may be sent to the Gemini API when a `GEMINI_API_KEY` is configured. RED, UNSCREENED and truncated documents stay on the local extraction path; without a key, no model payload is sent to Gemini. The Web reader still performs operator-requested external GETs, and configured Firestore/Cloud Trace backends still receive their documented records. Do not upload real invoices or personal data to a demo deployment, and please do not post case data in issues.

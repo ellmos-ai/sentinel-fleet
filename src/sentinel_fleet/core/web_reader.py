@@ -15,18 +15,19 @@ and `selenium` paths (no new dependencies, no browser in this image) and its `al
 escape hatch (there is no legitimate caller for it in a public deployment, and a flag that exists
 gets set eventually).
 
-Caveat this cannot close, stated rather than hidden: the guard resolves the hostname and the HTTP
-client resolves it again, so a DNS entry that changes between the two calls (DNS rebinding) is not
-caught. Closing it needs connection-level pinning, which urllib does not offer without a custom
-connection class. The blast radius is bounded by everything else here - GET only, no credentials,
-1 MB, text only.
+The validated address is pinned at the connection layer while TLS still verifies the original
+hostname. DNS is therefore consulted once per hop; a rebinding answer cannot replace the checked
+public address between validation and connect.
 """
 
 from __future__ import annotations
 
 import ipaddress
+import http.client
 import re
 import socket
+import ssl
+import threading
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Dict, List, Optional, Tuple
@@ -53,6 +54,8 @@ METADATA_HOSTS = frozenset({
     "instance-data",
 })
 LOCALHOST_NAMES = frozenset({"localhost", "localhost.localdomain", "ip6-localhost"})
+
+_FETCH_CONTEXT = threading.local()
 
 
 class WebReadError(RuntimeError):
@@ -151,47 +154,99 @@ def guard_target(url: str) -> Tuple[str, List[str]]:
     return host, resolved
 
 
-def _fetch_once(url: str) -> Tuple[Optional[RawResponse], Optional[str]]:
-    """One HTTP hop without following redirects. Returns (response, redirect location)."""
-    import urllib.error
-    import urllib.request
+def _same_address(left: str, right: str) -> bool:
+    return ipaddress.ip_address(left) == ipaddress.ip_address(right)
 
-    class _NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            return None  # handled by the caller, so every hop passes the guard again
 
-    opener = urllib.request.build_opener(_NoRedirect())
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT}, method="GET")
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host: str, port: int, pinned_ip: str):
+        super().__init__(host, port, timeout=TIMEOUT_SECONDS)
+        self.pinned_ip = pinned_ip
 
+    def connect(self) -> None:
+        self.sock = socket.create_connection((self.pinned_ip, self.port), self.timeout)
+        peer = self.sock.getpeername()[0]
+        if not _same_address(peer, self.pinned_ip):
+            self.sock.close()
+            raise BlockedTargetError(
+                f"Connected peer {peer} differs from validated address {self.pinned_ip}"
+            )
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host: str, port: int, pinned_ip: str):
+        super().__init__(host, port, timeout=TIMEOUT_SECONDS, context=ssl.create_default_context())
+        self.pinned_ip = pinned_ip
+
+    def connect(self) -> None:
+        raw = socket.create_connection((self.pinned_ip, self.port), self.timeout)
+        peer = raw.getpeername()[0]
+        if not _same_address(peer, self.pinned_ip):
+            raw.close()
+            raise BlockedTargetError(
+                f"Connected peer {peer} differs from validated address {self.pinned_ip}"
+            )
+        # The socket goes to the pinned IP; certificate validation and SNI still name the URL
+        # host, preserving ordinary HTTPS authenticity.
+        self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
+
+
+def _fetch_from_ip(url: str, pinned_ip: str) -> Tuple[Optional[RawResponse], Optional[str]]:
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    connection_cls = _PinnedHTTPSConnection if parsed.scheme.lower() == "https" else _PinnedHTTPConnection
+    connection = connection_cls(host, port, pinned_ip)
+    target = parsed.path or "/"
+    if parsed.query:
+        target += f"?{parsed.query}"
+    host_header = host if parsed.port is None else f"{host}:{parsed.port}"
     try:
-        with opener.open(request, timeout=TIMEOUT_SECONDS) as response:
-            content_type = (response.headers.get_content_type() or "").lower()
-            if content_type and content_type not in ALLOWED_CONTENT_TYPES:
-                raise WebReadError(
-                    f"'{content_type}' is not a readable page type; this reader accepts "
-                    f"{' and '.join(ALLOWED_CONTENT_TYPES)}"
-                )
-            body = response.read(MAX_RESPONSE_BYTES + 1)
-            truncated = len(body) > MAX_RESPONSE_BYTES
-            return RawResponse(
-                url=response.geturl(),
-                status=getattr(response, "status", 200) or 200,
-                content_type=content_type,
-                charset=response.headers.get_content_charset() or "utf-8",
-                body=body[:MAX_RESPONSE_BYTES],
-                truncated=truncated,
-                headers={key: value for key, value in response.headers.items()},
-            ), None
-    except urllib.error.HTTPError as exc:
-        if exc.code in (301, 302, 303, 307, 308):
-            location = exc.headers.get("location")
+        connection.request("GET", target, headers={"Host": host_header, "User-Agent": USER_AGENT})
+        response = connection.getresponse()
+        if response.status in (301, 302, 303, 307, 308):
+            location = response.headers.get("location")
             if location:
                 return None, location
-        raise WebReadError(f"HTTP {exc.code}: {exc.reason}") from exc
-    except (WebReadError, BlockedTargetError):
-        raise
-    except Exception as exc:
-        raise WebReadError(f"{type(exc).__name__}: {exc}") from exc
+        if response.status >= 400:
+            raise WebReadError(f"HTTP {response.status}: {response.reason}")
+        body = response.read(MAX_RESPONSE_BYTES + 1)
+        return RawResponse(
+            url=url,
+            status=response.status,
+            content_type=(response.headers.get_content_type() or "").lower(),
+            charset=response.headers.get_content_charset() or "utf-8",
+            body=body[:MAX_RESPONSE_BYTES],
+            truncated=len(body) > MAX_RESPONSE_BYTES,
+            headers={key: value for key, value in response.headers.items()},
+        ), None
+    finally:
+        connection.close()
+
+
+def _fetch_once(url: str) -> Tuple[Optional[RawResponse], Optional[str]]:
+    """One HTTP hop pinned to an address already approved by ``guard_target``."""
+    addresses = getattr(_FETCH_CONTEXT, "addresses", None)
+    if not addresses:
+        _, addresses = guard_target(url)
+    last_error: Optional[Exception] = None
+    for pinned_ip in addresses:
+        try:
+            response, location = _fetch_from_ip(url, pinned_ip)
+            if response and response.content_type and response.content_type not in ALLOWED_CONTENT_TYPES:
+                raise WebReadError(
+                    f"'{response.content_type}' is not a readable page type; this reader accepts "
+                    f"{' and '.join(ALLOWED_CONTENT_TYPES)}"
+                )
+            return response, location
+        except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
+            last_error = exc
+            continue
+        except (WebReadError, BlockedTargetError):
+            raise
+    if last_error is not None:
+        raise WebReadError(f"{type(last_error).__name__}: {last_error}") from last_error
+    raise WebReadError("No validated address was available for the connection")
 
 
 class _PageText(HTMLParser):
@@ -268,7 +323,11 @@ def read_page(url: str) -> Dict[str, object]:
 
     for _ in range(MAX_REDIRECTS + 1):
         host, resolved = guard_target(current)
-        response, location = _fetch_once(current)
+        _FETCH_CONTEXT.addresses = resolved
+        try:
+            response, location = _fetch_once(current)
+        finally:
+            _FETCH_CONTEXT.addresses = None
         if location is None:
             assert response is not None
             payload = response.body.decode(response.charset, errors="replace")

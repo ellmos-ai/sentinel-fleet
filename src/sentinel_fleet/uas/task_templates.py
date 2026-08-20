@@ -22,9 +22,9 @@ from sentinel_fleet.core.errors import TemplateNotFoundError, TemplatePermission
 # Ketten-Schnitt" of Phase 2, executed by `core/chain_runner.py`.
 MIN_STEPS = 1
 
-# The minimal chain cut supports exactly two execution patterns (concept doc, section E.4):
-# "single" (the pre-existing one-model-call path) and "race" (chat_service.race(), bound to a
-# step). Swarm/operator patterns are real, but their dispatch loops are Phase 3 - a schema that
+# The executable chain cut supports three patterns: "single" (one model call), "race"
+# (chat_service.race(), bound to a step), and bounded "research" over operator-named URLs.
+# Swarm/operator patterns are real, but their dispatch loops are Phase 3 - a schema that
 # accepted them here would let the UI save a step the chain runner then silently cannot execute.
 SUPPORTED_EXECUTION_PATTERNS = {"single", "race", "research"}
 
@@ -68,9 +68,8 @@ class Step(BaseModel):
     # doc, section E.4: input_spec stays fixed at "previous_output" for this cut). None means
     # "no predecessor yet" - the default single step, or a chain's first step.
     input_spec: Optional[str] = None
-    # Required by the concept for a real chain (a Phase-2 runner enforces every step
-    # depositing its output at a fixed handoff point) but left optional here: Phase 1 has
-    # nothing that reads it yet, and the single default step is never chained into anything.
+    # Optional evidence label for the output. The current runner records step output in the task
+    # audit list and hands it forward directly; a durable artifact registry is a later cut.
     output_artifact_id: Optional[str] = None
     # Parallel branches ("Schwarm (b)", concept doc section E.1) are a later phase - the minimal
     # chain cut is strictly linear, so this must stay unset (validated below).
@@ -167,9 +166,9 @@ class TaskTemplate(BaseModel):
     group: Optional[str] = None            # at most one group/tag per template
     fork_of: Optional[str] = None
     # Chain foundation (concept doc, section E.1/E.4): a single-step task is the special case
-    # of Steps, not a different shape that would need migrating later. Phase 1 builds and
-    # shows only this single-step case - no step editor, no chain runner, no parallel_group
-    # or loop in the UI - but the field exists from day one, and IS the storage: what used to
+    # of Steps, not a different shape that would need migrating later. The UI edits linear
+    # chains and the runner executes them; parallel_group and loop still have no executor. This
+    # field IS the storage: what used to
     # be this model's own prompt_source/skill_ids/assigned_agent fields are now computed
     # properties reading through to steps[0] below, not a second, independently stored copy.
     steps: List[Step] = Field(default_factory=_default_steps)
@@ -206,8 +205,8 @@ class TaskTemplate(BaseModel):
     # names (concept doc, section E.4: "Convenience-Felder aufs erste Step-Element mappen").
     # `steps[0]` is the single source of truth; these read and write through to it, so every
     # existing call site, API response shape and Jinja template that expects
-    # `template.assigned_agent` etc. keeps working unchanged, whether it is Phase 1's
-    # single-step template or (later) the first step of a real chain. Plain `@property`
+    # `template.assigned_agent` etc. keeps working unchanged, whether it is a
+    # single-step template or the first step of a real chain. Plain `@property`
     # setters keep this Python-side mutable; `@computed_field` makes each one appear in
     # `model_dump()`/`model_dump_json()` exactly like the real fields it replaces.
 
@@ -297,11 +296,9 @@ class TaskTemplateRegistry:
     ) -> TaskTemplate:
         """Build a new TaskTemplate.
 
-        Either pass the flat convenience fields (the common case - the create-template form
-        uses this path, and they are folded into a single default `Step`), or pass `steps`
-        directly with exactly one element - the concept doc's Phase 2 chain shape, already
-        valid in Phase 1's schema. `TaskTemplate`'s own field validator rejects anything other
-        than exactly one step either way, so this method does not need to duplicate that rule.
+        Either pass the flat convenience fields (folded into one default `Step`) or pass an
+        explicit non-empty linear `steps` list. `TaskTemplate` owns the unique-id and gapless
+        position invariants, so this method does not duplicate them.
         """
         template_id = f"TMPL-{uuid.uuid4().hex[:8].upper()}"
         resolved_steps = steps if steps is not None else [Step(

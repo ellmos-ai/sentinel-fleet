@@ -9,7 +9,7 @@
 
 ## 1. Executive Summary
 
-**SentinelFleet** is a fortified, zero-trust enterprise agent operating system and taskmaster platform designed for mission-critical corporate workflows. Built upon a unified 4-pillars architecture (**Control, UAS, Memory, Domain**), it transforms autonomous AI agents from unpredictable chat bots into deterministic, auditable, and secure enterprise workers.
+**SentinelFleet** is a fortified enterprise-agent control-plane and taskmaster demonstration. Built upon a unified 4-pillars architecture (**Control, UAS, Memory, Domain**), it makes model calls, policy decisions and task hand-offs inspectable and fail-closed at their implemented gates. It is not a production authentication system: the public hackathon build deliberately has no login, and non-demo access remains locked until a verified identity layer is installed.
 
 Paired with **OmniLedger**, its primary business domain pipeline, SentinelFleet automates complex, statutory-compliant accounts payable (AP) and tax compliance workflows under German and European law (**§ 14 UStG**, **§ 147 AO**, **GoBD**). It autonomously ingests multi-format invoices, audits statutory mandatory requirements, resolves math discrepancies, triggers Human-in-the-Loop (HITL) approval gates, and closes communication loops with suppliers via self-healing dispute notices.
 
@@ -176,14 +176,13 @@ The entire codebase is validated by a rigorous Pytest test suite covering unit l
 ```bash
 python -m pytest tests -v
 ```
-### Test Results: 159/159 passed — 100% green
+### Test Results: 447/447 passed — 100% green (verified 2026-08-20)
 
 The suite covers the gateway (scoping, quarantine, HITL), model armor, the
 OmniLedger workflow, chat and race (including live-path failure modes), task
 templates with routine/schedule bindings and the `/api/routines/fire` trigger,
 storage (local and mocked Firestore), i18n regression, and every dashboard
-surface. Run it yourself — the count in the README badge is regenerated from
-the actual run, not maintained by hand:
+surface. Run it yourself to reproduce the stated count.
 ---
 
 ## 8. Deployment & Quickstart
@@ -237,20 +236,19 @@ deletable again only once both bindings are gone (`routines.delete_template`,
 viewer can remove it from their own listing without touching it for anyone else
 (`remove_for_viewer`).
 
-`TaskTemplate.steps` (a list, validated to hold exactly one `Step` in this deployment) is Phase
-1's forward-compatible schema slot for Phase 2 chains — a single-step task is the special case
-of a chain, not a shape that would need migrating later, and `steps[0]` is the one place that
-step's configuration actually lives: `TaskTemplate.assigned_agent`/`prompt_source`/`prompt_id`/
-`prompt_version`/`custom_prompt_text`/`skill_ids` are `@computed_field` properties reading and
-writing straight through to it, not a second, independently stored copy. That keeps every
-existing call site, API response shape and Jinja template that expects the old flat attribute
-names working unchanged — `enqueue_template()` still reads `template.assigned_agent` etc.
-directly and has needed no code change. `POST /api/task-templates` accepts either the flat form
-fields (folded into a single default `Step`, the common path) or an explicit `steps` JSON array
-with one element (the Phase 2 chain shape, already valid against this schema); either way,
-`TaskTemplate`'s own field validator rejects anything but exactly one step with a 422, so the
-"exactly one" rule lives in a single place rather than being re-checked at each call site. No
-step editor, chain runner, or `parallel_group`/`loop` wiring exists yet.
+`TaskTemplate.steps` is the canonical storage shape for both a single task and a linear chain.
+`TaskTemplate.assigned_agent`/`prompt_source`/`prompt_id`/`prompt_version`/
+`custom_prompt_text`/`skill_ids` remain computed compatibility properties over `steps[0]`, not a
+second copy. `POST /api/task-templates` accepts either the flat single-step form or an explicit
+`steps` JSON array; the step editor can then edit the ordered chain.
+
+The chain runner supports three validated execution patterns: `single`, `race` and bounded
+`research` (one to five operator-named URLs). Multi-step
+templates and even a one-step race go through `core/chain_runner.py`; a one-step `single` task
+keeps the original direct path and response shape. Every model call still crosses the Sovereign
+Gateway. Previous output and research-source content are handed on as clearly marked untrusted
+user context, never promoted into system instructions. `parallel_group`, loops and unsupported
+input specifications are rejected before persistence because no executor exists for them yet.
 
 **Execution** (`routines.enqueue_template`) creates a real `TaskRecord` — not a second, parallel
 run object — carrying `source_template_id`/`source_binding_id`/`triggered_by`, and drives it
@@ -266,10 +264,13 @@ deterministic-demo mode as every other model call in this app. A template with
 Scheduler**. SentinelFleet runs on Cloud Run with scale-to-zero (`core/storage.py` reads
 `K_SERVICE` as its production signal), so an in-process tick loop would lose its state on every
 scale-down and would need an external wakeup anyway — Cloud Scheduler's HTTP trigger is that
-wakeup and the trigger source at once. Each call enqueues every `RoutineBinding` whose
+wakeup and the trigger source at once. A process-wide async lock serialises each call before it
+claims due work. Each call enqueues every `RoutineBinding` whose
 `next_due_at` has passed and every `pending` `ScheduleBinding` whose `due_at` has passed, then
-recomputes `next_due_at` strictly forward, which is what makes the endpoint idempotent by
-construction rather than by a dedupe table: firing twice for the same tick enqueues once. A
+recomputes `next_due_at` strictly forward. With the documented Cloud Run limit of one instance,
+two overlapping triggers cannot enqueue the same tick twice. This is deliberately not presented
+as a distributed Firestore transaction: scaling beyond one instance first requires a durable
+lease/idempotency claim. A
 `ScheduleBinding` more than 15 minutes past due is treated as missed and follows its
 `miss_policy` (`skip` marks it `skipped` without a run, `catch_up` still fires it late); a
 `RoutineBinding`'s backlog is drained one run per `/fire` call under `catch_up`, or dropped
@@ -280,11 +281,11 @@ vendored copy of the pure date-math function, not an import of its SQLite job st
 
 For a local demo the endpoint stays open (with a logged warning) when `ROUTINES_FIRE_TOKEN` is
 unset; setting it requires callers to send the same value as the `X-Fire-Token` header. A real
-deployment should either set that token in the Cloud Scheduler job's HTTP target, or invoke the
-endpoint through an OIDC-authenticated Cloud Run service-to-service call instead.
+deployment must set that token in the Cloud Scheduler job's HTTP target, or invoke the endpoint
+through an OIDC-authenticated Cloud Run service-to-service call. Cloud Run without a token fails
+closed with HTTP 503.
 
-**Not in this MVP** (see the "Tasks & Routines" concept doc, Phase 2/3): a guided wizard for
-composing a template from the chat tab's current prompt/skill selection, a dedicated run-history
-("Verlauf") view with a one-click "promote to routine" action, the `idle_window` trigger kind
-(no load signal is available to a stateless Cloud Scheduler call), and a console/COMA execution
+**Not in this MVP:** authenticated prompt/skill/permission administration, a process registry
+for process-policy bindings, parallel chain groups, executable loops, a distributed scheduler
+lease for multi-instance operation, the `idle_window` trigger kind, and a console/COMA execution
 path as an alternative to the Gemini chat backend.

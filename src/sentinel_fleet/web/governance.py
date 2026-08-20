@@ -24,12 +24,25 @@ from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.core.gateway import gateway
 from sentinel_fleet.core.identity import AgentIdentity, AgentStatus
 from sentinel_fleet.core.permissions import PermissionAction, PermissionRegistry
+from sentinel_fleet.core.binding_rules import (
+    API_TARGET_KINDS,
+    SCOPE_LEVELS,
+    TARGET_KINDS,
+    explain_binding,
+)
+from sentinel_fleet.core.policy_catalog import (
+    Enforcement,
+    Policy,
+    PolicyType,
+    policy_catalog,
+)
 from sentinel_fleet.core.policies import (
     DEFAULT_MAX_CONSECUTIVE_STEPS,
     MATH_TOLERANCE_EUR,
     UST_REQUIRED_FIELDS,
 )
 from sentinel_fleet.core.telemetry import SpanRecord, telemetry
+from sentinel_fleet.core.users import DEMO_USER_ID, UserIdentity, user_registry
 from sentinel_fleet.uas import routines
 from sentinel_fleet.uas.task_templates import TaskTemplate, task_template_registry
 from sentinel_fleet.uas.ticket_master import Ticket, TicketStatus, ticket_master
@@ -96,6 +109,48 @@ def policy_catalogue() -> List[Dict[str, Any]]:
             "checks": [],
         },
     ]
+
+
+def user_binding_matrix(actor: UserIdentity) -> Dict[str, Any]:
+    """Generate the current identity's 5 target x 4 scope view from R1-R7."""
+    sample = Policy(
+        policy_id="matrix:preference",
+        title="Matrix sample preference",
+        statement="A neutral advisory policy used only to explain binding rights.",
+        type=PolicyType.PREFERENCE,
+        enforcement=Enforcement.ADVISORY,
+        owner=actor.user_id,
+    )
+    rows = []
+    for target_kind in TARGET_KINDS:
+        cells = []
+        for scope in SCOPE_LEVELS:
+            verdict = explain_binding(
+                actor,
+                sample,
+                target_kind,
+                f"matrix:{target_kind}",
+                scope,
+                target_owner=actor.user_id,
+                target_user_id="operator" if scope == "other_user" else None,
+                target_department_id=(actor.department or "finance") if scope == "department" else None,
+            )
+            cells.append({
+                "scope": scope,
+                "supported_by_api": target_kind in API_TARGET_KINDS,
+                **verdict.model_dump(),
+            })
+        rows.append({
+            "target_kind": target_kind,
+            "supported_by_api": target_kind in API_TARGET_KINDS,
+            "cells": cells,
+        })
+    return {
+        "actor": actor.model_dump(),
+        "scopes": list(SCOPE_LEVELS),
+        "rows": rows,
+        "source": "core/binding_rules.py :: explain_binding (R1-R7)",
+    }
 
 
 def _agent_groups(agents: Sequence[AgentIdentity]) -> List[List[AgentIdentity]]:
@@ -492,6 +547,9 @@ def ticket_catalogue(tickets: Sequence[Ticket], limit: int = 20) -> Dict[str, An
             "created_at": ticket.created_at,
             "resolved_at": ticket.resolved_at,
             "resolution_comment": ticket.resolution_comment or "",
+            "requested_by": ticket.requested_by or "",
+            "assigned_to_role": ticket.assigned_to_role or "",
+            "assigned_to_user": ticket.assigned_to_user or "",
         }
 
     ordered = sorted(tickets, key=lambda ticket: ticket.created_at, reverse=True)
@@ -516,7 +574,7 @@ def ticket_catalogue(tickets: Sequence[Ticket], limit: int = 20) -> Dict[str, An
 # The board
 # ---------------------------------------------------------------------------
 
-def build_board() -> Dict[str, Any]:
+def build_board(current_user_id: str = DEMO_USER_ID) -> Dict[str, Any]:
     """Read every register once and hand back the whole board.
 
     The single place in this module that touches a singleton. `gateway.permissions` rather than
@@ -525,6 +583,7 @@ def build_board() -> Dict[str, Any]:
     """
     agents = lifecycle_manager.list_fleet()
     spans = list(telemetry.spans)
+    current_user = user_registry.get_user(current_user_id) or user_registry.require_user(DEMO_USER_ID)
 
     return {
         "generated_at": time.time(),
@@ -537,7 +596,10 @@ def build_board() -> Dict[str, Any]:
         "gate_sequence": GATE_SEQUENCE,
         "gate_sequence_source": GATE_SEQUENCE_SOURCE,
         "permissions": permission_matrix(agents, gateway.permissions),
-        "policies": policy_catalogue(),
+        "policies": policy_catalog.summary(gateway.permissions),
+        "engine_checks": policy_catalogue(),
+        "users": user_registry.capability_matrix(),
+        "binding_matrix": user_binding_matrix(current_user),
         "decisions": aggregate_decisions(spans),
         "evidence": evidence_trail(spans),
         "usage": usage_summary(spans),
