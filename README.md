@@ -16,7 +16,7 @@
 [Devpost project](https://devpost.com/software/sentinelfleet-o3v56y) ·
 [live architecture blueprint](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app/blueprint)
 
-[![Watch the 3:20 SentinelFleet guided demo](https://img.youtube.com/vi/Ab5kHsHo2fQ/maxresdefault.jpg)](https://youtu.be/Ab5kHsHo2fQ)
+[![Watch the 3:20 SentinelFleet guided demo](youtube-play-thumb.png)](https://youtu.be/Ab5kHsHo2fQ)
 
 ---
 
