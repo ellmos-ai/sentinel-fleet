@@ -3,13 +3,13 @@
 > **Project:** SentinelFleet (Enterprise Multi-Agent Platform & Autonomous Taskmaster)  
 > **Repository:** [github.com/ellmos-ai/sentinel-fleet](https://github.com/ellmos-ai/sentinel-fleet)  
 > **Google Cloud Hackathon 2026:** Track 1 (Autonomous Taskmaster) & Track 3 (Enterprise Multi-Agent Governance)  
-> **Target Runtime:** Google Cloud Run, Gemini 3.5 to 3.7 Flash via the Google GenAI SDK (`google-genai`), Google Cloud Firestore, OpenTelemetry (Cloud Trace export optional)  
+> **Target Runtime:** Google Cloud Run, Gemini 3.5 to 3.7 Flash via the Google GenAI SDK (`google-genai`), Google Cloud Firestore, OpenTelemetry with Cloud Trace export in the documented deployment profile
 
 ---
 
 ## 1. Executive Summary
 
-**SentinelFleet** is a fortified enterprise-agent control-plane and taskmaster demonstration. Built upon a unified 4-pillars architecture (**Control, UAS, Memory, Domain**), it makes model calls, policy decisions and task hand-offs inspectable and fail-closed at their implemented gates. It is not a production authentication system: the public hackathon build deliberately has no login, and non-demo access remains locked until a verified identity layer is installed.
+**SentinelFleet** is a fortified enterprise-agent control-plane and taskmaster demonstration. Built upon a unified 4-pillars architecture (**Control, UAS, Memory, Domain**), it makes model calls, policy decisions and task hand-offs inspectable and fail-closed at their implemented gates. The public hackathon build deliberately has no human login and isolates anonymous browser workspaces. Non-demo mode verifies signed Google IAP assertions and maps immutable claims to registered, active users; deployment still requires the operator to configure IAP and its explicit user map.
 
 Paired with **OmniLedger**, its primary business domain pipeline, SentinelFleet automates complex, statutory-compliant accounts payable (AP) and tax compliance workflows under German and European law (**§ 14 UStG**, **§ 147 AO**, **GoBD**). It autonomously ingests multi-format invoices, audits statutory mandatory requirements, resolves math discrepancies, triggers Human-in-the-Loop (HITL) approval gates, and closes communication loops with suppliers via self-healing dispute notices.
 
@@ -49,8 +49,8 @@ SentinelFleet unifies and hardens codebases, patterns, and research from several
 |---|---|---|
 | **`.CONTROL`** (`.armor`, `.gateway`, `.clutch`) | `OneDrive/.TOPICS/.AI/.CONTROL` | Zero-Trust Model Armor (regex + semantic injection detection), Agent Gateway scoping (PoLP), Dynamic Intent Dispatcher (`clutch`). |
 | **`.RUNTIME` / UAS** (`.uas`) | `OneDrive/.TOPICS/.AI/.RUNTIME/.uas` | Universal Autonomous System: `task_master.py` (idempotent state tracking), `ticket_master.py` (HITL ask-gates), `lifecycle_manager.py`. |
-| **`.MEMORY`** (`.bank`, `.gardener`, `.hooker`) | `OneDrive/.TOPICS/.AI/.MEMORY` | Curated USMC Memory Bank (`fact`, `lesson`, `policy`, `entity`), GARDENER RAG vector search, Just-in-Time Context Injector (`letter-hooker`). |
-| **`.UMBRUCH` Mail** | `OneDrive/.TOPICS/.UMBRUCH/.UmbruchMail` | GDPR protection level model (S1-S4), statutory retention periods (§ 147 AO), automated deletion and deadline checks (`dsgvo-check`). |
+| **`.MEMORY`** (`.bank`, `.gardener`, `.hooker`) | `OneDrive/.TOPICS/.AI/.MEMORY` | Original visible USMC taxonomy (`Fact`, `Lesson`, `Entity`, `Policy`), now migrated on read to `facts`, `lessons`, `working`, `sessions`; GARDENER RAG and Just-in-Time Context Injector (`letter-hooker`). |
+| **`.UMBRUCH` Mail** | `OneDrive/.TOPICS/.UMBRUCH/.UmbruchMail` | Source concept for the S1-S4 protection model and deadline review. SentinelFleet reports due records for human review; it does not make an automatic legal deletion decision. |
 | **`DEV_PrivacyMailDesk_SOCIAL`** | `OneDrive/.TOPICS/.SOFTWARE/MAIL/...` | Local-first zero-cloud CRM architecture, **tombstone principle** (locked deletion markers prevent re-ingestion and unauthorised mail dispatch). |
 | **`.SKILLS` Repository** | `OneDrive/.TOPICS/.AI/.SKILLS/skills` | 32 standardised, bilingual, Google-Cloud-branded enterprise skills following the **Component-v1** schema. |
 | **`ProfiPrompt` Library** | `OneDrive/.TOPICS/.AI/.PROMPTS` | ProfiPrompt v1 schema with SemVer versioning, change history and role-based visibility (`organization`, `restricted`, `public`). |
@@ -71,11 +71,12 @@ SentinelFleet unifies and hardens codebases, patterns, and research from several
 * **Swarm Conductor (`swarm.py`):** Scaffold for multi-agent fan-out on Cloud Run. The current build dispatches the OmniLedger workflow sequentially through the gateway and traces every step; parallel Pub/Sub distribution is designed for, not yet implemented.
 
 ### Pillar 3: Memory (USMC Bank & Context Hooker)
-* **USMC Memory Bank (`bank.py`):** Persistent corporate memory partitioned into four core taxonomies:
-  * `fact`: Verified operational facts and company constants.
-  * `lesson`: Learnings from past runs (e.g., supplier payment terms, discount habits).
-  * `policy`: Statutory rules (e.g., § 14 UStG, GoBD requirements).
-  * `entity`: Vendor and customer master profiles.
+* **USMC Memory Bank (`bank.py`):** Persistent corporate memory partitioned into the current four core taxonomies:
+  * `facts`: Verified operational facts; legacy `fact`, `policy` and `entity` records map here.
+  * `lessons`: Learnings from past runs; legacy `lesson` maps here.
+  * `working`: Active working context and the fail-safe target for unknown legacy categories.
+  * `sessions`: Session checkpoints and reconciliation write-backs; legacy `session` and `session_checkpoint` map here.
+  The legacy source/UI vocabulary was `Fact`, `Lesson`, `Entity`, `Policy`; the earliest internal bank comment used `session_checkpoint` instead of `policy`. The original label is retained as migration metadata where applicable.
 * **GARDENER RAG (`gardener_rag.py`):** In-memory retrieval engine over tax law and accounting guideline chunks. The shipped implementation ranks by keyword overlap; the chunk model is prepared for a vector index but no embeddings are computed in this build.
 * **Dynamic Context Injector (`hooker.py`):** Injects matching policies and memory clues directly into agent system prompts just-in-time before inference.
 
@@ -100,7 +101,7 @@ SentinelFleet features a dedicated privacy and address book layer synthesizing `
 | S1               | 6 Months          | Ad-hoc project inquiries / tenders       |
 | S2               | 12 Months         | Business development & pre-contractual   |
 | S3 (Default)     | 36 Months / 3 Yrs | Tax & accounting records (§ 147 AO)      |
-| S4               | Permanent         | Key institutional partners until revoke  |
+| S4               | Until revocation  | Key institutional partners                |
 +---------------------------------------------------------------------------------+
 | Safe Gate: validate_send_permission() -> Checks Opt-Out & Tombstone status      |
 | Tombstone Guard: Unsubscribed contacts are locked to prevent re-contacting      |
@@ -110,7 +111,7 @@ SentinelFleet features a dedicated privacy and address book layer synthesizing `
 ### Key Capabilities:
 1. **Pre-Send Verification:** Before any dispute email is dispatched by `agent:vendor-dispute`, `validate_send_permission()` verifies that the recipient has not opted out.
 2. **Tombstone Principle:** When a contact revokes consent, their entry is marked with `is_tombstone = True`. The email is blocked permanently, preventing sub-agents from re-adding the contact from future parsed emails.
-3. **Automated Retention Audit:** `run_dsgvo_retention_audit()` regularly verifies that stored contacts comply with European data protection regulations.
+3. **Operational Retention Audit:** `run_dsgvo_retention_audit()` reports S1-S4 records whose configured review window is due. It does not delete automatically and is not itself a legal-compliance determination.
 
 ---
 
@@ -158,7 +159,7 @@ The frontend is served directly via FastAPI + Jinja2 and vanilla JavaScript/CSS 
   3. `📇 Privacy Contacts (4)` — DSGVO address book with protection levels, tombstone indicators, and opt-out buttons.
   4. `👥 Fleet & Tasks (9)` — Fleet directory, quarantine release actions, and TaskMaster execution table.
   5. `📥 Tickets & Approvals` — HITL queue for operator triage, approval, and rejection.
-  6. `🧠 Memory Bank` — USMC facts, policies, lessons, and entities.
+  6. `🧠 Memory Bank` — USMC `facts`, `lessons`, `working`, and `sessions`, with legacy labels mapped on read.
   7. `📝 Prompts & Skills (32)` — ProfiPrompt v1 and Skill governance with version bumping and permission modals.
   8. `📊 OpenTelemetry Spans` — Distributed traces and audit logs.
 * **Live Interactive Demo Trigger Panel:**
@@ -176,7 +177,7 @@ The entire codebase is validated by a rigorous Pytest test suite covering unit l
 ```bash
 python -m pytest tests -v
 ```
-### Test Results: 448/448 passed — 100% green (verified 2026-08-20)
+### Test Results: full suite green (verified 2026-08-21; run the command above for the current count)
 
 The suite covers the gateway (scoping, quarantine, HITL), model armor, the
 OmniLedger workflow, chat and race (including live-path failure modes), task
@@ -285,7 +286,10 @@ deployment must set that token in the Cloud Scheduler job's HTTP target, or invo
 through an OIDC-authenticated Cloud Run service-to-service call. Cloud Run without a token fails
 closed with HTTP 503.
 
-**Not in this MVP:** authenticated prompt/skill/permission administration, a process registry
-for process-policy bindings, parallel chain groups, executable loops, a distributed scheduler
+**Not in this MVP:** a process registry for process-policy bindings, parallel chain groups,
+executable loops, a distributed scheduler
 lease for multi-instance operation, the `idle_window` trigger kind, and a console/COMA execution
-path as an alternative to the Gemini chat backend.
+path as an alternative to the Gemini chat backend. Public-demo administration remains locked;
+non-demo administration is available only through a verified IAP principal with the relevant
+capability. Chat sessions are private/shareable/exportable but do not yet have a self-service
+delete, retention or legal-hold lifecycle.

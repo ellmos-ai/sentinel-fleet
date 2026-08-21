@@ -26,7 +26,7 @@ def test_error_status_is_propagated_to_the_span():
     service.end_span(span, status="SECURITY_VIOLATION", error="not scoped")
 
     assert span.status == "SECURITY_VIOLATION"
-    assert span.error_message == "not scoped"
+    assert span.error_message == "SECURITY_VIOLATION: details redacted"
     assert "tool_call:failing" in service.get_exported_spans()
 
 

@@ -485,10 +485,8 @@ async def test_a_refused_chain_run_is_settled_too(client):
 
 
 @pytest.mark.asyncio
-async def test_release_names_the_runs_it_stopped_without_re_running_them(client):
-    """Releasing must not silently re-dispatch: the agent was locked because something got
-    through, and handing that attempt a second try without a human deciding to would be the
-    wrong default. The response names the runs so the operator can decide."""
+async def test_public_demo_member_cannot_release_a_global_quarantine(client):
+    """A shared anonymous member must not unlock a fleet-wide security quarantine."""
     from sentinel_fleet.conductor.lifecycle import lifecycle_manager
     from sentinel_fleet.core.errors import QuarantineLockError
     from sentinel_fleet.core.identity import AgentStatus
@@ -499,18 +497,16 @@ async def test_release_names_the_runs_it_stopped_without_re_running_them(client)
     with pytest.raises(QuarantineLockError):
         await routines.enqueue_template(template.template_id, triggered_by="manual")
 
-    response = await client.post(f"/api/agents/{agent_id}/quarantine/release")
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["agent"]["status"] == "idle"
+    try:
+        response = await client.post(f"/api/agents/{agent_id}/quarantine/release")
+        assert response.status_code == 403
 
-    stopped = payload["runs_stopped_by_this_quarantine"]
-    assert any(row["source_template_id"] == template.template_id for row in stopped), \
-        "the release must name what the quarantine had stopped"
-
-    runs = [t for t in task_master.list_all() if t.source_template_id == template.template_id]
-    assert all(t.state is TaskState.FAILED for t in runs), \
-        "release must not resurrect the run by itself"
+        runs = [t for t in task_master.list_all() if t.source_template_id == template.template_id]
+        assert all(t.state is TaskState.FAILED for t in runs), \
+            "a rejected release must not resurrect a run"
+        assert lifecycle_manager.get_agent(agent_id).status is AgentStatus.QUARANTINED
+    finally:
+        lifecycle_manager.update_agent_status(agent_id, AgentStatus.IDLE)
 
 
 # ---------------------------------------------------------------------------

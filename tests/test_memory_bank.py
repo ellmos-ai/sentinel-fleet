@@ -31,6 +31,80 @@ def test_memory_hooker_injects_context():
     assert len(context_text) > 50
 
 
+def test_memory_search_is_scoped_by_principal_department_and_organization():
+    """A search is an authorization boundary, not a global index with UI filtering."""
+    from sentinel_fleet.core.storage import LocalJsonStore
+    from sentinel_fleet.memory.bank import MemoryEntry
+
+    bank = object.__new__(MemoryBank)
+    bank._store = LocalJsonStore("memory-scope-test", MemoryEntry)
+    needle = "scope-search-needle"
+    records = (
+        ("alice-private", "Alice private", "alice", "personal", None, "org-a"),
+        ("bob-private", "Bob private", "bob", "personal", None, "org-a"),
+        ("finance-shared", "Finance shared", "finance-manager", "department", "finance", "org-a"),
+        ("operations-shared", "Operations shared", "ops-manager", "department", "operations", "org-a"),
+        ("other-org-finance", "Other organization", "other-manager", "department", "finance", "org-b"),
+        ("org-shared", "Organization A", "org-admin", "organization", None, "org-a"),
+        ("org-shared", "Organization B", "org-admin", "organization", None, "org-b"),
+    )
+    for key, label, owner, visibility, department, organization in records:
+        bank.store_memory(
+            "facts",
+            f"{needle}:{key}",
+            label,
+            owner=owner,
+            visibility=visibility,
+            department_id=department,
+            organization_id=organization,
+        )
+
+    visible = bank.search_memories(
+        needle,
+        requested_by="bob",
+        requested_department="finance",
+        requested_organization="org-a",
+    )
+
+    assert {entry.content for entry in visible} == {
+        "Bob private", "Finance shared", "Organization A"
+    }
+
+
+def test_memory_hooker_never_injects_another_principals_private_clue(monkeypatch):
+    from sentinel_fleet.core.storage import LocalJsonStore
+    from sentinel_fleet.memory import hooker as hooker_module
+    from sentinel_fleet.memory.bank import MemoryEntry
+
+    bank = object.__new__(MemoryBank)
+    bank._store = LocalJsonStore("memory-hook-scope-test", MemoryEntry)
+    bank.store_memory(
+        "facts",
+        "scope-hook-secret",
+        "scope-hook-secret Alice only",
+        owner="alice",
+        visibility="personal",
+        organization_id="org-a",
+    )
+    monkeypatch.setattr(hooker_module, "memory_bank", bank)
+
+    bob_context = MemoryHooker.inject_context(
+        "scope-hook-secret",
+        requested_by="bob",
+        requested_department="finance",
+        requested_organization="org-a",
+    )
+    alice_context = MemoryHooker.inject_context(
+        "scope-hook-secret",
+        requested_by="alice",
+        requested_department="finance",
+        requested_organization="org-a",
+    )
+
+    assert "Alice only" not in bob_context
+    assert "Alice only" in alice_context
+
+
 # ---------------------------------------------------------------------------
 # Correctability. The live test read an unchangeable memory bank as the same powerlessness the
 # overview cards caused: "if CEO is filed under the wrong category, there is nothing I can do".

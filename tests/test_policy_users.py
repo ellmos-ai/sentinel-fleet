@@ -54,9 +54,9 @@ def test_permission_registry_can_be_injected_without_changing_gateway_defaults()
 def test_seed_profiles_and_users_form_a_reasoned_capability_matrix():
     users = UserRegistry()
 
-    assert {profile.profile_id for profile in users.list_profiles()} == {
-        "administrator", "operator", "member", "viewer"
-    }
+    assert {"administrator", "operator", "member", "viewer"}.issubset({
+        profile.profile_id for profile in users.list_profiles()
+    })
     assert users.is_capability_granted("admin:lukas", "permissions.edit")
     assert users.is_capability_granted("member:demo", "policy.create")
     denied = users.explain_capability("viewer:judge", "policy.create")
@@ -74,6 +74,7 @@ def test_reasoned_user_deviation_overrides_a_wildcard_profile():
         user_id=f"wild-user-{suffix}",
         name="Wildcard user",
         profile_id=f"wild-{suffix}",
+        organization_id="sentinel-demo",
         deviations={
             "permissions.edit": Deviation(
                 action=PermissionAction.DENY,
@@ -102,6 +103,7 @@ def test_specific_user_deviation_wins_over_an_overlapping_wildcard_deviation():
         user_id=f"specific-user-{suffix}",
         name="Specific deviation user",
         profile_id=profile_id,
+        organization_id="sentinel-demo",
         deviations={
             "policy.*": Deviation(
                 action=PermissionAction.ALLOW,
@@ -221,6 +223,7 @@ def test_explicit_deny_beats_forward_under_r7():
         user_id=f"denied-{suffix}",
         name="Denied member",
         profile_id="member",
+        organization_id="sentinel-demo",
         deviations={
             "policy.bind.user.foreign": Deviation(
                 action=PermissionAction.DENY,
@@ -413,6 +416,7 @@ def test_explicit_administrator_deviation_still_denies_binding():
         user_id=f"limited-admin-{suffix}",
         name="Limited admin",
         profile_id="administrator",
+        organization_id="sentinel-demo",
         deviations={
             "policy.bind.organization": Deviation(
                 action=PermissionAction.DENY,

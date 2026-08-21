@@ -417,9 +417,10 @@
           <span class="eyebrow">Result storage</span>
           <h2>Documents you may access</h2>
           <p>
-            Your share ID is <span class="numeric">{{ data_owner_id }}</span>. In this public demo
-            it identifies this browser workspace, not a verified human account; clearing the
-            cookie loses that identity. Production sharing therefore remains gated on IAM/IAP.
+            Your share ID is <span class="numeric">{{ data_owner_id }}</span>. It is a one-way,
+            non-authenticating handle for this browser workspace, not the secret workspace cookie
+            or a verified human account. Clearing the cookie loses that identity. Production
+            sharing therefore remains gated on IAM/IAP.
           </p>
         </div>
         <span class="badge-status badge-info numeric">{{ artifact_total }} visible</span>
@@ -473,7 +474,7 @@
                 <label class="field-label" for="artifact-shares-{{ artifact.artifact_id }}">Share IDs, comma-separated</label>
                 <input id="artifact-shares-{{ artifact.artifact_id }}" class="text-input"
                        value="{{ artifact.shared_with|join(', ') }}"
-                       placeholder="workspace:recipient-id">
+                       placeholder="workspace:recipient-share-hash">
               </div>
               <div style="align-self: end">
                 <button class="btn btn-sm" onclick="saveArtifactSharing('{{ artifact.artifact_id }}')">Save sharing</button>
@@ -531,7 +532,7 @@
             </div>
             <div style="flex: 1 1 320px">
               <label class="field-label" for="chat-shares">Share IDs, comma-separated</label>
-              <input id="chat-shares" class="text-input" placeholder="workspace:recipient-id">
+              <input id="chat-shares" class="text-input" placeholder="workspace:recipient-share-hash">
             </div>
             <div style="align-self: end"><button class="btn btn-sm" onclick="saveChatSharing()">Save sharing</button></div>
           </div>
@@ -975,8 +976,8 @@
                         {% else %}
                         <button class="btn btn-sm" onclick='openScheduleModal({{ row.template_id|tojson }}, {{ row.name|tojson }})'>Add schedule</button>
                         {% endif %}
-                        {% if row.owner != viewer and row.visibility != 'own' %}
-                        <button class="btn btn-sm" {% if viewer == demo_mutation_user_id %}onclick='hideTemplateForViewer({{ row.template_id|tojson }}, {{ viewer|tojson }})'{% else %}disabled title="Display aliases cannot mutate another user’s view"{% endif %}>Hide from my view</button>
+                        {% if row.owner != data_owner_id and row.visibility != 'own' %}
+                        <button class="btn btn-sm" onclick='hideTemplateForViewer({{ row.template_id|tojson }}, {{ data_owner_id|tojson }})'>Hide from my view</button>
                         {% endif %}
                         {% if row.can_delete %}
                         <button class="btn btn-sm btn-reject" onclick='deleteTaskTemplate({{ row.template_id|tojson }})'>Delete</button>
@@ -2389,14 +2390,12 @@
       <div id="wizard-pane-3" class="wizard-pane">
         <div class="form-group">
           <label>Assigned agent</label>
-          {# Rendered from agent_catalog, the same source the step editor's select uses, so the
-             execute_template scope mark reads identically in both places. #}
+          {# The server catalog contains only identities scoped for execute_template. #}
           <select id="wz-agent" class="select-input">
-            {% for a in agent_catalog %}<option value="{{ a.agent_id }}" {% if a.agent_id == 'agent:task-solver' %}selected{% endif %}>{{ a.name }} ({{ a.role }}){% if not a.can_execute_template %} — no execute_template scope{% endif %}</option>{% endfor %}
+            {% for a in agent_catalog %}<option value="{{ a.agent_id }}" {% if a.agent_id == 'agent:task-solver' %}selected{% endif %}>{{ a.name }} ({{ a.role }})</option>{% endfor %}
           </select>
           <div class="item-meta">
-            An agent without <code>execute_template</code> in scope is refused by the gateway when
-            a single-agent step runs as it — least privilege working as designed, not a fault.
+            Only agents with <code>execute_template</code> in scope can be assigned here.
           </div>
         </div>
         <div class="form-group">

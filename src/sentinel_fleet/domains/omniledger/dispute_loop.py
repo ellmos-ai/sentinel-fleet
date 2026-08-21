@@ -1,17 +1,28 @@
 """Autonomous Self-Healing Vendor Dispute & Correction Loop with GDPR Privacy Gates."""
 
-from typing import Dict, Any
+from typing import Optional
 from sentinel_fleet.domains.omniledger.models import InvoiceDocument
+from sentinel_fleet.memory.bank import DEFAULT_ORGANIZATION_ID
 from sentinel_fleet.memory.hooker import memory_hooker
 from sentinel_fleet.core.privacy_contacts import privacy_contact_hub
 
 
 class DisputeCommunicator:
     @staticmethod
-    def generate_dispute_resolution(doc: InvoiceDocument) -> str:
+    def generate_dispute_resolution(
+        doc: InvoiceDocument,
+        requested_by: str = "operator",
+        requested_department: Optional[str] = None,
+        requested_organization: str = DEFAULT_ORGANIZATION_ID,
+    ) -> str:
         """Generates a legally sound, courteous correction request to the vendor under strict GDPR controls."""
         # 1. Check Privacy Contact Hub & Opt-Out Blacklist
-        perm = privacy_contact_hub.validate_send_permission(doc.vendor_email)
+        perm = privacy_contact_hub.validate_send_permission(
+            doc.vendor_email,
+            requested_by=requested_by,
+            requested_department=requested_department,
+            requested_organization=requested_organization,
+        )
         if not perm["allowed"]:
             doc.dispute_email_draft = f"BLOCKED BY PRIVACY GATE: {perm['reason']}"
             return doc.dispute_email_draft
@@ -22,7 +33,12 @@ class DisputeCommunicator:
         #    operator can see which retrieved knowledge the argument rests on.
         # The query keeps the statute tokens (14, UStG) on purpose: the legal corpus is
         # indexed in German, and dropping them would silently empty the retrieval.
-        memory_clues = memory_hooker.inject_context("invoice audit § 14 UStG correction request")
+        memory_clues = memory_hooker.inject_context(
+            "invoice audit § 14 UStG correction request",
+            requested_by=requested_by,
+            requested_department=requested_department,
+            requested_organization=requested_organization,
+        )
         clue_lines = [line for line in memory_clues.splitlines() if line.startswith("- ")]
         reference_block = ""
         if clue_lines:

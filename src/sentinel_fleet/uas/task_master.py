@@ -1,10 +1,11 @@
 """TaskMaster: Asynchronous Task Engine & Execution State Table."""
 
+import json
 import time
 import uuid
 from enum import Enum
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Literal, Optional
+from pydantic import BaseModel, Field, model_validator
 from sentinel_fleet.core.storage import get_store
 from sentinel_fleet.core.errors import TaskNotFoundError, TaskStateTransitionError
 
@@ -59,6 +60,24 @@ class TaskRecord(BaseModel):
     source_binding_id: Optional[str] = None
     triggered_by: str = "manual"  # "manual" | "routine" | "schedule" | "external"
     scheduled_for: Optional[str] = None
+    # Resource scope. Legacy/unmigrated rows stay outside every live tenant until explicitly
+    # migrated; ownership alone never reclassifies them.
+    owner_id: str = "legacy-unassigned"
+    organization_id: str = "legacy-unassigned"
+    department_id: Optional[str] = None
+    visibility: Literal["private", "department", "organization"] = "private"
+    # Role snapshot used only to re-check restricted prompt/skill visibility while this run
+    # executes. Scheduled legacy runs have no verified human role and therefore keep it empty.
+    actor_roles: List[str] = Field(default_factory=list)
+    # Optional durable artifact produced by the run. ArtifactService authorization and download
+    # routing stay at the service/HTTP boundary; this record only preserves the relationship.
+    result_artifact_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _department_visibility_has_a_department(self) -> "TaskRecord":
+        if self.visibility == "department" and not self.department_id:
+            raise ValueError("Department-visible tasks require department_id.")
+        return self
 
 
 class TaskMaster:
@@ -73,7 +92,12 @@ class TaskMaster:
         source_template_id: Optional[str] = None,
         source_binding_id: Optional[str] = None,
         triggered_by: str = "manual",
-        scheduled_for: Optional[str] = None
+        scheduled_for: Optional[str] = None,
+        owner_id: str = "legacy-unassigned",
+        organization_id: str = "legacy-unassigned",
+        department_id: Optional[str] = None,
+        visibility: Literal["private", "department", "organization"] = "private",
+        actor_roles: Optional[List[str]] = None,
     ) -> TaskRecord:
         # Collision-free: a counter over a shared store races and repeats ids after deletions
         task_id = f"TASK-{uuid.uuid4().hex[:8].upper()}"
@@ -86,7 +110,12 @@ class TaskMaster:
             source_template_id=source_template_id,
             source_binding_id=source_binding_id,
             triggered_by=triggered_by,
-            scheduled_for=scheduled_for
+            scheduled_for=scheduled_for,
+            owner_id=owner_id,
+            organization_id=organization_id,
+            department_id=department_id,
+            visibility=visibility,
+            actor_roles=list(actor_roles or []),
         )
         self._store.put(task_id, task)
         return task
@@ -99,6 +128,57 @@ class TaskMaster:
 
     def get_task(self, task_id: str) -> Optional[TaskRecord]:
         return self._store.get(task_id)
+
+    @staticmethod
+    def can_read(
+        task: TaskRecord,
+        requested_by: str,
+        organization_id: str,
+        department_id: Optional[str] = None,
+    ) -> bool:
+        """Return whether one verified principal may read a task.
+
+        Organization is checked before ownership. This prevents a reused user identifier from
+        becoming a cross-tenant owner alias.
+        """
+        if task.organization_id in {"", "legacy-unassigned"}:
+            return False
+        if task.organization_id != organization_id:
+            return False
+        if task.owner_id == requested_by:
+            return True
+        if task.visibility == "organization":
+            return True
+        if task.visibility == "department":
+            return bool(department_id and task.department_id == department_id)
+        return False
+
+    @staticmethod
+    def can_edit(
+        task: TaskRecord,
+        requested_by: str,
+        organization_id: str,
+        *,
+        can_edit_foreign: bool = False,
+    ) -> bool:
+        """Owners edit in-tenant; only an explicit foreign-edit grant broadens that."""
+        return bool(
+            task.organization_id not in {"", "legacy-unassigned"}
+            and task.organization_id == organization_id
+            and (task.owner_id == requested_by or can_edit_foreign)
+        )
+
+    def list_visible(
+        self,
+        requested_by: str,
+        organization_id: str,
+        department_id: Optional[str] = None,
+    ) -> List[TaskRecord]:
+        """Newest-first tasks visible to a verified principal."""
+        return [
+            task for task in self.list_all()
+            if self.can_read(task, requested_by, organization_id, department_id)
+        ]
 
     def update_task_state(
         self,
@@ -114,12 +194,38 @@ class TaskMaster:
         if state != task.state and state not in ALLOWED_TASK_TRANSITIONS.get(task.state, set()):
             raise TaskStateTransitionError(task_id, task.state.value, state.value)
 
+        result_artifact_id = task.result_artifact_id
+        if output_data and state in {TaskState.COMPLETED, TaskState.AWAITING_APPROVAL}:
+            # Every material run result gets a creator-owned, downloadable representation.
+            # Import lazily to keep the task model usable without initializing blob storage.
+            from sentinel_fleet.core.artifacts import artifact_service
+
+            artifact = artifact_service.store_result(
+                content=json.dumps(
+                    output_data,
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                    default=str,
+                ).encode("utf-8"),
+                filename=f"{task.task_id}-result.json",
+                media_type="application/json",
+                creator_id=task.owner_id,
+                creator_organization=task.organization_id,
+                creator_department=task.department_id,
+                visibility=task.visibility,
+                source_kind="task_result",
+                source_ref=task.task_id,
+            )
+            result_artifact_id = artifact.artifact_id
+
         task.state = state
         task.updated_at = time.time()
         if output_data:
             task.output_data = output_data
         if error:
             task.error_message = error
+        task.result_artifact_id = result_artifact_id
 
         self._store.put(task_id, task)
         return task
@@ -136,6 +242,30 @@ class TaskMaster:
             raise TaskNotFoundError(task_id)
         return self.update_task_state(task_id, TaskState.CANCELLED, error=reason)
 
+    def cancel_authorized(
+        self,
+        task_id: str,
+        reason: str = "Cancelled by the operator",
+        *,
+        requested_by: str,
+        organization_id: str,
+        can_edit_foreign: bool = False,
+    ) -> TaskRecord:
+        """Cancel through the ACL boundary used by an operator-facing mutation path."""
+        task = self._store.get(task_id)
+        if not task:
+            raise TaskNotFoundError(task_id)
+        if not self.can_edit(
+            task,
+            requested_by,
+            organization_id,
+            can_edit_foreign=can_edit_foreign,
+        ):
+            raise PermissionError(
+                f"'{requested_by}' cannot cancel task '{task_id}' in this organization."
+            )
+        return self.cancel_task(task_id, reason)
+
     def delete_task(self, task_id: str) -> bool:
         """Remove a settled record entirely - the one operation that does erase.
 
@@ -148,6 +278,29 @@ class TaskMaster:
         if task.state not in TERMINAL_TASK_STATES:
             raise TaskStateTransitionError(task_id, task.state.value, "deleted")
         return self._store.delete(task_id)
+
+    def delete_authorized(
+        self,
+        task_id: str,
+        *,
+        requested_by: str,
+        organization_id: str,
+        can_edit_foreign: bool = False,
+    ) -> bool:
+        """Delete a terminal task only after the same tenant/ownership ACL as cancellation."""
+        task = self._store.get(task_id)
+        if not task:
+            raise TaskNotFoundError(task_id)
+        if not self.can_edit(
+            task,
+            requested_by,
+            organization_id,
+            can_edit_foreign=can_edit_foreign,
+        ):
+            raise PermissionError(
+                f"'{requested_by}' cannot delete task '{task_id}' in this organization."
+            )
+        return self.delete_task(task_id)
 
     def list_all(self) -> List[TaskRecord]:
         tasks = self._store.list_all()

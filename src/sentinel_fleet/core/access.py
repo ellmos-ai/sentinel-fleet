@@ -2,13 +2,15 @@
 
 The public build deliberately has no human login.  Treating every browser as ``member:demo``
 nevertheless made private records global.  A random HttpOnly workspace cookie is an object
-capability: it does not claim a person's identity, but it gives one browser a stable, unguessable
-owner id for private demo data.  Organization-wide seed data remains shared.
+capability: it does not claim a person's identity, but it gives one browser a stable workspace.
+The cookie value is never used or exposed as an owner/share identifier; those identifiers are a
+one-way digest of the secret token. Organization-wide seed data remains shared.
 
 Non-demo deployments validate IAP's signed assertion and map it to a registered user. The demo
 cookie remains workspace isolation only and must not be presented as SSO.
 """
 
+import hashlib
 import json
 import re
 import secrets
@@ -34,6 +36,7 @@ class RequestPrincipal:
     department: Optional[str] = None
     email: Optional[str] = None
     subject: Optional[str] = None
+    organization_id: str = "sentinel-demo"
 
 
 @dataclass(frozen=True)
@@ -68,14 +71,31 @@ def new_workspace_token() -> str:
     return secrets.token_hex(16)
 
 
-def demo_principal(user_id: str, token: str) -> RequestPrincipal:
+def workspace_share_id(token: str) -> str:
+    """Derive a stable, non-authenticating share handle without exposing the cookie secret."""
+    checked = valid_workspace_token(token)
+    if checked is None:
+        raise ValueError("A demo workspace token must be 128-bit lowercase hexadecimal.")
+    digest = hashlib.sha256(f"sentinel-fleet-demo-share\0{checked}".encode("ascii")).hexdigest()
+    return f"workspace:{digest}"
+
+
+def demo_principal(
+    user_id: str,
+    token: str,
+    *,
+    organization_id: str = "sentinel-demo",
+    department: Optional[str] = None,
+) -> RequestPrincipal:
     checked = valid_workspace_token(token)
     if checked is None:
         raise ValueError("A demo workspace token must be 128-bit lowercase hexadecimal.")
     return RequestPrincipal(
         user_id=user_id,
-        data_owner_id=f"workspace:{checked}",
+        data_owner_id=workspace_share_id(checked),
         authenticated=False,
+        department=department,
+        organization_id=organization_id,
     )
 
 
@@ -131,7 +151,11 @@ def resolve_iap_user_id(mapping_json: str, identity: VerifiedIapIdentity) -> str
 
 
 def authenticated_principal(
-    *, user_id: str, department: Optional[str], identity: VerifiedIapIdentity
+    *,
+    user_id: str,
+    organization_id: str,
+    department: Optional[str],
+    identity: VerifiedIapIdentity,
 ) -> RequestPrincipal:
     return RequestPrincipal(
         user_id=user_id,
@@ -140,4 +164,5 @@ def authenticated_principal(
         department=department,
         email=identity.email,
         subject=identity.subject,
+        organization_id=organization_id,
     )

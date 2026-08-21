@@ -31,6 +31,7 @@ from sentinel_fleet.chat.models import (
     RaceVerdict,
 )
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
+from sentinel_fleet.core.access import RequestPrincipal
 from sentinel_fleet.core.gateway import gateway
 from sentinel_fleet.core.prompts import prompt_registry
 from sentinel_fleet.core.skills import skill_registry
@@ -116,11 +117,13 @@ class ChatService:
         self,
         title: str = "",
         owner_id: str = "operator",
+        organization_id: str = "sentinel-demo",
     ) -> ChatSession:
         session = ChatSession(
             session_id=_new_id("chat"),
             title=title.strip() or "New conversation",
             owner_id=owner_id,
+            organization_id=organization_id,
         )
         self._store.put(session.session_id, session)
         return session
@@ -130,11 +133,20 @@ class ChatService:
         session: ChatSession,
         requested_by: str,
         requested_department: Optional[str] = None,
+        requested_organization: str = "sentinel-demo",
     ) -> bool:
+        if session.organization_id in {"", "legacy-unassigned"}:
+            return False
+        if session.organization_id != requested_organization:
+            return False
         return (
             session.owner_id == requested_by
-            or session.visibility == "organization"
-            or requested_by in session.shared_with
+            or (
+                session.visibility == "organization"
+            )
+            or (
+                requested_by in session.shared_with
+            )
             or (
                 session.visibility == "department"
                 and bool(requested_department)
@@ -147,12 +159,13 @@ class ChatService:
         session_id: str,
         requested_by: Optional[str] = None,
         requested_department: Optional[str] = None,
+        requested_organization: str = "sentinel-demo",
     ) -> Optional[ChatSession]:
         session = self._store.get(session_id)
         if session is None:
             return None
         if requested_by is not None and not self.can_read(
-            session, requested_by, requested_department
+            session, requested_by, requested_department, requested_organization
         ):
             return None
         return session
@@ -161,12 +174,15 @@ class ChatService:
         self,
         requested_by: Optional[str] = None,
         requested_department: Optional[str] = None,
+        requested_organization: str = "sentinel-demo",
     ) -> List[ChatSession]:
         sessions = self._store.list_all()
         if requested_by is not None:
             sessions = [
                 session for session in sessions
-                if self.can_read(session, requested_by, requested_department)
+                if self.can_read(
+                    session, requested_by, requested_department, requested_organization
+                )
             ]
         return sorted(sessions, key=lambda s: s.updated_at, reverse=True)
 
@@ -175,7 +191,8 @@ class ChatService:
         session_id: str,
         *,
         requested_by: str,
-        requested_department: Optional[str],
+        requested_organization: str = "sentinel-demo",
+        requested_department: Optional[str] = None,
         visibility: str,
         shared_with: Sequence[str],
     ) -> ChatSession:
@@ -184,6 +201,8 @@ class ChatService:
             raise KeyError(session_id)
         if session.owner_id != requested_by:
             raise PermissionError("Only the chat creator may change sharing")
+        if session.organization_id != requested_organization:
+            raise PermissionError("The chat belongs to another organization")
         if visibility not in {"private", "department", "organization"}:
             raise ValueError("visibility must be private, department or organization")
         if visibility == "department" and not requested_department:
@@ -212,6 +231,11 @@ class ChatService:
         prompt_id: str = "",
         prompt_version: str = "",
         agent_id: str = CHAT_AGENT_ID,
+        *,
+        requested_by: str = "operator",
+        organization_id: str = "sentinel-demo",
+        department_id: Optional[str] = None,
+        actor_roles: Optional[Sequence[str]] = None,
     ) -> Tuple[str, List[str]]:
         """Compose the system prompt from the fleet base, the loaded skills and one prompt version.
 
@@ -220,15 +244,25 @@ class ChatService:
         """
         parts = [FLEET_BASE_PROMPT]
         digest: List[str] = []
+        effective_roles = list(actor_roles) if actor_roles is not None else ["operator"]
         agent = lifecycle_manager.get_agent(agent_id)
         if agent is None:
             raise ComponentAuthorizationError(f"Agent '{agent_id}' is not registered.")
 
         loaded = []
         for skill_id in skill_ids:
-            skill = skill_registry.get_skill(skill_id)
+            skill = skill_registry.get_visible(
+                skill_id,
+                requested_by=requested_by,
+                organization_id=organization_id,
+                department_id=department_id,
+                roles=effective_roles,
+            )
             if not skill:
-                raise ComponentAuthorizationError(f"Skill '{skill_id}' is not registered.")
+                # Do not disclose whether an opaque foreign component identifier exists.
+                raise ComponentAuthorizationError(
+                    f"Skill '{skill_id}' is not registered or unavailable."
+                )
             if skill.execution_gate != "auto":
                 raise ComponentAuthorizationError(
                     f"Skill '{skill_id}' is {skill.execution_gate}; it is not approved for execution."
@@ -255,7 +289,13 @@ class ChatService:
         )
 
         if prompt_id:
-            prompt = prompt_registry.get_prompt(prompt_id)
+            prompt = prompt_registry.get_visible(
+                prompt_id,
+                requested_by=requested_by,
+                organization_id=organization_id,
+                department_id=department_id,
+                roles=effective_roles,
+            )
             if prompt:
                 if prompt.requires_approval:
                     raise ComponentAuthorizationError(
@@ -269,6 +309,10 @@ class ChatService:
                     prompt_registry.get_version(prompt_id, prompt_version)
                     if prompt_version else None
                 )
+                if prompt_version and version is None:
+                    raise ComponentAuthorizationError(
+                        f"Prompt '{prompt_id}' version '{prompt_version}' is unavailable."
+                    )
                 text = version.text if version else prompt.current_text
                 inspection = gateway.model_armor.inspect_prompt(text)
                 if not inspection.is_safe:
@@ -279,7 +323,7 @@ class ChatService:
                 parts.append(f"# Prompt template: {prompt.title} (v{shown})\n{text}")
                 digest.append(f"prompt template      {prompt.id} v{shown}")
             else:
-                raise ComponentAuthorizationError(f"Prompt '{prompt_id}' is not registered.")
+                raise ComponentAuthorizationError(f"Prompt '{prompt_id}' is unavailable.")
         else:
             digest.append("prompt template      none selected")
 
@@ -308,7 +352,8 @@ class ChatService:
         system_prompt: str,
         user_message: str,
         model: str,
-        config_digest: str = ""
+        config_digest: str = "",
+        principal: Optional[RequestPrincipal] = None,
     ) -> BackendReply:
         agent = lifecycle_manager.get_agent(agent_id)
         if agent is None:
@@ -323,7 +368,8 @@ class ChatService:
                 "model": model,
                 "config_digest": config_digest
             },
-            tool_func=self._chat_completion
+            tool_func=self._chat_completion,
+            principal=principal,
         )
         if not result.success:
             return BackendReply(
@@ -369,6 +415,9 @@ class ChatService:
         prompt_id: str = "",
         prompt_version: str = "",
         owner_id: str = "operator",
+        organization_id: str = "sentinel-demo",
+        department_id: Optional[str] = None,
+        actor_roles: Optional[Sequence[str]] = None,
     ) -> Tuple[ChatSession, ChatMessage]:
         model = model or SUPPORTED_MODELS[0]
         skill_ids = list(skill_ids or [])
@@ -376,8 +425,12 @@ class ChatService:
         session = self._store.get(session_id) if session_id else None
         if session_id and (session is None or session.owner_id != owner_id):
             raise PermissionError("Chat session does not exist or belongs to another workspace.")
+        if session is not None and session.organization_id != organization_id:
+            raise PermissionError("Chat session belongs to another organization.")
         if session is None:
-            session = self.create_session(title=message[:60], owner_id=owner_id)
+            session = self.create_session(
+                title=message[:60], owner_id=owner_id, organization_id=organization_id
+            )
 
         session.messages.append(ChatMessage(
             message_id=_new_id("msg"),
@@ -385,7 +438,16 @@ class ChatService:
             content=message
         ))
 
-        span = telemetry.start_span("chat:send", CHAT_AGENT_ID, {"model": model})
+        telemetry_principal = RequestPrincipal(
+            user_id=owner_id,
+            data_owner_id=owner_id,
+            authenticated=False,
+            department=department_id,
+            organization_id=organization_id,
+        )
+        span = telemetry.start_span(
+            "chat:send", CHAT_AGENT_ID, {"model": model}, principal=telemetry_principal
+        )
         try:
             self._guard(message)
         except ChatBlockedError as blocked:
@@ -395,13 +457,22 @@ class ChatService:
             self._persist(session)
             return session, reply
 
-        system_prompt, digest = self.build_system_prompt(skill_ids, prompt_id, prompt_version)
+        system_prompt, digest = self.build_system_prompt(
+            skill_ids,
+            prompt_id,
+            prompt_version,
+            requested_by=owner_id,
+            organization_id=organization_id,
+            department_id=department_id,
+            actor_roles=actor_roles,
+        )
         backend_reply = await self._run_completion(
             agent_id=CHAT_AGENT_ID,
             system_prompt=system_prompt,
             user_message=message,
             model=model,
-            config_digest="\n".join(digest)
+            config_digest="\n".join(digest),
+            principal=telemetry_principal,
         )
         telemetry.end_span(span, status="OK")
 
@@ -431,6 +502,9 @@ class ChatService:
         prompt_id: str = "",
         prompt_version: str = "",
         owner_id: str = "operator",
+        organization_id: str = "sentinel-demo",
+        department_id: Optional[str] = None,
+        actor_roles: Optional[Sequence[str]] = None,
     ) -> Tuple[ChatSession, RaceRecord]:
         """Send one prompt to several models at once and record every lane.
 
@@ -448,10 +522,13 @@ class ChatService:
         session = self._store.get(session_id) if session_id else None
         if session_id and (session is None or session.owner_id != owner_id):
             raise PermissionError("Chat session does not exist or belongs to another workspace.")
+        if session is not None and session.organization_id != organization_id:
+            raise PermissionError("Chat session belongs to another organization.")
         if session is None:
             session = self.create_session(
                 title=f"Race: {message[:48]}",
                 owner_id=owner_id,
+                organization_id=organization_id,
             )
 
         record = RaceRecord(race_id=_new_id("race"), prompt=message)
@@ -476,17 +553,43 @@ class ChatService:
             self._persist(session)
             return session, record
 
-        system_prompt, digest = self.build_system_prompt(skill_ids, prompt_id, prompt_version)
+        system_prompt, digest = self.build_system_prompt(
+            skill_ids,
+            prompt_id,
+            prompt_version,
+            requested_by=owner_id,
+            organization_id=organization_id,
+            department_id=department_id,
+            actor_roles=actor_roles,
+        )
         config_digest = "\n".join(digest)
 
-        span = telemetry.start_span("chat:race", CHAT_AGENT_ID, {"lanes": str(len(models))})
+        span = telemetry.start_span(
+            "chat:race",
+            CHAT_AGENT_ID,
+            {"lanes": str(len(models))},
+            principal=RequestPrincipal(
+                user_id=owner_id,
+                data_owner_id=owner_id,
+                authenticated=False,
+                department=department_id,
+                organization_id=organization_id,
+            ),
+        )
         replies = await asyncio.gather(*[
             self._run_completion(
                 agent_id=RACE_LANE_AGENT_IDS[index],
                 system_prompt=system_prompt,
                 user_message=message,
                 model=model,
-                config_digest=config_digest
+                config_digest=config_digest,
+                principal=RequestPrincipal(
+                    user_id=owner_id,
+                    data_owner_id=owner_id,
+                    authenticated=False,
+                    department=department_id,
+                    organization_id=organization_id,
+                ),
             )
             for index, model in enumerate(models)
         ])

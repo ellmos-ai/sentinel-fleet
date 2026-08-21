@@ -95,7 +95,9 @@ class MultimodalExtractor:
             )
         except asyncio.TimeoutError:
             local = local_text.LocalTextResult(note="local parser exceeded the 8 second limit")
-        screen_verdict, screen_notes = self._screen_before_dispatch(filename, local, text_content)
+        screen_verdict, screen_notes = self._screen_before_dispatch(
+            filename, local, text_content, log_ref=doc_id
+        )
 
         if not self.api_key:
             logger.warning("No GEMINI_API_KEY - using the local extraction path")
@@ -109,7 +111,7 @@ class MultimodalExtractor:
                 "model dispatch blocked by privacy policy: RED, UNSCREENED and partially "
                 "screened documents stay local"
             )
-            logger.warning("%s (%s)", reason, filename)
+            logger.warning("%s (document %s)", reason, doc_id)
             return self._extract_without_model(
                 doc_id, filename, local, text_content, screen_notes + [reason]
             )
@@ -120,8 +122,9 @@ class MultimodalExtractor:
             return doc
         except Exception as exc:
             logger.warning(
-                "Gemini extraction failed (%s: %s) - falling back to the local extraction path",
-                type(exc).__name__, exc
+                "Gemini extraction failed (%s) for document %s - falling back to the local "
+                "extraction path",
+                type(exc).__name__, doc_id,
             )
             notes = screen_notes + [f"Gemini call failed ({type(exc).__name__}); read locally instead"]
             return self._extract_without_model(doc_id, filename, local, text_content, notes)
@@ -130,7 +133,9 @@ class MultimodalExtractor:
         self,
         filename: str,
         local: local_text.LocalTextResult,
-        text_content: Optional[str]
+        text_content: Optional[str],
+        *,
+        log_ref: str = "unassigned",
     ) -> tuple[PrivacyVerdict, List[str]]:
         """Classify the document's content before it can reach a model, and log the verdict.
 
@@ -145,10 +150,12 @@ class MultimodalExtractor:
         )
         telemetry.record_on_active_span(
             "privacy_screen",
-            {"document": filename, **verdict.as_span_payload()},
+            verdict.as_span_payload(),
         )
         if verdict.level is ScreenLevel.RED:
-            logger.warning("Privacy screen RED for %s: %s", filename, verdict.summary())
+            logger.warning(
+                "Privacy screen RED for document %s: %s", log_ref, verdict.summary()
+            )
         return verdict, [verdict.summary()]
 
     def _extract_without_model(
@@ -206,7 +213,7 @@ class MultimodalExtractor:
             + (f", {local.note}" if local.note else ""),
             *parse_notes,
         ]
-        logger.info("Local text-layer extraction for %s via %s", filename, local.backend)
+        logger.info("Local text-layer extraction for document %s via %s", doc_id, local.backend)
         return doc
 
     async def _extract_with_gemini(
@@ -240,7 +247,11 @@ class MultimodalExtractor:
         data = json.loads(self._strip_code_fence(response.text))
         doc = self._dict_to_document(doc_id, filename, data)
         doc.extraction_mode = ExtractionMode.GEMINI
-        logger.info("Gemini extraction succeeded for %s using %s", filename, settings.gemini_default_model)
+        logger.info(
+            "Gemini extraction succeeded for document %s using %s",
+            doc_id,
+            settings.gemini_default_model,
+        )
         return doc
 
     def _deterministic_extract(self, doc_id: str, filename: str, text: str) -> InvoiceDocument:

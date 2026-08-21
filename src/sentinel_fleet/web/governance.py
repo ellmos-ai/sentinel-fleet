@@ -37,14 +37,13 @@ from sentinel_fleet.core.policy_catalog import (
     policy_catalog,
 )
 from sentinel_fleet.core.policies import (
-    DEFAULT_MAX_CONSECUTIVE_STEPS,
     MATH_TOLERANCE_EUR,
     UST_REQUIRED_FIELDS,
 )
 from sentinel_fleet.core.telemetry import SpanRecord, telemetry
 from sentinel_fleet.core.users import DEMO_USER_ID, UserIdentity, user_registry
 from sentinel_fleet.uas import routines
-from sentinel_fleet.uas.task_templates import TaskTemplate, task_template_registry
+from sentinel_fleet.uas.task_templates import MAX_STEPS, TaskTemplate, task_template_registry
 from sentinel_fleet.uas.ticket_master import Ticket, TicketStatus, ticket_master
 
 # Span statuses the gateway writes when a call did not go through. Kept as one set so the board,
@@ -99,12 +98,12 @@ def policy_catalogue() -> List[Dict[str, Any]]:
             "checks": [],
         },
         {
-            "name": "Loop prevention / step budget",
-            "source": "core/policies.py :: PolicyEngine.evaluate_step_budget",
+            "name": "Bounded template chain",
+            "source": "uas/task_templates.py :: TaskTemplate._steps_form_a_valid_chain",
             "outcome": "block",
             "summary": (
-                f"An agent may take at most {DEFAULT_MAX_CONSECUTIVE_STEPS} consecutive gateway "
-                "steps without the run state advancing."
+                f"A task template may contain at most {MAX_STEPS} steps; larger chains are "
+                "rejected before storage and revalidated before enqueue."
             ),
             "checks": [],
         },
@@ -456,8 +455,6 @@ def agent_states(agents: Sequence[AgentIdentity], spans: Iterable[SpanRecord]) -
             "role": agent.role.value,
             "status": agent.status.value,
             "quarantine_reason": agent.quarantine_reason,
-            "consecutive_steps": agent.consecutive_steps,
-            "step_budget": DEFAULT_MAX_CONSECUTIVE_STEPS,
             "last_refusal_at": marker.start_time if marker else None,
             "last_refusal_status": marker.status if marker else "",
             "last_refusal_operation": marker.name if marker else "",
@@ -574,15 +571,29 @@ def ticket_catalogue(tickets: Sequence[Ticket], limit: int = 20) -> Dict[str, An
 # The board
 # ---------------------------------------------------------------------------
 
-def build_board(current_user_id: str = DEMO_USER_ID) -> Dict[str, Any]:
+def build_board(
+    current_user_id: str = DEMO_USER_ID,
+    *,
+    visible_agents: Optional[Sequence[AgentIdentity]] = None,
+    visible_spans: Optional[Sequence[SpanRecord]] = None,
+    visible_templates: Optional[Sequence[TaskTemplate]] = None,
+    visible_tickets: Optional[Sequence[Ticket]] = None,
+    visible_user_matrix: Optional[Dict[str, Any]] = None,
+    visible_policy_summary: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Read every register once and hand back the whole board.
 
     The single place in this module that touches a singleton. `gateway.permissions` rather than
     a fresh `PermissionRegistry()`: the board must answer from the same object the gateway
     consults, not from a second instance that merely starts out identical.
     """
-    agents = lifecycle_manager.list_fleet()
-    spans = list(telemetry.spans)
+    agents = list(lifecycle_manager.list_fleet() if visible_agents is None else visible_agents)
+    spans = list(telemetry.spans if visible_spans is None else visible_spans)
+    templates = list(
+        task_template_registry.list_all()
+        if visible_templates is None else visible_templates
+    )
+    tickets = list(ticket_master.list_all() if visible_tickets is None else visible_tickets)
     current_user = user_registry.get_user(current_user_id) or user_registry.require_user(DEMO_USER_ID)
 
     return {
@@ -590,20 +601,23 @@ def build_board(current_user_id: str = DEMO_USER_ID) -> Dict[str, Any]:
         "window": {
             "retained_spans": len(spans),
             "retention_limit": telemetry.spans.maxlen,
-            "exported_total": telemetry.get_exported_span_total(),
+            "exported_total": (
+                telemetry.get_exported_span_total()
+                if visible_spans is None else len(spans)
+            ),
             "otel_enabled": telemetry.otel_enabled,
         },
         "gate_sequence": GATE_SEQUENCE,
         "gate_sequence_source": GATE_SEQUENCE_SOURCE,
         "permissions": permission_matrix(agents, gateway.permissions),
-        "policies": policy_catalog.summary(gateway.permissions),
+        "policies": visible_policy_summary or policy_catalog.summary(gateway.permissions),
         "engine_checks": policy_catalogue(),
-        "users": user_registry.capability_matrix(),
+        "users": visible_user_matrix or user_registry.capability_matrix(),
         "binding_matrix": user_binding_matrix(current_user),
         "decisions": aggregate_decisions(spans),
         "evidence": evidence_trail(spans),
         "usage": usage_summary(spans),
         "agents": agent_states(agents, spans),
-        "plans": plan_catalogue(task_template_registry.list_all()),
-        "tickets": ticket_catalogue(ticket_master.list_all()),
+        "plans": plan_catalogue(templates),
+        "tickets": ticket_catalogue(tickets),
     }

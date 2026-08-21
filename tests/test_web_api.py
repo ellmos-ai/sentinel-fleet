@@ -152,7 +152,7 @@ async def test_private_upload_filename_is_not_copied_to_the_organization_task_pl
 
 
 @pytest.mark.asyncio
-async def test_ticket_create_and_approve(client):
+async def test_ticket_creator_can_read_status_but_cannot_self_approve(client):
     created = await client.post("/api/tickets/create", data={
         "title": "Release vendor payment",
         "description": "Operator signoff for a held payment run.",
@@ -166,12 +166,12 @@ async def test_ticket_create_and_approve(client):
     assert ticket["ticket_id"].startswith("TICK-")
 
     approved = await client.post(f"/api/tickets/{ticket['ticket_id']}/approve")
-    assert approved.status_code == 200
-    assert approved.json()["ticket"]["status"] == "approved"
+    assert approved.status_code == 403
 
-    # Re-resolving a settled ticket is a conflict, not a silent second approval
-    again = await client.post(f"/api/tickets/{ticket['ticket_id']}/approve")
-    assert again.status_code == 409
+    visible = await client.get("/api/tickets")
+    assert visible.status_code == 200
+    own = next(row for row in visible.json() if row["ticket_id"] == ticket["ticket_id"])
+    assert own["status"] == "pending_approval"
 
 
 @pytest.mark.asyncio
@@ -266,7 +266,7 @@ async def test_prompt_create_is_advisory_but_admin_versioning_is_locked(client):
         "change_summary": "Handle partial payments"
     })
     assert bumped.status_code == 403
-    assert "Authenticated administration is not configured" in bumped.json()["detail"]
+    assert "locked in the public demo" in bumped.json()["detail"]
 
 
 @pytest.mark.asyncio

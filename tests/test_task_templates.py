@@ -24,6 +24,15 @@ async def client():
         yield ac
 
 
+async def _owned_template(client, **fields):
+    access = (await client.get("/api/access/me")).json()
+    return task_template_registry.create_template(
+        owner=access["share_id"],
+        organization_id=access["organization_id"],
+        **fields,
+    )
+
+
 def test_create_and_get_template():
     template = task_template_registry.create_template(
         name="Reconcile bank statements",
@@ -79,16 +88,25 @@ def test_non_owner_cannot_delete_a_shared_template():
 
 
 def test_non_owner_removes_from_own_view_instead_of_deleting():
-    template = task_template_registry.create_template(name="Shared onboarding checklist", owner="frank")
+    template = task_template_registry.create_template(
+        name="Shared onboarding checklist", owner="frank", visibility="organization",
+        organization_id="sentinel-demo",
+    )
 
     updated = task_template_registry.remove_for_viewer(template.template_id, "grace")
     assert "grace" in updated.removed_by
 
     # Gone from grace's own listing...
-    assert template.template_id not in {t.template_id for t in task_template_registry.list_all(viewer="grace")}
+    assert template.template_id not in {
+        t.template_id
+        for t in task_template_registry.list_visible("grace", "sentinel-demo")
+    }
     # ...but the template itself, and everyone else's view of it, is untouched.
     assert task_template_registry.get_template(template.template_id) is not None
-    assert template.template_id in {t.template_id for t in task_template_registry.list_all(viewer="frank")}
+    assert template.template_id in {
+        t.template_id
+        for t in task_template_registry.list_visible("frank", "sentinel-demo")
+    }
     assert template.template_id in {t.template_id for t in task_template_registry.list_all()}
 
     # Hiding twice is a no-op, not two entries in the list.
@@ -100,15 +118,24 @@ def test_non_owner_removes_from_own_view_instead_of_deleting():
 def test_restore_for_viewer_undoes_a_hide():
     """`restore_for_viewer()` is `remove_for_viewer()`'s mirror action (concept doc, section
     D Phase 2 "removed_by-Liste") - the "hidden for you" panel's Restore button."""
-    template = task_template_registry.create_template(name="Shared audit checklist", owner="henry")
+    template = task_template_registry.create_template(
+        name="Shared audit checklist", owner="henry", visibility="organization",
+        organization_id="sentinel-demo",
+    )
 
     task_template_registry.remove_for_viewer(template.template_id, "ines")
     assert template.template_id in {t.template_id for t in task_template_registry.list_hidden_for_viewer("ines")}
-    assert template.template_id not in {t.template_id for t in task_template_registry.list_all(viewer="ines")}
+    assert template.template_id not in {
+        t.template_id
+        for t in task_template_registry.list_visible("ines", "sentinel-demo")
+    }
 
     restored = task_template_registry.restore_for_viewer(template.template_id, "ines")
     assert "ines" not in restored.removed_by
-    assert template.template_id in {t.template_id for t in task_template_registry.list_all(viewer="ines")}
+    assert template.template_id in {
+        t.template_id
+        for t in task_template_registry.list_visible("ines", "sentinel-demo")
+    }
     assert task_template_registry.list_hidden_for_viewer("ines") == []
 
 
@@ -236,6 +263,20 @@ def test_zero_steps_is_rejected():
     just under the new "at least 1" wording (concept doc, section E.4)."""
     with pytest.raises(ValidationError, match="at least 1 step"):
         TaskTemplate(template_id="TMPL-EMPTY", name="No steps", steps=[])
+
+
+def test_more_than_the_bounded_chain_size_is_rejected():
+    from sentinel_fleet.uas.task_templates import MAX_STEPS
+
+    with pytest.raises(ValidationError, match=f"at most {MAX_STEPS} steps"):
+        TaskTemplate(
+            template_id="TMPL-TOO-LARGE",
+            name="Too many steps",
+            steps=[
+                Step(step_id=f"step-{index}", position=index)
+                for index in range(MAX_STEPS + 1)
+            ],
+        )
 
 
 def test_duplicate_step_ids_are_rejected():
@@ -387,7 +428,7 @@ async def test_create_task_template_accepts_a_valid_multi_step_array(client):
 @pytest.mark.asyncio
 async def test_create_task_template_rejects_steps_with_duplicate_positions(client):
     """Both steps default to position=0 here - rejected for a duplicate position, not for
-    having "too many" steps (that rule no longer exists, see the test above)."""
+    exceeding the independent eight-step chain cap."""
     response = await client.post("/api/task-templates", data={
         "name": "Explicit steps array, duplicate positions",
         "steps": '[{"step_id": "a", "position": 0}, {"step_id": "b", "position": 0}]'
@@ -412,7 +453,7 @@ async def test_create_task_template_rejects_malformed_steps_json(client):
 
 @pytest.mark.asyncio
 async def test_update_steps_endpoint_replaces_the_whole_list(client):
-    template = task_template_registry.create_template(name="Editable steps", owner="petra")
+    template = await _owned_template(client, name="Editable steps")
 
     response = await client.put(f"/api/task-templates/{template.template_id}/steps", data={
         "steps": '[{"step_id": "a", "position": 0, "custom_prompt_text": "First."}, '
@@ -430,8 +471,8 @@ async def test_update_steps_endpoint_replaces_the_whole_list(client):
 async def test_update_steps_endpoint_reorders_by_resubmitting_positions(client):
     """"Umordnen" is the same call as add/change/remove: the client re-sends every step with
     its new position - here a→1, b→0 swaps the execution order."""
-    template = task_template_registry.create_template(
-        name="Reorder probe", owner="quinn",
+    template = await _owned_template(
+        client, name="Reorder probe",
         steps=[Step(step_id="a", position=0), Step(step_id="b", position=1)]
     )
 
@@ -453,21 +494,21 @@ async def test_update_steps_endpoint_returns_404_for_a_missing_template(client):
 
 @pytest.mark.asyncio
 async def test_update_steps_endpoint_rejects_malformed_json(client):
-    template = task_template_registry.create_template(name="Bad JSON target", owner="rio")
+    template = await _owned_template(client, name="Bad JSON target")
     response = await client.put(f"/api/task-templates/{template.template_id}/steps", data={"steps": "not json"})
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_update_steps_endpoint_rejects_an_empty_array(client):
-    template = task_template_registry.create_template(name="Empty array target", owner="sana")
+    template = await _owned_template(client, name="Empty array target")
     response = await client.put(f"/api/task-templates/{template.template_id}/steps", data={"steps": "[]"})
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_update_steps_endpoint_rejects_gappy_positions(client):
-    template = task_template_registry.create_template(name="Gap target", owner="tariq")
+    template = await _owned_template(client, name="Gap target")
     response = await client.put(f"/api/task-templates/{template.template_id}/steps", data={
         "steps": '[{"step_id": "a", "position": 0}, {"step_id": "b", "position": 5}]'
     })
@@ -477,8 +518,8 @@ async def test_update_steps_endpoint_rejects_gappy_positions(client):
 
 @pytest.mark.asyncio
 async def test_list_endpoint_carries_steps_and_step_count_for_the_editor(client):
-    template = task_template_registry.create_template(
-        name="Two-step for the dashboard", owner="vik",
+    template = await _owned_template(
+        client, name="Two-step for the dashboard",
         steps=[Step(step_id="b", position=1), Step(step_id="a", position=0)]
     )
 
@@ -493,12 +534,12 @@ async def test_list_endpoint_carries_steps_and_step_count_for_the_editor(client)
 
 @pytest.mark.asyncio
 async def test_dashboard_shows_a_step_count_chip_for_a_multi_step_template():
-    task_template_registry.create_template(
-        name="Chip visibility probe", owner="wren",
-        steps=[Step(step_id="a", position=0), Step(step_id="b", position=1)]
-    )
-
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        await _owned_template(
+            ac,
+            name="Chip visibility probe",
+            steps=[Step(step_id="a", position=0), Step(step_id="b", position=1)],
+        )
         body = (await ac.get("/")).text
     assert "2 steps" in body
 
@@ -508,7 +549,7 @@ async def test_dashboard_shows_the_history_toggle_and_wizard_entry_points(client
     """Markup guard for the two Phase-2 UI additions that render unconditionally once at least
     one template exists (concept doc, section D Phase 2 "Verlauf-Ansicht"/"Wizard-UI").
     """
-    template = task_template_registry.create_template(name="History toggle probe", owner="oskar")
+    template = await _owned_template(client, name="History toggle probe")
 
     body = (await client.get("/")).text
     assert f"toggleHistoryPanel(\"{template.template_id}\"" in body
@@ -518,7 +559,7 @@ async def test_dashboard_shows_the_history_toggle_and_wizard_entry_points(client
 
 @pytest.mark.asyncio
 async def test_update_steps_endpoint_rejects_an_unsupported_race_model(client):
-    template = task_template_registry.create_template(name="Bad race model target", owner="uma")
+    template = await _owned_template(client, name="Bad race model target")
     response = await client.put(f"/api/task-templates/{template.template_id}/steps", data={
         "steps": '[{"step_id": "a", "position": 0, "execution_pattern": "race", '
                  '"race_models": ["gemini-3.5-flash", "made-up-model"]}]'
@@ -534,11 +575,12 @@ async def test_update_steps_endpoint_rejects_an_unsupported_race_model(client):
 
 @pytest.mark.asyncio
 async def test_remove_for_me_endpoint_hides_and_restore_for_me_undoes_it(client):
-    template = task_template_registry.create_template(name="Shared onboarding pack", owner="xena")
+    access = (await client.get("/api/access/me")).json()
+    template = await _owned_template(client, name="Shared onboarding pack")
 
     hide = await client.post(f"/api/task-templates/{template.template_id}/remove-for-me", data={"viewer": "yara"})
     assert hide.status_code == 200
-    assert "member:demo" in hide.json()["template"]["removed_by"]
+    assert access["share_id"] in hide.json()["template"]["removed_by"]
     assert "yara" not in hide.json()["template"]["removed_by"]
 
     listing = await client.get("/api/task-templates", params={"viewer": "member:demo"})
@@ -546,30 +588,26 @@ async def test_remove_for_me_endpoint_hides_and_restore_for_me_undoes_it(client)
 
     restore = await client.post(f"/api/task-templates/{template.template_id}/restore-for-me", data={"viewer": "yara"})
     assert restore.status_code == 200
-    assert "member:demo" not in restore.json()["template"]["removed_by"]
+    assert access["share_id"] not in restore.json()["template"]["removed_by"]
 
     listing_after = await client.get("/api/task-templates", params={"viewer": "member:demo"})
     assert template.template_id in {r["template_id"] for r in listing_after.json()}
 
 
 @pytest.mark.asyncio
-async def test_index_viewer_query_param_filters_the_tasks_card_and_shows_the_hidden_panel(client):
+async def test_index_identity_alias_is_ignored_and_hidden_panel_uses_principal(client):
     template = task_template_registry.create_template(
-        name="Zeds shared checklist", owner="zed", visibility="organization"
+        name="Zeds shared checklist", owner="zed", visibility="organization",
+        organization_id="sentinel-demo",
     )
     await client.post(f"/api/task-templates/{template.template_id}/remove-for-me", data={"viewer": "amir"})
 
     operator_view = await client.get("/", params={"user": "operator"})
-    assert "Zeds shared checklist" in operator_view.text
-
-    # The fixed demo member hid it - gone from that Tasks card, but surfaced in the panel with
-    # a Restore action, not silently dropped. The panel accumulates across every test that has
-    # ever hidden something for "amir" (LocalJsonStore persists to disk, concept doc, section
-    # A.2's storage pattern), so this checks the specific row, not an exact count.
     member_view = await client.get("/", params={"viewer": "member:demo"})
-    assert "Hidden for you (" in member_view.text
-    assert f'restoreTemplateForViewer("{template.template_id}", "member:demo")' in member_view.text
-    assert 'value="member:demo"' in member_view.text
+    expected = f'restoreTemplateForViewer("{template.template_id}"'
+    assert expected in operator_view.text
+    assert expected in member_view.text
+    assert "legacy ?user= and ?viewer= values are ignored" in operator_view.text
 
 
 @pytest.mark.asyncio
@@ -578,9 +616,15 @@ async def test_index_only_offers_hide_for_shared_not_own_templates(client):
     a template still on its default `visibility="own"` is not shared yet, no matter who owns
     it, so the button must stay off even when someone else is viewing.
     """
-    own = task_template_registry.create_template(name="Demo member draft", owner="member:demo")
+    access = (await client.get("/api/access/me")).json()
+    own = task_template_registry.create_template(
+        name="Demo member draft",
+        owner=access["share_id"],
+        organization_id=access["organization_id"],
+    )
     shared = task_template_registry.create_template(
-        name="Amir sees this shared one", owner="brynn", visibility="organization"
+        name="Amir sees this shared one", owner="brynn", visibility="organization",
+        organization_id=access["organization_id"],
     )
 
     body = (await client.get("/", params={"viewer": "member:demo"})).text.replace('"', "'")
@@ -626,8 +670,13 @@ async def test_wizard_prompt_fork_is_locked_but_existing_version_can_be_pinned(c
 
 @pytest.mark.asyncio
 async def test_wizard_skill_fork_is_locked_but_existing_skill_can_be_attached(client):
-    skill = skill_registry.create_skill(
-        name="wizard fork source", pillar="domain", description="Base skill for a wizard fork test"
+    access = (await client.get("/api/access/me")).json()
+    skill = skill_registry.create_skill_authorized(
+        name="wizard fork source",
+        pillar="domain",
+        description="Base skill for a wizard fork test",
+        owner_id=access["share_id"],
+        organization_id=access["organization_id"],
     )
 
     fork = await client.post(f"/api/skills/{skill.skill_id}/version", data={

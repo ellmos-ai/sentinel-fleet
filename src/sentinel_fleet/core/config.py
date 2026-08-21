@@ -22,6 +22,18 @@ class Settings(BaseModel):
     # The public build demonstrates authorization without pretending the query-string identity
     # is authentication.  In demo mode, sensitive administration remains server-side locked.
     demo_mode: bool = Field(default_factory=lambda: os.getenv("DEMO_MODE", "true").lower() == "true")
+    demo_workspace_write_limit: int = Field(
+        default_factory=lambda: int(os.getenv("DEMO_WORKSPACE_WRITES_PER_HOUR", "30"))
+    )
+    demo_global_write_limit: int = Field(
+        default_factory=lambda: int(os.getenv("DEMO_GLOBAL_WRITES_PER_HOUR", "240"))
+    )
+    demo_workspace_external_limit: int = Field(
+        default_factory=lambda: int(os.getenv("DEMO_WORKSPACE_EXTERNAL_PER_HOUR", "5"))
+    )
+    demo_global_external_limit: int = Field(
+        default_factory=lambda: int(os.getenv("DEMO_GLOBAL_EXTERNAL_PER_HOUR", "60"))
+    )
     # Non-demo requests are accepted only after validating IAP's signed JWT for this audience
     # and mapping one of its immutable claims to a registered SentinelFleet user.
     iap_audience: str = Field(default_factory=lambda: os.getenv("IAP_AUDIENCE", ""))

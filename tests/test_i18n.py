@@ -59,11 +59,6 @@ ALLOWED_GERMAN = {
         "rechnungsbetrag",
         "^(?:invoice|rechnung|bill",
     ),
-    # "RechnungsSteller" is the proper name of the upstream module this engine derives from,
-    # listed like the other component names (coma, clutch, law-checker).
-    "sentinel_fleet/domains/omniledger/reconciliation.py": (
-        "based on RechnungsSteller",
-    ),
     "sentinel_fleet/web/templates/blueprint.html": (
         "chip-item\">RechnungsSteller<",
     ),

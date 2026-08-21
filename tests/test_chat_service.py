@@ -188,7 +188,7 @@ async def test_chat_creator_can_share_read_access_without_sharing_write_access()
         AsyncClient(transport=transport, base_url="http://test") as alice,
         AsyncClient(transport=transport, base_url="http://test") as bob,
     ):
-        bob_id = (await bob.get("/api/access/me")).json()["data_owner_id"]
+        bob_id = (await bob.get("/api/access/me")).json()["share_id"]
         created = await alice.post("/api/chat/send", json={"message": "Share this chat"})
         session_id = created.json()["session_id"]
 

@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.core.gateway import gateway
+from sentinel_fleet.core.access import RequestPrincipal
 from sentinel_fleet.core.telemetry import telemetry
 from sentinel_fleet.core.web_reader import read_page
 
@@ -54,7 +55,9 @@ async def _read_web_page_tool(url: str) -> Dict[str, Any]:
     return page
 
 
-async def gather_sources(urls: List[str], emit=None) -> List[Dict[str, Any]]:
+async def gather_sources(
+    urls: List[str], emit=None, *, principal: Optional[RequestPrincipal] = None
+) -> List[Dict[str, Any]]:
     """Fetch every URL as `agent:web-reader`, in order, and report what each one did.
 
     Sequential on purpose. The gateway holds one lock per agent, so every fetch under this
@@ -88,6 +91,7 @@ async def gather_sources(urls: List[str], emit=None) -> List[Dict[str, Any]]:
                 tool_name=READ_WEB_PAGE_TOOL,
                 tool_args={"url": url},
                 tool_func=_read_web_page_tool,
+                principal=principal,
             )
         except Exception as exc:  # a gateway verdict on one source is not the run's verdict
             sources.append({"url": url, "status": "refused", "note": str(exc)})

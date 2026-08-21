@@ -22,6 +22,7 @@ from sentinel_fleet.core.storage import BaseStore, get_store, requested_backend
 
 
 ArtifactVisibility = Literal["private", "department", "organization"]
+ArtifactRetentionPolicy = Literal["creator_managed", "retain_until"]
 
 
 class ArtifactRecord(BaseModel):
@@ -31,13 +32,15 @@ class ArtifactRecord(BaseModel):
     byte_size: int
     sha256: str
     creator_id: str
+    organization_id: str = "legacy-unassigned"
     visibility: ArtifactVisibility = "private"
     department_id: Optional[str] = None
     shared_with: List[str] = Field(default_factory=list)
     source_kind: str = "generated"
     source_ref: str = ""
     created_at: float = Field(default_factory=time.time)
-    retention_policy: str = "creator_managed_no_automatic_expiry"
+    retention_policy: ArtifactRetentionPolicy = "creator_managed"
+    retain_until: Optional[float] = None
     encryption: str = ""
     legal_hold: bool = False
     deleted_at: Optional[float] = None
@@ -45,10 +48,16 @@ class ArtifactRecord(BaseModel):
 
     @model_validator(mode="after")
     def _scope_is_coherent(self) -> "ArtifactRecord":
+        if not self.organization_id:
+            raise ValueError("a result document needs an organization_id")
         if self.visibility == "department" and not self.department_id:
             raise ValueError("department-visible result needs a department_id")
         if self.visibility != "department":
             self.department_id = None
+        if self.retention_policy == "retain_until" and self.retain_until is None:
+            raise ValueError("retain_until policy needs a timestamp")
+        if self.retention_policy == "creator_managed":
+            self.retain_until = None
         return self
 
 
@@ -213,26 +222,40 @@ class ArtifactService:
         record: ArtifactRecord,
         requested_by: str,
         requested_department: Optional[str] = None,
+        requested_organization: str = "sentinel-demo",
     ) -> bool:
+        if record.organization_id in {"", "legacy-unassigned"}:
+            return False
+        if record.organization_id != requested_organization:
+            return False
         return (
             record.creator_id == requested_by
-            or record.visibility == "organization"
+            or (
+                record.visibility == "organization"
+            )
             or (
                 record.visibility == "department"
                 and bool(requested_department)
                 and record.department_id == requested_department
             )
-            or requested_by in record.shared_with
+            or (
+                requested_by in record.shared_with
+            )
         )
 
     def list_visible(
-        self, requested_by: str, requested_department: Optional[str] = None
+        self,
+        requested_by: str,
+        requested_department: Optional[str] = None,
+        requested_organization: str = "sentinel-demo",
     ) -> List[ArtifactRecord]:
         return sorted(
             [
                 record for record in self._store.list_all()
                 if record.deleted_at is None
-                and self.can_read(record, requested_by, requested_department)
+                and self.can_read(
+                    record, requested_by, requested_department, requested_organization
+                )
             ],
             key=lambda record: record.created_at,
             reverse=True,
@@ -245,6 +268,7 @@ class ArtifactService:
         filename: str,
         media_type: str,
         creator_id: str,
+        creator_organization: str = "sentinel-demo",
         creator_department: Optional[str] = None,
         visibility: ArtifactVisibility = "private",
         shared_with: Optional[List[str]] = None,
@@ -265,6 +289,7 @@ class ArtifactService:
             if (
                 existing.deleted_at is None
                 and existing.creator_id == creator_id
+                and existing.organization_id == creator_organization
                 and existing.source_kind == source_kind
                 and existing.source_ref == source_ref
                 and existing.filename == clean_name
@@ -273,7 +298,12 @@ class ArtifactService:
                 try:
                     # Metadata alone is not durability. Reuse only when the bytes still exist
                     # and pass the same integrity check a later download will enforce.
-                    self.download(existing.artifact_id, creator_id)
+                    self.download(
+                        existing.artifact_id,
+                        creator_id,
+                        creator_department,
+                        creator_organization,
+                    )
                     return existing
                 except ArtifactBackendError:
                     # Keep the broken record as audit evidence and write a fresh object/record.
@@ -287,6 +317,7 @@ class ArtifactService:
             byte_size=len(content),
             sha256=digest,
             creator_id=creator_id,
+            organization_id=creator_organization,
             visibility=visibility,
             department_id=creator_department if visibility == "department" else None,
             shared_with=self._clean_shared_with(shared_with or [], creator_id),
@@ -316,13 +347,16 @@ class ArtifactService:
         artifact_id: str,
         requested_by: str,
         requested_department: Optional[str] = None,
+        requested_organization: str = "sentinel-demo",
     ) -> ArtifactRecord:
         record = self._store.get(artifact_id)
         if record is None:
             raise ArtifactNotFoundError(artifact_id)
         if record.deleted_at is not None:
             raise ArtifactNotFoundError(artifact_id)
-        if not self.can_read(record, requested_by, requested_department):
+        if not self.can_read(
+            record, requested_by, requested_department, requested_organization
+        ):
             # Opaque IDs are not an enumeration oracle.
             raise ArtifactNotFoundError(artifact_id)
         return record
@@ -332,8 +366,11 @@ class ArtifactService:
         artifact_id: str,
         requested_by: str,
         requested_department: Optional[str] = None,
+        requested_organization: str = "sentinel-demo",
     ) -> tuple[ArtifactRecord, bytes]:
-        record = self.get_record(artifact_id, requested_by, requested_department)
+        record = self.get_record(
+            artifact_id, requested_by, requested_department, requested_organization
+        )
         content = self.blob_store.get(self._object_key(artifact_id))
         digest = hashlib.sha256(content).hexdigest()
         if len(content) != record.byte_size or digest != record.sha256:
@@ -345,6 +382,7 @@ class ArtifactService:
         artifact_id: str,
         *,
         requested_by: str,
+        requested_organization: str = "sentinel-demo",
         requested_department: Optional[str] = None,
         visibility: ArtifactVisibility,
         shared_with: List[str],
@@ -354,6 +392,8 @@ class ArtifactService:
             raise ArtifactNotFoundError(artifact_id)
         if record.creator_id != requested_by:
             raise ArtifactAccessError("Only the document creator may change sharing")
+        if record.organization_id != requested_organization:
+            raise ArtifactAccessError("The document belongs to another organization")
         if visibility == "department" and not requested_department:
             raise ArtifactAccessError("A user without a department cannot use department sharing")
         record.visibility = visibility
@@ -362,26 +402,87 @@ class ArtifactService:
         self._store.put(artifact_id, record)
         return record
 
-    def delete_result(self, artifact_id: str, *, requested_by: str) -> ArtifactRecord:
+    def delete_result(
+        self,
+        artifact_id: str,
+        *,
+        requested_by: str,
+        requested_organization: str = "sentinel-demo",
+    ) -> ArtifactRecord:
         """Make a result inaccessible, then remove its bytes; retain a metadata tombstone."""
         record = self._store.get(artifact_id)
         if record is None:
             raise ArtifactNotFoundError(artifact_id)
         if record.deleted_at is not None:
-            if record.deletion_requested_by != requested_by:
+            if (
+                record.deletion_requested_by != requested_by
+                or record.organization_id != requested_organization
+            ):
                 raise ArtifactNotFoundError(artifact_id)
             # A prior byte deletion may have failed after the tombstone was committed.
             self.blob_store.delete(self._object_key(artifact_id))
             return record
         if record.creator_id != requested_by:
             raise ArtifactAccessError("Only the document creator may delete it")
+        if record.organization_id != requested_organization:
+            raise ArtifactAccessError("The document belongs to another organization")
         if record.legal_hold:
             raise ArtifactAccessError("The document is under legal hold and cannot be deleted")
+        if (
+            record.retention_policy == "retain_until"
+            and record.retain_until is not None
+            and record.retain_until > time.time()
+        ):
+            raise ArtifactAccessError("The document must be retained until its retention date")
         record.deleted_at = time.time()
         record.deletion_requested_by = requested_by
+        # Keep only the ACL and lifecycle evidence needed for a safe retry/audit. Names,
+        # hashes, source references and former shares are content-bearing metadata.
+        record.filename = "deleted-result"
+        record.media_type = "application/octet-stream"
+        record.byte_size = 0
+        record.sha256 = ""
+        record.source_kind = "deleted"
+        record.source_ref = ""
+        record.shared_with = []
         self._store.put(artifact_id, record)
         self.blob_store.delete(self._object_key(artifact_id))
         return record
+
+    def set_retention(
+        self,
+        artifact_id: str,
+        *,
+        requested_organization: str,
+        policy: ArtifactRetentionPolicy,
+        retain_until: Optional[float],
+    ) -> ArtifactRecord:
+        record = self._store.get(artifact_id)
+        if record is None or record.organization_id != requested_organization:
+            raise ArtifactNotFoundError(artifact_id)
+        if record.legal_hold and policy == "creator_managed":
+            raise ArtifactAccessError("Legal hold prevents reducing retention")
+        if policy == "retain_until":
+            if retain_until is None or retain_until <= time.time():
+                raise ValueError("retain_until must be in the future")
+            if record.retain_until is not None and retain_until < record.retain_until:
+                raise ArtifactAccessError("Retention may be extended but not shortened")
+        record.retention_policy = policy
+        record.retain_until = retain_until if policy == "retain_until" else None
+        return self._store.put(artifact_id, record)
+
+    def set_legal_hold(
+        self,
+        artifact_id: str,
+        *,
+        requested_organization: str,
+        enabled: bool,
+    ) -> ArtifactRecord:
+        record = self._store.get(artifact_id)
+        if record is None or record.organization_id != requested_organization:
+            raise ArtifactNotFoundError(artifact_id)
+        record.legal_hold = enabled
+        return self._store.put(artifact_id, record)
 
     @staticmethod
     def _clean_shared_with(values: List[str], creator_id: str) -> List[str]:

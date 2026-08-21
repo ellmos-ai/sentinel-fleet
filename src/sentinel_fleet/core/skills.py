@@ -3,7 +3,7 @@
 import os
 import re
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 # Deliberately a top-level import, not a lazy one inside the parser: when pyyaml is
 # missing, the old in-function `import yaml` raised inside the parser's broad
 # `except Exception`, every SKILL.md silently became None and the registry degraded to
@@ -15,6 +15,12 @@ from sentinel_fleet.core.errors import SkillNotFoundError, SkillSchemaValidation
 from sentinel_fleet.core.storage import BaseStore, get_store
 
 
+LEGACY_SCOPE = "legacy-unassigned"
+DEMO_ORGANIZATION = "sentinel-demo"
+SYSTEM_COMPONENT_OWNER = "system:sentinel"
+ComponentVisibility = Literal["private", "department", "organization", "restricted", "public"]
+
+
 class SkillVersionRecord(BaseModel):
     version_id: str
     skill_id: str
@@ -22,6 +28,7 @@ class SkillVersionRecord(BaseModel):
     change_summary: str
     required_tools: List[str]
     created_at: float = Field(default_factory=time.time)
+    created_by: str = "operator"
 
 
 class AgentSkill(BaseModel):
@@ -40,9 +47,16 @@ class AgentSkill(BaseModel):
     fork_of: Optional[str] = None
     language: str = "en"
     # Permissions & Governance
-    visibility: str = "organization"  # public | organization | restricted
+    # Legacy records have no attributable tenant and therefore default to private.
+    owner_id: str = LEGACY_SCOPE
+    organization_id: str = LEGACY_SCOPE
+    department_id: Optional[str] = None
+    visibility: ComponentVisibility = "private"
+    global_public: bool = False
     execution_gate: str = "auto"  # auto | ask_permission | locked
     allowed_agents: List[str] = Field(default_factory=lambda: ["*"])
+    allowed_roles: List[str] = Field(default_factory=list)
+    allowed_users: List[str] = Field(default_factory=list)
     compatibility: Dict[str, bool] = Field(default_factory=lambda: {
         "google_adk": True,
         "gemini_3_5": True,
@@ -93,8 +107,13 @@ class ComponentV1SkillLoader:
                 status=data.get("status", "active"),
                 fork_of=data.get("fork_of"),
                 language=data.get("language", "en"),
+                owner_id=SYSTEM_COMPONENT_OWNER,
+                organization_id=DEMO_ORGANIZATION,
+                department_id=data.get("department_id"),
                 visibility=data.get("visibility", "organization"),
                 execution_gate=data.get("execution_gate", "auto"),
+                allowed_roles=data.get("allowed_roles", []),
+                allowed_users=data.get("allowed_users", []),
                 compatibility=data.get("compatibility", {
                     "google_adk": True,
                     "gemini_3_5": True,
@@ -163,6 +182,14 @@ class SkillRegistry:
                 existing = self._store.get(s.skill_id)
                 if existing is None:
                     existing = self._store.put(s.skill_id, s)
+                elif (
+                    existing.origin == "bundled"
+                    and existing.owner_id == LEGACY_SCOPE
+                    and existing.organization_id == LEGACY_SCOPE
+                ):
+                    existing.owner_id = SYSTEM_COMPONENT_OWNER
+                    existing.organization_id = DEMO_ORGANIZATION
+                    existing = self._store.put(existing.skill_id, existing)
                 self._skills[s.skill_id] = existing
         else:
             # Loud, not silent: a missing bundled library is a deployment defect. Durable
@@ -191,6 +218,9 @@ class SkillRegistry:
                 pillar="domain",
                 version="1.4.0",
                 description="Automated check of statutory mandatory fields, VAT ID and arithmetic consistency under German tax law.",
+                owner_id=SYSTEM_COMPONENT_OWNER,
+                organization_id=DEMO_ORGANIZATION,
+                visibility="organization",
                 required_tools=["validate_tax_compliance"],
                 tags=["tax", "compliance", "ustg", "finance", "audit"]
             ),
@@ -200,6 +230,9 @@ class SkillRegistry:
                 pillar="domain",
                 version="2.1.0",
                 description="Pixel-accurate extraction of tabular and unstructured data with Gemini 3.5 Flash Vision.",
+                owner_id=SYSTEM_COMPONENT_OWNER,
+                organization_id=DEMO_ORGANIZATION,
+                visibility="organization",
                 required_tools=["extract_invoice_multimodal"],
                 tags=["vision", "ocr", "multimodal", "gemini", "pdf"]
             ),
@@ -209,6 +242,9 @@ class SkillRegistry:
                 pillar="control",
                 version="3.0.0",
                 description="Inline prompt injection scanner, jailbreak blocker and PII masking filter.",
+                owner_id=SYSTEM_COMPONENT_OWNER,
+                organization_id=DEMO_ORGANIZATION,
+                visibility="organization",
                 required_tools=["inspect_prompt", "sanitize_pii"],
                 tags=["security", "armor", "zero-trust", "guardrail"]
             )
@@ -217,6 +253,14 @@ class SkillRegistry:
             existing = self._store.get(s.skill_id)
             if existing is None:
                 existing = self._store.put(s.skill_id, s)
+            elif (
+                existing.origin == "bundled"
+                and existing.owner_id == LEGACY_SCOPE
+                and existing.organization_id == LEGACY_SCOPE
+            ):
+                existing.owner_id = SYSTEM_COMPONENT_OWNER
+                existing.organization_id = DEMO_ORGANIZATION
+                existing = self._store.put(existing.skill_id, existing)
             self._skills[s.skill_id] = existing
 
     def list_all(self) -> List[AgentSkill]:
@@ -224,6 +268,60 @@ class SkillRegistry:
 
     def get_skill(self, skill_id: str) -> Optional[AgentSkill]:
         return self._skills.get(skill_id)
+
+    @staticmethod
+    def can_read(
+        skill: AgentSkill,
+        requested_by: str,
+        organization_id: str,
+        department_id: Optional[str] = None,
+        roles: Optional[List[str]] = None,
+    ) -> bool:
+        if skill.visibility == "public" and skill.global_public:
+            return True
+        if skill.organization_id != organization_id:
+            return False
+        if skill.owner_id == requested_by:
+            return True
+        if skill.visibility == "organization":
+            return True
+        if skill.visibility == "department":
+            return bool(skill.department_id and skill.department_id == department_id)
+        if skill.visibility == "restricted":
+            if skill.department_id and skill.department_id != department_id:
+                return False
+            return requested_by in skill.allowed_users or bool(
+                set(roles or []).intersection(skill.allowed_roles)
+            )
+        return False
+
+    def list_visible(
+        self,
+        requested_by: str,
+        organization_id: str,
+        department_id: Optional[str] = None,
+        roles: Optional[List[str]] = None,
+    ) -> List[AgentSkill]:
+        return [
+            skill
+            for skill in self._skills.values()
+            if self.can_read(skill, requested_by, organization_id, department_id, roles)
+        ]
+
+    def get_visible(
+        self,
+        skill_id: str,
+        requested_by: str,
+        organization_id: str,
+        department_id: Optional[str] = None,
+        roles: Optional[List[str]] = None,
+    ) -> Optional[AgentSkill]:
+        skill = self.get_skill(skill_id)
+        if skill is None or not self.can_read(
+            skill, requested_by, organization_id, department_id, roles
+        ):
+            return None
+        return skill
 
     def find_skills(self, query: str) -> List[AgentSkill]:
         """ControlCenter-style keyword and semantic intent matcher."""
@@ -242,6 +340,22 @@ class SkillRegistry:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [item[1] for item in scored]
 
+    def find_visible(
+        self,
+        query: str,
+        requested_by: str,
+        organization_id: str,
+        department_id: Optional[str] = None,
+        roles: Optional[List[str]] = None,
+    ) -> List[AgentSkill]:
+        visible_ids = {
+            skill.skill_id
+            for skill in self.list_visible(
+                requested_by, organization_id, department_id, roles
+            )
+        }
+        return [skill for skill in self.find_skills(query) if skill.skill_id in visible_ids]
+
     def create_skill(
         self,
         name: str,
@@ -250,8 +364,14 @@ class SkillRegistry:
         body: str = "",
         required_tools: Optional[List[str]] = None,
         tags: Optional[List[str]] = None,
-        visibility: str = "organization",
-        execution_gate: str = "auto"
+        visibility: ComponentVisibility = "private",
+        execution_gate: str = "auto",
+        owner_id: str = LEGACY_SCOPE,
+        organization_id: str = LEGACY_SCOPE,
+        department_id: Optional[str] = None,
+        allowed_roles: Optional[List[str]] = None,
+        allowed_users: Optional[List[str]] = None,
+        global_public: bool = False,
     ) -> AgentSkill:
         """Register an operator-authored skill.
 
@@ -271,19 +391,67 @@ class SkillRegistry:
             body=body.strip(),
             required_tools=required_tools or [],
             tags=tags or [],
+            owner_id=owner_id,
+            organization_id=organization_id,
+            department_id=department_id,
             visibility=visibility,
+            global_public=global_public,
             execution_gate=execution_gate,
+            allowed_roles=allowed_roles or [],
+            allowed_users=allowed_users or [],
             origin="operator",
         )
         self._skills[skill.skill_id] = self._store.put(skill.skill_id, skill)
         return self._skills[skill.skill_id]
+
+    def create_skill_authorized(
+        self,
+        name: str,
+        pillar: str,
+        description: str,
+        owner_id: str,
+        organization_id: str,
+        body: str = "",
+        required_tools: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        visibility: ComponentVisibility = "private",
+        execution_gate: str = "auto",
+        department_id: Optional[str] = None,
+        allowed_roles: Optional[List[str]] = None,
+        allowed_users: Optional[List[str]] = None,
+        can_publish_global: bool = False,
+    ) -> AgentSkill:
+        self._validate_principal_scope(owner_id, organization_id)
+        self._validate_visibility(visibility, department_id, can_publish_global)
+        slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+        if not slug:
+            raise SkillSchemaValidationError("name", "A skill name must contain letters or digits")
+        if self.get_skill(f"skill:{slug}") is not None:
+            raise ValueError("Component identifier is unavailable")
+        return self.create_skill(
+            name,
+            pillar,
+            description,
+            body,
+            required_tools,
+            tags,
+            visibility,
+            execution_gate,
+            owner_id,
+            organization_id,
+            department_id,
+            allowed_roles,
+            allowed_users,
+            visibility == "public",
+        )
 
     def add_skill_version(
         self,
         skill_id: str,
         new_version_number: str,
         change_summary: str,
-        required_tools: List[str]
+        required_tools: List[str],
+        created_by: str = "operator",
     ) -> AgentSkill:
         skill = self.get_skill(skill_id)
         if not skill:
@@ -294,7 +462,8 @@ class SkillRegistry:
             skill_id=skill_id,
             version_number=new_version_number,
             change_summary=change_summary,
-            required_tools=required_tools
+            required_tools=required_tools,
+            created_by=created_by,
         )
         skill.versions.append(ver_rec)
         skill.version = new_version_number
@@ -302,6 +471,25 @@ class SkillRegistry:
         skill.updated_at = time.time()
         self._skills[skill_id] = self._store.put(skill_id, skill)
         return self._skills[skill_id]
+
+    def add_skill_version_authorized(
+        self,
+        skill_id: str,
+        new_version_number: str,
+        change_summary: str,
+        required_tools: List[str],
+        requested_by: str,
+        organization_id: str,
+        can_edit_foreign: bool = False,
+    ) -> AgentSkill:
+        self._require_editable(skill_id, requested_by, organization_id, can_edit_foreign)
+        return self.add_skill_version(
+            skill_id,
+            new_version_number,
+            change_summary,
+            required_tools,
+            created_by=requested_by,
+        )
 
     def delete_skill(self, skill_id: str) -> bool:
         """Remove a skill from the registry.
@@ -316,11 +504,25 @@ class SkillRegistry:
         del self._skills[skill_id]
         return self._store.delete(skill_id)
 
+    def delete_skill_authorized(
+        self,
+        skill_id: str,
+        requested_by: str,
+        organization_id: str,
+        can_edit_foreign: bool = False,
+    ) -> bool:
+        self._require_editable(skill_id, requested_by, organization_id, can_edit_foreign)
+        return self.delete_skill(skill_id)
+
     def update_permissions(
         self,
         skill_id: str,
         visibility: str,
-        execution_gate: str
+        execution_gate: str,
+        department_id: Optional[str] = None,
+        allowed_roles: Optional[List[str]] = None,
+        allowed_users: Optional[List[str]] = None,
+        global_public: Optional[bool] = None,
     ) -> AgentSkill:
         skill = self.get_skill(skill_id)
         if not skill:
@@ -328,9 +530,75 @@ class SkillRegistry:
 
         skill.visibility = visibility
         skill.execution_gate = execution_gate
+        skill.department_id = department_id
+        if allowed_roles is not None:
+            skill.allowed_roles = allowed_roles
+        if allowed_users is not None:
+            skill.allowed_users = allowed_users
+        if global_public is not None:
+            skill.global_public = global_public
         skill.updated_at = time.time()
         self._skills[skill_id] = self._store.put(skill_id, skill)
         return self._skills[skill_id]
+
+    def update_permissions_authorized(
+        self,
+        skill_id: str,
+        visibility: ComponentVisibility,
+        execution_gate: str,
+        requested_by: str,
+        organization_id: str,
+        department_id: Optional[str] = None,
+        allowed_roles: Optional[List[str]] = None,
+        allowed_users: Optional[List[str]] = None,
+        can_edit_foreign: bool = False,
+        can_publish_global: bool = False,
+    ) -> AgentSkill:
+        self._require_editable(skill_id, requested_by, organization_id, can_edit_foreign)
+        self._validate_visibility(visibility, department_id, can_publish_global)
+        return self.update_permissions(
+            skill_id,
+            visibility,
+            execution_gate,
+            department_id,
+            allowed_roles,
+            allowed_users,
+            visibility == "public",
+        )
+
+    @staticmethod
+    def _validate_principal_scope(owner_id: str, organization_id: str) -> None:
+        if owner_id in {"", LEGACY_SCOPE} or organization_id in {"", LEGACY_SCOPE}:
+            raise ValueError("Verified owner and organization are required")
+
+    @staticmethod
+    def _validate_visibility(
+        visibility: ComponentVisibility,
+        department_id: Optional[str],
+        can_publish_global: bool,
+    ) -> None:
+        if visibility not in {"private", "department", "organization", "restricted", "public"}:
+            raise ValueError("Unsupported component visibility")
+        if visibility == "department" and not department_id:
+            raise ValueError("Department visibility requires a department")
+        if visibility == "public" and not can_publish_global:
+            raise PermissionError("Global component publication is not permitted")
+
+    def _require_editable(
+        self,
+        skill_id: str,
+        requested_by: str,
+        organization_id: str,
+        can_edit_foreign: bool,
+    ) -> AgentSkill:
+        skill = self.get_skill(skill_id)
+        if skill is None:
+            raise SkillNotFoundError(skill_id)
+        if skill.organization_id != organization_id:
+            raise PermissionError("Skill belongs to another organization")
+        if skill.owner_id != requested_by and not can_edit_foreign:
+            raise PermissionError("Skill mutation requires its owner")
+        return skill
 
 
 skill_registry = SkillRegistry()

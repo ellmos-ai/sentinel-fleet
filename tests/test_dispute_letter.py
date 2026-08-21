@@ -8,6 +8,8 @@ from httpx import ASGITransport, AsyncClient
 from pypdf import PdfReader
 
 from sentinel_fleet.core.privacy_contacts import privacy_contact_hub
+from sentinel_fleet.core.access import WORKSPACE_COOKIE, demo_principal
+from sentinel_fleet.core.users import DEMO_USER_ID
 from sentinel_fleet.domains.omniledger.letter import (
     CORRECTION_DEADLINE_DAYS,
     build_correction_letter,
@@ -20,12 +22,38 @@ from sentinel_fleet.web.server import app, processed_invoices
 
 # 2026-08-04 12:00:00 UTC, so the derived deadline is a fixed, checkable date
 ISSUED_AT = 1785844800.0
+TEST_WORKSPACE_TOKEN = "a" * 32
+TEST_PRINCIPAL = demo_principal(DEMO_USER_ID, TEST_WORKSPACE_TOKEN)
 
 
 @pytest_asyncio.fixture
 async def client():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        cookies={WORKSPACE_COOKIE: TEST_WORKSPACE_TOKEN},
+    ) as ac:
         yield ac
+
+
+def _store_invoice(invoice: InvoiceDocument) -> None:
+    processed_invoices.put_scoped(invoice, TEST_PRINCIPAL)
+
+
+def _create_ticket(invoice: InvoiceDocument | None, description: str):
+    return ticket_master.create_approval_ticket(
+        title="Approval: correction request" if invoice else "Operator ticket",
+        description=description,
+        agent_id="agent:vendor-dispute" if invoice else "agent:orchestrator",
+        tool_name="send_external_email" if invoice else "operator_manual_ticket",
+        payload=(
+            {"doc_id": invoice.id, "vendor_email": invoice.vendor_email}
+            if invoice else {}
+        ),
+        owner_id=TEST_PRINCIPAL.data_owner_id,
+        organization_id=TEST_PRINCIPAL.organization_id,
+        visibility="private",
+    )
 
 
 def _defective_invoice(email="finance@vendor-under-test.example") -> InvoiceDocument:
@@ -111,14 +139,8 @@ def test_filename_is_derived_from_the_invoice_number():
 @pytest.mark.asyncio
 async def test_endpoint_serves_the_letter_for_a_dispute_ticket(client):
     invoice = _defective_invoice()
-    processed_invoices[invoice.id] = invoice
-    ticket = ticket_master.create_approval_ticket(
-        title="Approval: correction request",
-        description="letter endpoint test",
-        agent_id="agent:vendor-dispute",
-        tool_name="send_external_email",
-        payload={"doc_id": invoice.id, "vendor_email": invoice.vendor_email},
-    )
+    _store_invoice(invoice)
+    ticket = _create_ticket(invoice, "letter endpoint test")
 
     response = await client.get(f"/api/tickets/{ticket.ticket_id}/letter.pdf")
 
@@ -136,14 +158,8 @@ async def test_letter_render_appears_on_the_gate_ledger(client):
     from sentinel_fleet.core.telemetry import telemetry
 
     invoice = _defective_invoice()
-    processed_invoices[invoice.id] = invoice
-    ticket = ticket_master.create_approval_ticket(
-        title="Approval: correction request",
-        description="ledger test",
-        agent_id="agent:vendor-dispute",
-        tool_name="send_external_email",
-        payload={"doc_id": invoice.id},
-    )
+    _store_invoice(invoice)
+    ticket = _create_ticket(invoice, "ledger test")
 
     await client.get(f"/api/tickets/{ticket.ticket_id}/letter.pdf")
 
@@ -156,14 +172,8 @@ async def test_letter_render_appears_on_the_gate_ledger(client):
 @pytest.mark.asyncio
 async def test_approval_card_offers_the_download(client):
     invoice = _defective_invoice()
-    processed_invoices[invoice.id] = invoice
-    ticket = ticket_master.create_approval_ticket(
-        title="Approval: correction request",
-        description="console rendering test",
-        agent_id="agent:vendor-dispute",
-        tool_name="send_external_email",
-        payload={"doc_id": invoice.id},
-    )
+    _store_invoice(invoice)
+    ticket = _create_ticket(invoice, "console rendering test")
 
     body = (await client.get("/")).text
 
@@ -180,13 +190,7 @@ async def test_unknown_ticket_is_a_404(client):
 
 @pytest.mark.asyncio
 async def test_ticket_without_an_invoice_has_no_letter(client):
-    ticket = ticket_master.create_approval_ticket(
-        title="Operator ticket",
-        description="not a dispute",
-        agent_id="agent:orchestrator",
-        tool_name="operator_manual_ticket",
-        payload={},
-    )
+    ticket = _create_ticket(None, "not a dispute")
 
     response = await client.get(f"/api/tickets/{ticket.ticket_id}/letter.pdf")
 
@@ -207,14 +211,8 @@ async def test_opted_out_vendor_gets_no_letter_rendered(client):
 
     invoice = _defective_invoice(email=contact.email)
     invoice.id = "INV-LETTERTEST-OPTOUT"
-    processed_invoices[invoice.id] = invoice
-    ticket = ticket_master.create_approval_ticket(
-        title="Approval: correction request",
-        description="opt-out test",
-        agent_id="agent:vendor-dispute",
-        tool_name="send_external_email",
-        payload={"doc_id": invoice.id},
-    )
+    _store_invoice(invoice)
+    ticket = _create_ticket(invoice, "opt-out test")
 
     response = await client.get(f"/api/tickets/{ticket.ticket_id}/letter.pdf")
 

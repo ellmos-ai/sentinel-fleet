@@ -12,7 +12,7 @@ model plus a thin registry over `get_store()`.
 
 import time
 import uuid
-from typing import Any, List, Optional
+from typing import Any, Iterable, List, Optional
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 from sentinel_fleet.core.storage import get_store
 from sentinel_fleet.core.errors import TemplateNotFoundError, TemplatePermissionError
@@ -21,6 +21,9 @@ from sentinel_fleet.core.errors import TemplateNotFoundError, TemplatePermission
 # the special case of a chain, not a different shape. Multi-step chains are the "Minimaler
 # Ketten-Schnitt" of Phase 2, executed by `core/chain_runner.py`.
 MIN_STEPS = 1
+# A top-level enqueue is one public-demo usage reservation. Bounding the embedded chain keeps one
+# request from expanding into an unbounded number of model and web operations.
+MAX_STEPS = 8
 
 # The executable chain cut supports three patterns: "single" (one model call), "race"
 # (chat_service.race(), bound to a step), and bounded "research" over operator-named URLs.
@@ -156,8 +159,10 @@ def _default_steps() -> List[Step]:
 class TaskTemplate(BaseModel):
     template_id: str
     name: str
-    owner: str = "operator"
+    owner: str = "legacy-unassigned"
     visibility: str = "own"                # own | organization | restricted
+    organization_id: str = "legacy-unassigned"
+    department_id: Optional[str] = None
     requires_approval: bool = False        # routes the run through ticket_master (see routines.py)
     allowed_roles: List[str] = Field(default_factory=list)
     removed_by: List[str] = Field(default_factory=list)   # per-viewer hide list for shared templates
@@ -176,6 +181,12 @@ class TaskTemplate(BaseModel):
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
 
+    @model_validator(mode="after")
+    def _department_visibility_has_a_department(self) -> "TaskTemplate":
+        if self.visibility == "department" and not self.department_id:
+            raise ValueError("Department-visible templates require department_id.")
+        return self
+
     @field_validator("steps")
     @classmethod
     def _steps_form_a_valid_chain(cls, value: List[Step]) -> List[Step]:
@@ -188,6 +199,10 @@ class TaskTemplate(BaseModel):
         """
         if len(value) < MIN_STEPS:
             raise ValueError(f"A task template needs at least {MIN_STEPS} step - got {len(value)}.")
+        if len(value) > MAX_STEPS:
+            raise ValueError(
+                f"A task template supports at most {MAX_STEPS} steps - got {len(value)}."
+            )
 
         step_ids = [s.step_id for s in value]
         if len(set(step_ids)) != len(step_ids):
@@ -280,7 +295,7 @@ class TaskTemplateRegistry:
     def create_template(
         self,
         name: str,
-        owner: str = "operator",
+        owner: str = "legacy-unassigned",
         prompt_source: str = "custom",
         prompt_id: Optional[str] = None,
         prompt_version: Optional[str] = None,
@@ -292,7 +307,10 @@ class TaskTemplateRegistry:
         group: Optional[str] = None,
         on_success: Optional[str] = None,
         on_failure: Optional[str] = None,
-        steps: Optional[List[Step]] = None
+        steps: Optional[List[Step]] = None,
+        organization_id: str = "legacy-unassigned",
+        department_id: Optional[str] = None,
+        allowed_roles: Optional[List[str]] = None,
     ) -> TaskTemplate:
         """Build a new TaskTemplate.
 
@@ -316,7 +334,10 @@ class TaskTemplateRegistry:
             name=name,
             owner=owner,
             visibility=visibility,
+            organization_id=organization_id,
+            department_id=department_id,
             requires_approval=requires_approval,
+            allowed_roles=allowed_roles or [],
             group=group,
             on_success=on_success,
             on_failure=on_failure,
@@ -328,15 +349,81 @@ class TaskTemplateRegistry:
     def get_template(self, template_id: str) -> Optional[TaskTemplate]:
         return self._store.get(template_id)
 
-    def list_all(self, viewer: Optional[str] = None) -> List[TaskTemplate]:
-        """All templates, or - with `viewer` set - only the ones that viewer has not hidden.
+    @staticmethod
+    def can_read(
+        template: TaskTemplate,
+        requested_by: str,
+        organization_id: str,
+        department_id: Optional[str] = None,
+        actor_roles: Optional[Iterable[str]] = None,
+    ) -> bool:
+        """Evaluate template visibility against a verified principal's scope."""
+        if template.organization_id != organization_id:
+            return False
+        if template.owner == requested_by:
+            return True
+        if template.visibility == "organization":
+            return True
+        if template.visibility == "department":
+            return bool(department_id and template.department_id == department_id)
+        if template.visibility == "restricted":
+            return bool(set(actor_roles or ()).intersection(template.allowed_roles))
+        return False
 
-        A shared template a viewer removed from their own view stays intact for its owner and
-        everyone else; only that one viewer's listing skips it (concept doc, section A.4).
+    @staticmethod
+    def can_edit(
+        template: TaskTemplate,
+        requested_by: str,
+        organization_id: str,
+        *,
+        can_edit_foreign: bool = False,
+    ) -> bool:
+        """Owners may edit in-tenant; a verified management capability may edit foreign work."""
+        return (
+            template.organization_id == organization_id
+            and (template.owner == requested_by or can_edit_foreign)
+        )
+
+    def get_visible(
+        self,
+        template_id: str,
+        requested_by: str,
+        organization_id: str,
+        department_id: Optional[str] = None,
+        actor_roles: Optional[Iterable[str]] = None,
+    ) -> Optional[TaskTemplate]:
+        template = self._store.get(template_id)
+        if not template or not self.can_read(
+            template, requested_by, organization_id, department_id, actor_roles
+        ):
+            return None
+        return template
+
+    def list_visible(
+        self,
+        requested_by: str,
+        organization_id: str,
+        department_id: Optional[str] = None,
+        actor_roles: Optional[Iterable[str]] = None,
+    ) -> List[TaskTemplate]:
+        """Templates visible to the actual actor; no caller-supplied viewer alias is used."""
+        templates = [
+            template for template in self._store.list_all()
+            if requested_by not in template.removed_by
+            and self.can_read(
+                template, requested_by, organization_id, department_id, actor_roles
+            )
+        ]
+        templates.sort(key=lambda template: template.created_at)
+        return templates
+
+    def list_all(self) -> List[TaskTemplate]:
+        """Raw internal catalogue without principal filtering.
+
+        HTTP and other user-visible paths must use ``list_visible``. In particular, this method
+        deliberately accepts no caller-supplied ``viewer`` alias.
         """
         templates = self._store.list_all()
-        if viewer:
-            templates = [t for t in templates if viewer not in t.removed_by]
         templates.sort(key=lambda t: t.created_at)
         return templates
 
@@ -361,6 +448,28 @@ class TaskTemplateRegistry:
         updated = TaskTemplate.model_validate(updated.model_dump())
         self._store.put(template_id, updated)
         return updated
+
+    def update_authorized(
+        self,
+        template_id: str,
+        *,
+        requested_by: str,
+        organization_id: str,
+        can_edit_foreign: bool = False,
+        **fields: Any,
+    ) -> TaskTemplate:
+        """Update through the ACL boundary used by HTTP mutation handlers."""
+        template = self._store.get(template_id)
+        if not template:
+            raise TemplateNotFoundError(template_id)
+        if not self.can_edit(
+            template,
+            requested_by,
+            organization_id,
+            can_edit_foreign=can_edit_foreign,
+        ):
+            raise TemplatePermissionError(template_id, requested_by, template.owner)
+        return self.update_template(template_id, **fields)
 
     def delete_template(self, template_id: str, requested_by: str = "operator") -> bool:
         """Only the owner may delete outright. Bindings must be gone first (checked by the caller,

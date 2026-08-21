@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from sentinel_fleet.chat import export as chat_export
@@ -23,6 +23,11 @@ from sentinel_fleet.chat.service import ComponentAuthorizationError, chat_servic
 from sentinel_fleet.web import governance
 from sentinel_fleet.web.blueprint_graph import build_circuit
 from sentinel_fleet.core.config import settings
+from sentinel_fleet.core.demo_guard import (
+    DemoUsageGuard,
+    DemoUsageLease,
+    DemoUsageLimitError,
+)
 from sentinel_fleet.core.access import (
     IAP_ASSERTION_HEADER,
     WORKSPACE_COOKIE,
@@ -44,9 +49,14 @@ from sentinel_fleet.core.policy_catalog import (
     PolicyType,
     policy_catalog,
 )
+from sentinel_fleet.core.permissions import PermissionAction
 from sentinel_fleet.core.prompts import prompt_registry
 from sentinel_fleet.core.skills import skill_registry
-from sentinel_fleet.core.storage import BaseStore, StorageBackendError, get_store, requested_backend
+from sentinel_fleet.core.storage import StorageBackendError, requested_backend
+from sentinel_fleet.core.structured_documents import (
+    DocumentVisibility,
+    PersistentInvoiceWorkspace,
+)
 from sentinel_fleet.core.artifacts import (
     ArtifactAccessError,
     ArtifactBackendError,
@@ -54,7 +64,7 @@ from sentinel_fleet.core.artifacts import (
     ArtifactVisibility,
     artifact_service,
 )
-from sentinel_fleet.core.users import DEMO_USER_ID, UserIdentity, user_registry
+from sentinel_fleet.core.users import DEMO_USER_ID, RoleProfile, UserIdentity, user_registry
 from sentinel_fleet.core.domains import domain_registry
 from sentinel_fleet.core.privacy_contacts import privacy_contact_hub
 from sentinel_fleet.core.web_reader import read_page
@@ -85,7 +95,6 @@ from sentinel_fleet.uas.task_master import task_master, TaskState, TaskRecord
 from sentinel_fleet.uas.task_templates import EXECUTE_TEMPLATE_TOOL, Step, task_template_registry
 from sentinel_fleet.uas import routines
 from sentinel_fleet.memory.bank import memory_bank
-from sentinel_fleet.memory.gardener_rag import gardener
 from sentinel_fleet.core.run_log import RUN_CLOSED, run_log_bus
 from sentinel_fleet.core.telemetry import telemetry
 from sentinel_fleet.domains.omniledger.models import InvoiceDocument, InvoiceStatus
@@ -101,6 +110,50 @@ from sentinel_fleet.domains.omniledger.reconciliation import ledger_reconciler
 
 
 logger = logging.getLogger("sentinel_fleet")
+
+_demo_usage_guard = DemoUsageGuard(
+    workspace_write_limit=settings.demo_workspace_write_limit,
+    global_write_limit=settings.demo_global_write_limit,
+    workspace_external_limit=settings.demo_workspace_external_limit,
+    global_external_limit=settings.demo_global_external_limit,
+)
+_DEMO_EXTERNAL_PATHS = frozenset({
+    "/api/chat/send",
+    "/api/chat/race",
+    "/api/web/read",
+    "/api/omniledger/process",
+})
+
+
+def _public_demo_limits_active() -> bool:
+    return settings.demo_mode and (
+        settings.environment == "production" or bool(os.getenv("K_SERVICE"))
+    )
+
+
+def _demo_usage_kind(request: Request) -> Optional[Literal["write", "external"]]:
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+    path = request.url.path
+    if path == "/api/routines/fire":
+        return None
+    if path in _DEMO_EXTERNAL_PATHS or (
+        path.startswith("/api/task-templates/") and path.endswith("/enqueue")
+    ):
+        return "external"
+    return "write" if path.startswith("/api/") else None
+
+
+def _same_origin(headers, scheme: str) -> bool:
+    origin = (headers.get("origin") or "").rstrip("/")
+    host = (headers.get("host") or "").strip()
+    if not origin or not host:
+        return False
+    http_scheme = "https" if scheme in {"https", "wss"} else "http"
+    forwarded = (headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
+    if forwarded in {"http", "https"}:
+        http_scheme = forwarded
+    return origin == f"{http_scheme}://{host}"
 
 
 @asynccontextmanager
@@ -131,8 +184,13 @@ def _verified_iap_principal(assertion: str) -> RequestPrincipal:
     user = user_registry.require_user(user_id)
     if user.status.value != "active":
         raise PermissionError("The mapped SentinelFleet user is suspended")
+    if user.organization_id in {"legacy-unassigned", "legacy:unassigned"}:
+        raise PermissionError("The mapped SentinelFleet user has no assigned organization")
     return authenticated_principal(
-        user_id=user.user_id, department=user.department, identity=identity
+        user_id=user.user_id,
+        organization_id=user.organization_id,
+        department=user.department,
+        identity=identity,
     )
 
 
@@ -141,6 +199,16 @@ async def attach_request_principal(request: Request, call_next):
     """Attach either the bounded demo workspace or a cryptographically verified IAP user."""
     if not settings.demo_mode and request.url.path in {"/api/health", "/api/routines/fire"}:
         return await call_next(request)
+
+    if (
+        not settings.demo_mode
+        and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and not _same_origin(request.headers, request.url.scheme)
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Cross-site or origin-less mutation refused."},
+        )
 
     created = False
     if settings.demo_mode:
@@ -153,6 +221,7 @@ async def attach_request_principal(request: Request, call_next):
             data_owner_id=demo_principal(DEMO_USER_ID, workspace_token).data_owner_id,
             authenticated=False,
             department=demo_user.department,
+            organization_id=demo_user.organization_id,
         )
     else:
         if not settings.iap_audience:
@@ -174,10 +243,32 @@ async def attach_request_principal(request: Request, call_next):
 
     request.state.principal = principal
     context_token = bind_request_principal(principal)
+    usage_lease: Optional[DemoUsageLease] = None
     try:
-        response = await call_next(request)
+        usage_kind = _demo_usage_kind(request) if _public_demo_limits_active() else None
+        if usage_kind is not None:
+            try:
+                usage_lease = _demo_usage_guard.reserve(principal.data_owner_id, usage_kind)
+            except DemoUsageLimitError as exc:
+                response = JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": "Public demo usage limit reached; retry later.",
+                        "scope": "workspace-and-service",
+                    },
+                    headers={"Retry-After": str(exc.retry_after)},
+                )
+            else:
+                response = await call_next(request)
+        else:
+            response = await call_next(request)
     finally:
         reset_request_principal(context_token)
+    # A rejected ordinary mutation did not consume storage or external compute. Cost-bearing
+    # routes retain their reservation even when Model Armor or the downstream provider refused
+    # them, because the public service still performed the guarded work.
+    if usage_lease is not None and usage_lease.kind == "write" and response.status_code >= 400:
+        _demo_usage_guard.release(usage_lease)
     if created:
         response.set_cookie(
             WORKSPACE_COOKIE,
@@ -269,138 +360,6 @@ templates.env.filters["clock"] = _clock
 templates.env.filters["when"] = _when
 
 
-DocumentVisibility = Literal["private", "department", "organization"]
-
-
-class StoredInvoiceRecord(BaseModel):
-    doc_id: str
-    document: InvoiceDocument
-    owner_id: str = "system"
-    visibility: DocumentVisibility = "organization"
-    department_id: Optional[str] = None
-    created_at: float = Field(default_factory=time.time)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _wrap_legacy_invoice(cls, value):
-        if isinstance(value, dict) and "document" not in value and "id" in value:
-            return {
-                "doc_id": value["id"],
-                "document": value,
-                "owner_id": "system",
-                "visibility": "organization",
-            }
-        return value
-
-    @model_validator(mode="after")
-    def _scope_is_coherent(self) -> "StoredInvoiceRecord":
-        if self.visibility == "department" and not self.department_id:
-            raise ValueError("department-visible document needs a department_id")
-        if self.visibility != "department":
-            self.department_id = None
-        return self
-
-
-class PersistentInvoiceWorkspace:
-    """Small mapping facade over durable structured document records.
-
-    Raw upload bytes are intentionally request-scoped and are not retained. The extracted and
-    audited record is durable, however, so dashboards and correction letters survive cold starts.
-    """
-
-    def __init__(self, store: Optional[BaseStore[StoredInvoiceRecord]] = None):
-        self._store = store or get_store("processed_documents", StoredInvoiceRecord)
-
-    def __setitem__(self, doc_id: str, document: InvoiceDocument) -> None:
-        existing = self._store.get(doc_id)
-        if existing is None:
-            existing = StoredInvoiceRecord(doc_id=doc_id, document=document)
-        else:
-            existing.document = document
-        self._store.put(doc_id, existing)
-
-    def __getitem__(self, doc_id: str) -> InvoiceDocument:
-        record = self._store.get(doc_id)
-        if record is None:
-            raise KeyError(doc_id)
-        return record.document
-
-    def __contains__(self, doc_id: object) -> bool:
-        return isinstance(doc_id, str) and self._store.get(doc_id) is not None
-
-    def get(self, doc_id: str, default=None):
-        record = self._store.get(doc_id)
-        return record.document if record is not None else default
-
-    def values(self) -> List[InvoiceDocument]:
-        return [record.document for record in self._store.list_all()]
-
-    @staticmethod
-    def can_read(record: StoredInvoiceRecord, principal: RequestPrincipal) -> bool:
-        return (
-            record.owner_id == principal.data_owner_id
-            or record.visibility == "organization"
-            or (
-                record.visibility == "department"
-                and bool(principal.department)
-                and record.department_id == principal.department
-            )
-        )
-
-    def put_scoped(
-        self,
-        document: InvoiceDocument,
-        principal: RequestPrincipal,
-        visibility: DocumentVisibility = "private",
-    ) -> InvoiceDocument:
-        record = StoredInvoiceRecord(
-            doc_id=document.id,
-            document=document,
-            owner_id=principal.data_owner_id,
-            visibility=visibility,
-            department_id=principal.department if visibility == "department" else None,
-        )
-        self._store.put(document.id, record)
-        return document
-
-    def get_visible(
-        self, doc_id: str, principal: RequestPrincipal
-    ) -> Optional[InvoiceDocument]:
-        record = self._store.get(doc_id)
-        if record is None or not self.can_read(record, principal):
-            return None
-        return record.document
-
-    def values_visible(self, principal: RequestPrincipal) -> List[InvoiceDocument]:
-        return [
-            record.document for record in self._store.list_all()
-            if self.can_read(record, principal)
-        ]
-
-    def records_visible(self, principal: RequestPrincipal) -> List[StoredInvoiceRecord]:
-        return [
-            record for record in self._store.list_all()
-            if self.can_read(record, principal)
-        ]
-
-    def update_sharing(
-        self,
-        doc_id: str,
-        principal: RequestPrincipal,
-        visibility: DocumentVisibility,
-    ) -> StoredInvoiceRecord:
-        record = self._store.get(doc_id)
-        if record is None:
-            raise KeyError(doc_id)
-        if record.owner_id != principal.data_owner_id:
-            raise PermissionError("Only the document creator may change sharing")
-        if visibility == "department" and not principal.department:
-            raise ValueError("A user without a department cannot use department sharing")
-        record.visibility = visibility
-        record.department_id = principal.department if visibility == "department" else None
-        return self._store.put(doc_id, record)
-
-
 processed_invoices = PersistentInvoiceWorkspace()
 
 # Canned adversarial payload, used only when the operator triggers the preset without an upload
@@ -432,17 +391,29 @@ async def tool_create_reconciliation_draft(
     memory_owner: str = "system",
     memory_visibility: str = "organization",
     department_id: Optional[str] = None,
+    organization_id: str = "sentinel-demo",
 ) -> InvoiceDocument:
     return ledger_reconciler.book_invoice(
         document,
         memory_owner=memory_owner,
         memory_visibility=memory_visibility,
         department_id=department_id,
+        organization_id=organization_id,
     )
 
 
-async def tool_draft_vendor_dispute_email(document: InvoiceDocument) -> str:
-    return dispute_communicator.generate_dispute_resolution(document)
+async def tool_draft_vendor_dispute_email(
+    document: InvoiceDocument,
+    requested_by: str = "operator",
+    requested_department: Optional[str] = None,
+    requested_organization: str = "sentinel-demo",
+) -> str:
+    return dispute_communicator.generate_dispute_resolution(
+        document,
+        requested_by=requested_by,
+        requested_department=requested_department,
+        requested_organization=requested_organization,
+    )
 
 
 async def tool_render_dispute_letter(document: InvoiceDocument, issued_at: float) -> bytes:
@@ -518,7 +489,7 @@ def _tail(records: List[Any]) -> List[Any]:
     return records[:DASHBOARD_ROW_LIMIT]
 
 
-def _prompt_catalog() -> List[Dict[str, Any]]:
+def _prompt_catalog(principal: RequestPrincipal) -> List[Dict[str, Any]]:
     """Version list for the chat composer: enough to pin a version, without the full bodies."""
     return [
         {
@@ -527,15 +498,25 @@ def _prompt_catalog() -> List[Dict[str, Any]]:
             "active_version": p.active_version,
             "versions": [{"version_number": v.version_number, "title": v.title} for v in p.versions]
         }
-        for p in prompt_registry.list_all()
+        for p in prompt_registry.list_visible(
+            principal.data_owner_id,
+            principal.organization_id,
+            principal.department,
+            _principal_roles(principal),
+        )
     ]
 
 
-def _skill_catalog() -> List[Dict[str, Any]]:
+def _skill_catalog(principal: RequestPrincipal) -> List[Dict[str, Any]]:
     """Skill picker index. Bodies stay server-side; the picker only needs identity."""
     return [
         {"skill_id": s.skill_id, "name": s.name, "pillar": s.pillar, "version": s.version}
-        for s in skill_registry.list_all()
+        for s in skill_registry.list_visible(
+            principal.data_owner_id,
+            principal.organization_id,
+            principal.department,
+            _principal_roles(principal),
+        )
     ]
 
 
@@ -546,11 +527,9 @@ def _agent_catalog() -> List[Dict[str, Any]]:
     agent select needs this list in JS instead.
 
     `can_execute_template` is the least-privilege question the gateway will ask when this step
-    actually runs: `chain_runner._run_single_step` calls under `execute_template`, so an agent
-    without that tool in scope is refused there and quarantined for having tried. The editor
-    still offers such an agent - the narrow scope is the fleet's design, not a bug to hide - but
-    marks it at the point of choosing instead of letting the operator discover it at run time.
-    Derived per request from the identity's own scope, never stored.
+    actually runs. The editor only offers identities that carry the capability; accepting an
+    incompatible identity and discovering that at runtime would let an untrusted demo visitor
+    change shared lifecycle state. Derived from the identity's own scope, never stored.
     """
     return [
         {
@@ -560,16 +539,24 @@ def _agent_catalog() -> List[Dict[str, Any]]:
             "can_execute_template": a.is_tool_scoped(EXECUTE_TEMPLATE_TOOL)
         }
         for a in lifecycle_manager.list_fleet()
+        if a.is_tool_scoped(EXECUTE_TEMPLATE_TOOL)
     ]
 
 
-def _routine_catalog(viewer: Optional[str] = None) -> List[Dict[str, Any]]:
+def _routine_catalog(principal: RequestPrincipal) -> List[Dict[str, Any]]:
     """Template rows for the Task queue card: every derived field (badges, colour, next due),
     pre-sorted status-first-then-group, so the template renders it without deriving anything.
-    `viewer` set filters out templates that viewer removed from their own view (still intact
-    for the owner and everyone else - see TaskTemplateRegistry.remove_for_viewer).
+    Only templates visible to the verified principal are included. A caller-supplied viewer
+    alias is deliberately not accepted here.
     """
-    entries = routines.sorted_catalog(task_template_registry.list_all(viewer=viewer))
+    actor = user_registry.require_user(principal.user_id)
+    visible_templates = task_template_registry.list_visible(
+        requested_by=principal.data_owner_id,
+        organization_id=principal.organization_id,
+        department_id=principal.department,
+        actor_roles=[actor.profile_id],
+    )
+    entries = routines.sorted_catalog(visible_templates)
     rows = []
     for e in entries:
         template = e["template"]
@@ -630,11 +617,56 @@ def _download_headers(filename: str, artifact_id: Optional[str] = None) -> Dict[
 
 
 def _visible_tickets(principal: RequestPrincipal):
+    actor_roles = _principal_roles(principal)
     return [
-        ticket for ticket in ticket_master.list_all()
-        if not ticket.payload.get("doc_id")
-        or processed_invoices.get_visible(ticket.payload["doc_id"], principal) is not None
+        ticket
+        for ticket in ticket_master.list_visible(
+            requested_by=principal.data_owner_id,
+            actor_user_id=principal.user_id,
+            organization_id=principal.organization_id,
+            department_id=principal.department,
+            actor_roles=actor_roles,
+        )
+        if (
+            not ticket.payload.get("doc_id")
+            or processed_invoices.get_visible(ticket.payload["doc_id"], principal) is not None
+        )
     ]
+
+
+def _visible_fleet(principal: RequestPrincipal):
+    """Overlay only this browser's demo quarantine without mutating the shared fleet."""
+    visible = [agent.model_copy(deep=True) for agent in lifecycle_manager.list_fleet()]
+    if not settings.demo_mode:
+        return visible
+    for agent in visible:
+        reason = _demo_usage_guard.quarantine_reason(
+            principal.data_owner_id, agent.agent_id
+        )
+        if reason:
+            agent.status = AgentStatus.QUARANTINED
+            agent.quarantine_reason = reason
+    return visible
+
+
+def _principal_roles(principal: RequestPrincipal) -> List[str]:
+    """Roles come from the registered verified actor, never from request parameters."""
+    return [user_registry.require_user(principal.user_id).profile_id]
+
+
+def _visible_user_matrix(principal: RequestPrincipal) -> Dict[str, Any]:
+    """Expose the organization directory only to user administrators; others see themselves."""
+    matrix = user_registry.capability_matrix(principal.organization_id)
+    actor = user_registry.require_user(principal.user_id)
+    if user_registry.is_capability_granted(actor, "user.manage"):
+        return matrix
+    matrix["users"] = [
+        row for row in matrix["users"] if row["user_id"] == principal.user_id
+    ]
+    matrix["profiles"] = [
+        row for row in matrix["profiles"] if row["profile_id"] == actor.profile_id
+    ]
+    return matrix
 
 
 def _mutation_actor() -> UserIdentity:
@@ -651,6 +683,15 @@ def _mutation_actor() -> UserIdentity:
             detail="No request principal is available; operation denied.",
         )
     return user_registry.require_user(principal.user_id)
+
+
+def _data_actor(request: Request) -> UserIdentity:
+    """Capability-bearing actor whose ownership ID follows the private data principal."""
+    principal = _data_principal(request)
+    actor = _mutation_actor()
+    if actor.user_id == principal.data_owner_id:
+        return actor
+    return actor.model_copy(update={"user_id": principal.data_owner_id})
 
 
 def _require_authenticated_admin_mutation() -> UserIdentity:
@@ -674,15 +715,13 @@ async def index_view(
 ):
     """Render the Main Operator Control Dashboard.
 
-    This is an authorization demonstration, not authentication. ``?user=`` selects one named
-    registry identity so reviewers can inspect the resulting capabilities. The old ``viewer``
-    parameter remains an alias for links that predate the user registry. In demo mode the member
-    identity is the default and sensitive administration stays locked server-side.
+    This is an authorization demonstration, not authentication. Legacy ``?user=`` and
+    ``?viewer=`` parameters are accepted only so old links keep loading; they are ignored for
+    display, reads and writes. The page always reflects the request principal.
     """
     principal = _data_principal(request)
-    current_user = _registered_user(
-        (user or viewer or DEMO_USER_ID) if settings.demo_mode else principal.user_id
-    )
+    # Query parameters may select no identity. The page always reflects the request principal.
+    current_user = _registered_user(principal.user_id)
     viewer_id = current_user.user_id
     mutation_actor = _mutation_actor()
     can_manage_org_contacts = user_registry.is_capability_granted(
@@ -698,17 +737,19 @@ async def index_view(
         mutation_actor, "memory.manage.department"
     )
     visible_contacts = privacy_contact_hub.list_visible(
-        principal.data_owner_id, principal.department
+        principal.data_owner_id, principal.department, principal.organization_id
     )
     visible_memories = memory_bank.list_visible(
-        principal.data_owner_id, principal.department
+        principal.data_owner_id, principal.department, principal.organization_id
     )
     visible_artifacts = artifact_service.list_visible(
-        principal.data_owner_id, principal.department
+        principal.data_owner_id,
+        principal.department,
+        principal.organization_id,
     )
     visible_invoice_records = processed_invoices.records_visible(principal)
     visible_tickets = _visible_tickets(principal)
-    capability_board = user_registry.capability_matrix()
+    capability_board = _visible_user_matrix(principal)
     current_capabilities = next(
         entry["capabilities"]
         for entry in capability_board["users"]
@@ -719,8 +760,8 @@ async def index_view(
         name="index.html",
         context={
             "chat_models": SUPPORTED_MODELS,
-            "prompt_catalog": _prompt_catalog(),
-            "skill_catalog": _skill_catalog(),
+            "prompt_catalog": _prompt_catalog(principal),
+            "skill_catalog": _skill_catalog(principal),
             "agent_catalog": _agent_catalog(),
             "model_catalog": SUPPORTED_MODELS,
             "app_name": settings.app_name,
@@ -728,19 +769,30 @@ async def index_view(
             "project": settings.google_cloud_project,
             "gemini_live": bool(settings.gemini_api_key),
             "gemini_model": settings.gemini_default_model,
-            "agents": lifecycle_manager.list_fleet(),
+            "agents": _visible_fleet(principal),
             "tickets": _tail(visible_tickets),
             "ticket_total": len(visible_tickets),
             "pending_tickets": [
                 ticket for ticket in visible_tickets
                 if ticket.status == TicketStatus.PENDING_APPROVAL
             ],
-            "tasks": _tail(task_master.list_all()),
-            "task_total": len(task_master.list_all()),
+            "tasks": _tail(task_master.list_visible(
+                principal.data_owner_id,
+                principal.organization_id,
+                principal.department,
+            )),
+            "task_total": len(task_master.list_visible(
+                principal.data_owner_id,
+                principal.organization_id,
+                principal.department,
+            )),
             "viewer": viewer_id,
             "current_user": current_user,
-            "users": user_registry.list_users(),
-            "role_profiles": user_registry.list_profiles(),
+            "users": [
+                user_registry.require_user(row["user_id"])
+                for row in capability_board["users"]
+            ],
+            "role_profiles": capability_board["profiles"],
             "current_capabilities": current_capabilities,
             "demo_mode": settings.demo_mode,
             "admin_mutations_enabled": bool(
@@ -751,8 +803,8 @@ async def index_view(
             "authorization_note": (
                 "Verified IAP principal; API decisions use this registered identity."
                 if principal.authenticated else
-                "Authorization model, not authentication: ?user= changes this explanatory "
-                "matrix only. Bounded writes use member:demo; private data uses the browser "
+                "Authorization model, not authentication: legacy ?user= and ?viewer= values "
+                "are ignored. Bounded writes use member:demo; private data uses the browser "
                 "workspace ID."
             ),
             "storage_backend": requested_backend(),
@@ -761,11 +813,31 @@ async def index_view(
                 if requested_backend() == "firestore"
                 else "local files below DATA_DIR/artifacts"
             ),
-            "routine_catalog": _routine_catalog(viewer=viewer_id),
-            "hidden_templates": task_template_registry.list_hidden_for_viewer(viewer_id),
+            "routine_catalog": _routine_catalog(principal),
+            "hidden_templates": [
+                template for template in task_template_registry.list_all()
+                if principal.data_owner_id in template.removed_by
+                and task_template_registry.can_read(
+                    template,
+                    principal.data_owner_id,
+                    principal.organization_id,
+                    principal.department,
+                    _principal_roles(principal),
+                )
+            ],
             "memories": _tail(visible_memories),
-            "prompts": prompt_registry.list_all(),
-            "skills": skill_registry.list_all(),
+            "prompts": prompt_registry.list_visible(
+                principal.data_owner_id,
+                principal.organization_id,
+                principal.department,
+                _principal_roles(principal),
+            ),
+            "skills": skill_registry.list_visible(
+                principal.data_owner_id,
+                principal.organization_id,
+                principal.department,
+                _principal_roles(principal),
+            ),
             "domains": domain_registry.list_all(),
             "contacts": _tail(visible_contacts),
             "contact_total": len(visible_contacts),
@@ -781,6 +853,7 @@ async def index_view(
             "dsgvo_audit": privacy_contact_hub.run_dsgvo_retention_audit(
                 requested_by=principal.data_owner_id,
                 requested_department=principal.department,
+                requested_organization=principal.organization_id,
             ),
             "invoices": [record.document for record in visible_invoice_records],
             "invoice_records": {
@@ -790,10 +863,25 @@ async def index_view(
                 record.document for record in visible_invoice_records
                 if record.document.status == InvoiceStatus.BOOKED
             ],
-            "spans": telemetry.get_recent_spans(),
+            "spans": telemetry.get_recent_spans(principal=principal),
             # Recomputed on every render from the live registers, like every other derived view
             # on this page - the board has no store of its own (see web/governance.py).
-            "governance": governance.build_board(viewer_id)
+            "governance": governance.build_board(
+                principal.user_id,
+                visible_agents=_visible_fleet(principal),
+                visible_spans=telemetry.get_recent_spans(principal=principal),
+                visible_templates=task_template_registry.list_visible(
+                    principal.data_owner_id,
+                    principal.organization_id,
+                    principal.department,
+                    _principal_roles(principal),
+                ),
+                visible_tickets=visible_tickets,
+                visible_user_matrix=capability_board,
+                visible_policy_summary=policy_catalog.summary(
+                    gateway.permissions, _data_actor(request)
+                ),
+            )
         }
     )
 
@@ -838,12 +926,12 @@ async def api_health():
 
 
 @app.get("/api/fleet")
-async def api_get_fleet():
-    return [a.model_dump() for a in lifecycle_manager.list_fleet()]
+async def api_get_fleet(request: Request):
+    return [a.model_dump() for a in _visible_fleet(_data_principal(request))]
 
 
 @app.post("/api/agents/{agent_id}/quarantine/release")
-async def api_release_quarantine(agent_id: str):
+async def api_release_quarantine(request: Request, agent_id: str):
     """Releasing an agent does not re-run what its quarantine stopped, on purpose.
 
     The agent was locked because something got through that should not have - a prompt
@@ -852,14 +940,31 @@ async def api_release_quarantine(agent_id: str):
     one. So the runs stay FAILED and the console offers to run them again; the response names
     them so the operator learns they exist instead of hunting for them.
     """
-    _require_user_capability(_mutation_actor(), "agent.control")
+    principal = _data_principal(request)
     agent = lifecycle_manager.get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    if settings.demo_mode and _demo_usage_guard.release_quarantine(
+        principal.data_owner_id, agent_id
+    ):
+        return {
+            "status": "released",
+            "scope": "current_demo_workspace",
+            "agent": agent.model_copy(update={
+                "status": AgentStatus.IDLE,
+                "quarantine_reason": "",
+            }).model_dump(),
+            "runs_stopped_by_this_quarantine": [],
+        }
+    _require_user_capability(_mutation_actor(), "agent.control")
     lifecycle_manager.update_agent_status(agent_id, AgentStatus.IDLE)
     stopped = [
         {"task_id": t.task_id, "name": t.name, "source_template_id": t.source_template_id}
-        for t in task_master.list_all()
+        for t in task_master.list_visible(
+            principal.data_owner_id,
+            principal.organization_id,
+            principal.department,
+        )
         if t.assigned_agent == agent_id
         and t.state == TaskState.FAILED
         and "QUARANTINE" in (t.error_message or "").upper()
@@ -872,23 +977,26 @@ async def api_release_quarantine(agent_id: str):
 
 
 @app.get("/api/telemetry/spans")
-async def api_get_spans():
-    return [s.model_dump() for s in telemetry.get_recent_spans()]
+async def api_get_spans(request: Request):
+    principal = _data_principal(request)
+    return [s.model_dump() for s in telemetry.get_recent_spans(principal=principal)]
 
 
 @app.get("/api/telemetry/status")
-async def api_get_telemetry_status():
+async def api_get_telemetry_status(request: Request):
     """Reports what the tracing pipeline actually did, so the OpenTelemetry claim is checkable."""
-    exported = telemetry.get_exported_spans()
+    principal = _data_principal(request)
+    visible = telemetry.get_recent_spans(principal=principal)
     return {
         "otel_enabled": telemetry.otel_enabled,
         "cloud_trace_requested": settings.enable_cloud_trace,
-        "exported_span_count": telemetry.get_exported_span_total(),
-        "persisted_span_count": telemetry.get_persisted_span_total(),
-        "retained_exported_spans": len(exported),
-        "retained_span_records": len(telemetry.spans),
+        "scope": "current_principal",
+        "exported_span_count": len(visible),
+        "persisted_span_count": len(visible),
+        "retained_exported_spans": len(visible),
+        "retained_span_records": len(visible),
         "retention_limit": telemetry.spans.maxlen,
-        "last_exported_spans": list(exported[-10:])
+        "last_exported_spans": [],
     }
 
 
@@ -897,14 +1005,32 @@ async def api_get_telemetry_status():
 # ---------------------------------------------------------
 
 @app.get("/api/governance/board")
-async def api_governance_board(user: str = DEMO_USER_ID):
+async def api_governance_board(request: Request, user: Optional[str] = None):
     """Policies, verdicts, locks, plans and approvals in one aggregated read.
 
     The same object the Governance tab renders from, exposed as JSON so an auditor can take the
     board's numbers away and check them against the registers themselves. Read-only by
     construction: this module writes to nothing.
     """
-    return governance.build_board(_registered_user(user).user_id)
+    principal = _data_principal(request)
+    actor = _registered_user(principal.user_id)
+    templates_visible = task_template_registry.list_visible(
+        principal.data_owner_id,
+        principal.organization_id,
+        principal.department,
+        [actor.profile_id],
+    )
+    return governance.build_board(
+        principal.user_id,
+        visible_agents=_visible_fleet(principal),
+        visible_spans=telemetry.get_recent_spans(principal=principal),
+        visible_templates=templates_visible,
+        visible_tickets=_visible_tickets(principal),
+        visible_user_matrix=_visible_user_matrix(principal),
+        visible_policy_summary=policy_catalog.summary(
+            gateway.permissions, _data_actor(request)
+        ),
+    )
 
 
 @app.get("/api/governance/permissions")
@@ -918,28 +1044,213 @@ async def api_update_governance_permission(
     tool_pattern: str,
     action: str = Form(...),
 ):
-    """Expose the designed control without pretending an unauthenticated demo can use it."""
-    raise HTTPException(
-        status_code=403,
-        detail=(
-            "Permission editing is locked: the public build demonstrates authorization but "
-            "has no authentication authority for this security-root mutation."
-        ),
+    """Edit the live gateway rule only as a verified administrator.
+
+    The public demo remains locked because its shared member principal is not authenticated.
+    """
+    actor = _require_authenticated_admin_mutation()
+    _require_user_capability(actor, "permissions.edit")
+    try:
+        resolved_action = PermissionAction(action)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="action must be allow, deny or ask") from exc
+    rule = next(
+        (candidate for candidate in gateway.permissions.rules
+         if candidate.tool_pattern == tool_pattern),
+        None,
     )
+    if rule is None:
+        raise HTTPException(status_code=404, detail="Permission rule not found")
+    rule.action = resolved_action
+    return {
+        "status": "updated",
+        "tool_pattern": rule.tool_pattern,
+        "action": rule.action.value,
+        "reason": rule.reason,
+    }
 
 
 @app.get("/api/users")
-async def api_users():
-    return user_registry.capability_matrix()
+async def api_users(request: Request):
+    principal = _data_principal(request)
+    return _visible_user_matrix(principal)
+
+
+class RoleProfileCreateRequest(BaseModel):
+    profile_id: str
+    name: str
+    description: str
+    grants: List[str] = Field(default_factory=list)
+
+
+class RoleProfileUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    grants: Optional[List[str]] = None
+
+
+class UserCreateRequest(BaseModel):
+    user_id: str
+    name: str
+    profile_id: str
+    department: Optional[str] = None
+
+
+class UserUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    profile_id: Optional[str] = None
+    department: Optional[str] = None
+
+
+def _user_admin_context(request: Request) -> tuple[UserIdentity, RequestPrincipal]:
+    actor = _require_authenticated_admin_mutation()
+    principal = _data_principal(request)
+    return actor, principal
+
+
+def _raise_user_registry_error(exc: Exception) -> None:
+    if isinstance(exc, KeyError):
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if isinstance(exc, PermissionError):
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/role-profiles")
+async def api_create_role_profile(request: Request, payload: RoleProfileCreateRequest):
+    _actor, principal = _user_admin_context(request)
+    try:
+        profile = user_registry.create_profile(
+            RoleProfile(
+                profile_id=payload.profile_id,
+                name=payload.name,
+                description=payload.description,
+                organization_id=principal.organization_id,
+                grants=set(payload.grants),
+            ),
+            actor_organization=principal.organization_id,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        _raise_user_registry_error(exc)
+    return {"status": "created", "profile": profile.model_dump()}
+
+
+@app.put("/api/role-profiles/{profile_id}")
+async def api_update_role_profile(
+    request: Request,
+    profile_id: str,
+    payload: RoleProfileUpdateRequest,
+):
+    _actor, principal = _user_admin_context(request)
+    try:
+        profile = user_registry.update_profile(
+            profile_id,
+            actor_organization=principal.organization_id,
+            name=payload.name,
+            description=payload.description,
+            grants=set(payload.grants) if payload.grants is not None else None,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        _raise_user_registry_error(exc)
+    return {"status": "updated", "profile": profile.model_dump()}
+
+
+@app.delete("/api/role-profiles/{profile_id}")
+async def api_delete_role_profile(request: Request, profile_id: str):
+    _actor, principal = _user_admin_context(request)
+    try:
+        profile = user_registry.delete_profile(
+            profile_id,
+            actor_organization=principal.organization_id,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        _raise_user_registry_error(exc)
+    return {"status": "deleted", "profile": profile.model_dump()}
+
+
+@app.post("/api/users")
+async def api_create_user(request: Request, payload: UserCreateRequest):
+    _actor, principal = _user_admin_context(request)
+    try:
+        user = user_registry.create_user(
+            UserIdentity(
+                user_id=payload.user_id,
+                name=payload.name,
+                profile_id=payload.profile_id,
+                organization_id=principal.organization_id,
+                department=payload.department,
+            ),
+            actor_organization=principal.organization_id,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        _raise_user_registry_error(exc)
+    return {"status": "created", "user": user.model_dump()}
+
+
+@app.put("/api/users/{user_id}")
+async def api_update_user(request: Request, user_id: str, payload: UserUpdateRequest):
+    _actor, principal = _user_admin_context(request)
+    fields: Dict[str, Any] = {
+        "name": payload.name,
+        "profile_id": payload.profile_id,
+    }
+    if "department" in payload.model_fields_set:
+        fields["department"] = payload.department
+    try:
+        user = user_registry.update_user(
+            user_id,
+            actor_organization=principal.organization_id,
+            **fields,
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        _raise_user_registry_error(exc)
+    return {"status": "updated", "user": user.model_dump()}
+
+
+@app.post("/api/users/{user_id}/suspend")
+async def api_suspend_user(request: Request, user_id: str):
+    _actor, principal = _user_admin_context(request)
+    try:
+        user = user_registry.suspend_user(
+            user_id, actor_organization=principal.organization_id
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        _raise_user_registry_error(exc)
+    return {"status": "suspended", "user": user.model_dump()}
+
+
+@app.post("/api/users/{user_id}/reactivate")
+async def api_reactivate_user(request: Request, user_id: str):
+    _actor, principal = _user_admin_context(request)
+    try:
+        user = user_registry.reactivate_user(
+            user_id, actor_organization=principal.organization_id
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        _raise_user_registry_error(exc)
+    return {"status": "reactivated", "user": user.model_dump()}
+
+
+@app.delete("/api/users/{user_id}")
+async def api_delete_user(request: Request, user_id: str):
+    _actor, principal = _user_admin_context(request)
+    try:
+        user = user_registry.delete_user(
+            user_id, actor_organization=principal.organization_id
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        _raise_user_registry_error(exc)
+    return {"status": "deleted", "user": user.model_dump()}
 
 
 @app.get("/api/access/me")
 async def api_access_me(request: Request):
-    """Return the non-secret identifier other members can use for an explicit document share."""
+    """Return the non-authenticating handle usable for an explicit named share."""
     principal = _data_principal(request)
     return {
-        "data_owner_id": principal.data_owner_id,
+        "share_id": principal.data_owner_id,
         "department": principal.department,
+        "organization_id": principal.organization_id,
         "authenticated": principal.authenticated,
         "demo_workspace": settings.demo_mode,
     }
@@ -950,13 +1261,24 @@ class ArtifactSharingRequest(BaseModel):
     shared_with: List[str] = Field(default_factory=list)
 
 
+class RetentionRequest(BaseModel):
+    policy: Literal["creator_managed", "retain_until"]
+    retain_until: Optional[float] = None
+
+
+class LegalHoldRequest(BaseModel):
+    enabled: bool
+
+
 @app.get("/api/artifacts")
 async def api_artifacts(request: Request):
     principal = _data_principal(request)
     return [
         artifact.model_dump()
         for artifact in artifact_service.list_visible(
-            principal.data_owner_id, principal.department
+            principal.data_owner_id,
+            principal.department,
+            principal.organization_id,
         )
     ]
 
@@ -966,7 +1288,10 @@ async def api_download_artifact(request: Request, artifact_id: str):
     principal = _data_principal(request)
     try:
         artifact, content = artifact_service.download(
-            artifact_id, principal.data_owner_id, principal.department
+            artifact_id,
+            principal.data_owner_id,
+            principal.department,
+            principal.organization_id,
         )
     except ArtifactNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Result document not found") from exc
@@ -990,6 +1315,7 @@ async def api_update_artifact_sharing(
         artifact = artifact_service.update_sharing(
             artifact_id,
             requested_by=principal.data_owner_id,
+            requested_organization=principal.organization_id,
             requested_department=principal.department,
             visibility=payload.visibility,
             shared_with=payload.shared_with,
@@ -1006,7 +1332,9 @@ async def api_delete_artifact(request: Request, artifact_id: str):
     principal = _data_principal(request)
     try:
         artifact = artifact_service.delete_result(
-            artifact_id, requested_by=principal.data_owner_id
+            artifact_id,
+            requested_by=principal.data_owner_id,
+            requested_organization=principal.organization_id,
         )
     except ArtifactNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Result document not found") from exc
@@ -1023,13 +1351,59 @@ async def api_delete_artifact(request: Request, artifact_id: str):
     return {"status": "deleted", "artifact": artifact.model_dump()}
 
 
+@app.put("/api/artifacts/{artifact_id}/retention")
+async def api_set_artifact_retention(
+    request: Request,
+    artifact_id: str,
+    payload: RetentionRequest,
+):
+    actor = _mutation_actor()
+    _require_user_capability(actor, "artifact.retention.manage")
+    principal = _data_principal(request)
+    try:
+        artifact = artifact_service.set_retention(
+            artifact_id,
+            requested_organization=principal.organization_id,
+            policy=payload.policy,
+            retain_until=payload.retain_until,
+        )
+    except ArtifactNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Result document not found") from exc
+    except ArtifactAccessError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "updated", "artifact": artifact.model_dump()}
+
+
+@app.put("/api/artifacts/{artifact_id}/legal-hold")
+async def api_set_artifact_legal_hold(
+    request: Request,
+    artifact_id: str,
+    payload: LegalHoldRequest,
+):
+    actor = _mutation_actor()
+    _require_user_capability(actor, "artifact.legal_hold.manage")
+    principal = _data_principal(request)
+    try:
+        artifact = artifact_service.set_legal_hold(
+            artifact_id,
+            requested_organization=principal.organization_id,
+            enabled=payload.enabled,
+        )
+    except ArtifactNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Result document not found") from exc
+    return {"status": "updated", "artifact": artifact.model_dump()}
+
+
 @app.get("/api/policies")
-async def api_policies():
-    return policy_catalog.summary(gateway.permissions)
+async def api_policies(request: Request):
+    return policy_catalog.summary(gateway.permissions, _data_actor(request))
 
 
 @app.post("/api/policies")
 async def api_create_policy(
+    request: Request,
     title: str = Form(...),
     statement: str = Form(...),
     policy_type: str = Form("preference"),
@@ -1037,7 +1411,7 @@ async def api_create_policy(
     workflow_ref: Optional[str] = Form(None),
     visibility: str = Form("own"),
 ):
-    actor = _mutation_actor()
+    actor = _data_actor(request)
     try:
         policy = policy_catalog.create_policy(
             actor,
@@ -1057,12 +1431,13 @@ async def api_create_policy(
 
 @app.put("/api/policies/{policy_id}")
 async def api_update_policy(
+    request: Request,
     policy_id: str,
     title: Optional[str] = Form(None),
     statement: Optional[str] = Form(None),
     visibility: Optional[str] = Form(None),
 ):
-    actor = _mutation_actor()
+    actor = _data_actor(request)
     changes = {
         key: value
         for key, value in {"title": title, "statement": statement, "visibility": visibility}.items()
@@ -1081,6 +1456,7 @@ async def api_update_policy(
 
 @app.post("/api/policies/{policy_id}/bindings")
 async def api_bind_policy(
+    request: Request,
     policy_id: str,
     target_kind: str = Form(...),
     target_id: str = Form(...),
@@ -1088,13 +1464,20 @@ async def api_bind_policy(
     target_user_id: Optional[str] = Form(None),
     target_department_id: Optional[str] = Form(None),
 ):
-    actor = _mutation_actor()
-    policy = policy_catalog.get_policy(policy_id, gateway.permissions)
+    actor = _data_actor(request)
+    principal = _data_principal(request)
+    policy = policy_catalog.get_visible(policy_id, gateway.permissions, actor)
     if policy is None:
         raise HTTPException(status_code=404, detail=f"Policy '{policy_id}' does not exist.")
     target_owner = None
     if target_kind == "template":
-        template = task_template_registry.get_template(target_id)
+        template = task_template_registry.get_visible(
+            target_id,
+            principal.data_owner_id,
+            principal.organization_id,
+            principal.department,
+            _principal_roles(principal),
+        )
         if template is None:
             raise HTTPException(status_code=404, detail=f"Template '{target_id}' does not exist.")
         target_owner = template.owner
@@ -1102,7 +1485,13 @@ async def api_bind_policy(
         if lifecycle_manager.get_agent(target_id) is None:
             raise HTTPException(status_code=404, detail=f"Agent '{target_id}' does not exist.")
     elif target_kind == "skill":
-        if skill_registry.get_skill(target_id) is None:
+        if skill_registry.get_visible(
+            target_id,
+            principal.data_owner_id,
+            principal.organization_id,
+            principal.department,
+            _principal_roles(principal),
+        ) is None:
             raise HTTPException(status_code=404, detail=f"Skill '{target_id}' does not exist.")
     elif target_kind == "domain":
         if domain_registry.get_domain(target_id) is None:
@@ -1115,13 +1504,17 @@ async def api_bind_policy(
     if scope_level == "other_user":
         if not target_user_id:
             raise HTTPException(status_code=422, detail="other_user scope needs target_user_id.")
-        _registered_user(target_user_id)
+        target_user = _registered_user(target_user_id)
+        if target_user.organization_id != principal.organization_id:
+            raise HTTPException(status_code=404, detail="Target user does not exist")
     elif target_user_id:
         raise HTTPException(status_code=422, detail="target_user_id is valid only for other_user scope.")
     if scope_level == "department":
         if not target_department_id:
             raise HTTPException(status_code=422, detail="department scope needs target_department_id.")
-        if target_department_id not in user_registry.list_departments():
+        if target_department_id not in user_registry.list_departments(
+            principal.organization_id
+        ):
             raise HTTPException(
                 status_code=404, detail=f"Department '{target_department_id}' does not exist."
             )
@@ -1149,9 +1542,10 @@ async def api_bind_policy(
 
 @app.delete("/api/policy-bindings/{binding_id}")
 async def api_remove_policy_binding(
+    request: Request,
     binding_id: str,
 ):
-    actor = _mutation_actor()
+    actor = _data_actor(request)
     try:
         binding = policy_catalog.remove_binding(actor, binding_id, registry=gateway.permissions)
     except KeyError as exc:
@@ -1168,7 +1562,11 @@ async def api_get_memory(request: Request):
     principal = _data_principal(request)
     return [
         m.model_dump()
-        for m in memory_bank.list_visible(principal.data_owner_id, principal.department)
+        for m in memory_bank.list_visible(
+            principal.data_owner_id,
+            principal.department,
+            principal.organization_id,
+        )
     ]
 
 
@@ -1207,6 +1605,7 @@ async def api_create_memory(
         owner=owner,
         visibility=visibility,
         department_id=department_id,
+        organization_id=principal.organization_id,
     )
     return {"status": "created", "entry": entry.model_dump()}
 
@@ -1226,6 +1625,7 @@ async def api_update_memory(
         content=content,
         requested_by=principal.data_owner_id,
         requested_department=principal.department,
+        requested_organization=principal.organization_id,
         can_manage_department=user_registry.is_capability_granted(
             actor, "memory.manage.department"
         ),
@@ -1244,6 +1644,7 @@ async def api_delete_memory(request: Request, key: str):
         key,
         requested_by=principal.data_owner_id,
         requested_department=principal.department,
+        requested_organization=principal.organization_id,
         can_manage_department=user_registry.is_capability_granted(
             actor, "memory.manage.department"
         ),
@@ -1264,7 +1665,9 @@ async def api_get_contacts(request: Request):
     return [
         contact.model_dump()
         for contact in privacy_contact_hub.list_visible(
-            principal.data_owner_id, principal.department
+            principal.data_owner_id,
+            principal.department,
+            principal.organization_id,
         )
     ]
 
@@ -1312,6 +1715,7 @@ async def api_create_contact(
         visibility=visibility,
         owner_id=owner_id,
         department_id=department_id,
+        organization_id=principal.organization_id,
     )
     return {"status": "created", "contact": contact.model_dump()}
 
@@ -1330,6 +1734,7 @@ async def api_contact_opt_out(
             reason,
             requested_by=principal.data_owner_id,
             requested_department=principal.department,
+            requested_organization=principal.organization_id,
             can_manage_department=user_registry.is_capability_granted(
                 actor, "contact.manage.department"
             ),
@@ -1350,6 +1755,7 @@ async def api_get_dsgvo_audit(request: Request):
     return privacy_contact_hub.run_dsgvo_retention_audit(
         requested_by=principal.data_owner_id,
         requested_department=principal.department,
+        requested_organization=principal.organization_id,
     )
 
 
@@ -1357,56 +1763,101 @@ async def api_get_dsgvo_audit(request: Request):
 # API Endpoints for Prompts & Versioning / Permissions
 # ---------------------------------------------------------
 
+def _require_component_edit_surface() -> None:
+    if settings.demo_mode:
+        raise HTTPException(
+            status_code=403,
+            detail="Component version, sharing and deletion are locked in the public demo.",
+        )
+
 @app.get("/api/prompts")
-async def api_get_prompts():
-    return [p.model_dump() for p in prompt_registry.list_all()]
+async def api_get_prompts(request: Request):
+    principal = _data_principal(request)
+    return [
+        p.model_dump()
+        for p in prompt_registry.list_visible(
+            principal.data_owner_id,
+            principal.organization_id,
+            principal.department,
+            _principal_roles(principal),
+        )
+    ]
 
 
 @app.post("/api/prompts/create")
 async def api_create_prompt(
+    request: Request,
     title: str = Form(...),
     purpose: str = Form(...),
     category: str = Form("custom"),
     text: str = Form(...),
-    visibility: str = Form("organization"),
+    visibility: str = Form("private"),
     requires_approval: bool = Form(False)
 ):
-    _require_user_capability(_mutation_actor(), "prompt.create")
-    prompt = prompt_registry.create_prompt(
-        title=title,
-        purpose=purpose,
-        category=category,
-        text=text,
-        variables=[],
-        tags=[],
-        visibility=visibility,
-        requires_approval=True if settings.demo_mode else requires_approval
-    )
+    actor = _mutation_actor()
+    principal = _data_principal(request)
+    _require_user_capability(actor, "prompt.create")
+    try:
+        prompt = prompt_registry.create_prompt_authorized(
+            title=title,
+            purpose=purpose,
+            category=category,
+            text=text,
+            variables=[],
+            tags=[],
+            owner_id=principal.data_owner_id,
+            organization_id=principal.organization_id,
+            department_id=principal.department if visibility == "department" else None,
+            visibility=visibility,
+            requires_approval=True if settings.demo_mode else requires_approval,
+            can_publish_global=user_registry.is_capability_granted(
+                actor, "component.publish.global"
+            ),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "created", "prompt": prompt.model_dump()}
 
 
 @app.post("/api/prompts/{prompt_id}/version")
 async def api_add_prompt_version(
+    request: Request,
     prompt_id: str,
     new_version_number: str = Form(...),
     new_text: str = Form(...),
     change_summary: str = Form(...)
 ):
-    _require_authenticated_admin_mutation()
-    prompt = prompt_registry.add_prompt_version(
-        prompt_id=prompt_id,
-        new_version_number=new_version_number,
-        new_text=new_text,
-        change_summary=change_summary
-    )
-    if not prompt:
-        raise HTTPException(status_code=404, detail="Prompt not found")
+    _require_component_edit_surface()
+    actor = _mutation_actor()
+    principal = _data_principal(request)
+    _require_user_capability(actor, "prompt.create")
+    try:
+        prompt = prompt_registry.add_prompt_version_authorized(
+            prompt_id=prompt_id,
+            new_version_number=new_version_number,
+            new_text=new_text,
+            change_summary=change_summary,
+            requested_by=principal.data_owner_id,
+            organization_id=principal.organization_id,
+            can_edit_foreign=user_registry.is_capability_granted(
+                actor, "prompt.edit.foreign"
+            ),
+        )
+    except PromptNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Prompt not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return {"status": "version_added", "prompt": prompt.model_dump()}
 
 
-def _references_to(prompt_id: Optional[str] = None,
-                   version_number: Optional[str] = None,
-                   skill_id: Optional[str] = None) -> List[str]:
+def _references_to(
+    principal: RequestPrincipal,
+    prompt_id: Optional[str] = None,
+    version_number: Optional[str] = None,
+    skill_id: Optional[str] = None,
+) -> List[str]:
     """Everything that would break if this prompt, version or skill disappeared.
 
     Checked here rather than inside the registries: task templates and chat sessions live a
@@ -1415,78 +1866,186 @@ def _references_to(prompt_id: Optional[str] = None,
     """
     users: List[str] = []
 
+    visible_template_ids = {
+        template.template_id
+        for template in task_template_registry.list_visible(
+            principal.data_owner_id,
+            principal.organization_id,
+            principal.department,
+            _principal_roles(principal),
+        )
+    }
     for template in task_template_registry.list_all():
         for step in template.steps:
             if prompt_id and step.prompt_id == prompt_id:
                 if version_number is None or step.prompt_version == version_number:
-                    users.append(f"task '{template.name}' (step {step.step_id})")
+                    users.append(
+                        f"task '{template.name}' (step {step.step_id})"
+                        if template.template_id in visible_template_ids
+                        else "an inaccessible task"
+                    )
             if skill_id and skill_id in step.skill_ids:
-                users.append(f"task '{template.name}' (step {step.step_id})")
+                users.append(
+                    f"task '{template.name}' (step {step.step_id})"
+                    if template.template_id in visible_template_ids
+                    else "an inaccessible task"
+                )
 
     # A recorded conversation pins the version it ran on. Deleting that version would leave the
     # transcript citing something nobody can read any more, which is the opposite of what pinning
     # is for.
+    visible_session_ids = {
+        session.session_id
+        for session in chat_service.list_sessions(
+            principal.data_owner_id,
+            principal.department,
+            principal.organization_id,
+        )
+    }
     for session in chat_service.list_sessions():
         for message in session.messages:
             if prompt_id and getattr(message, "prompt_id", "") == prompt_id:
                 if version_number is None or getattr(message, "prompt_version", "") == version_number:
-                    users.append(f"conversation '{session.title}'")
+                    users.append(
+                        f"conversation '{session.title}'"
+                        if session.session_id in visible_session_ids
+                        else "an inaccessible conversation"
+                    )
             if skill_id and skill_id in getattr(message, "skill_ids", []):
-                users.append(f"conversation '{session.title}'")
+                users.append(
+                    f"conversation '{session.title}'"
+                    if session.session_id in visible_session_ids
+                    else "an inaccessible conversation"
+                )
 
     # One template can hit several times; the operator needs the list, not the multiplicity.
     return sorted(set(users))
 
 
 @app.delete("/api/prompts/{prompt_id}")
-async def api_delete_prompt(prompt_id: str):
-    _require_authenticated_admin_mutation()
-    if not prompt_registry.get_prompt(prompt_id):
-        raise PromptNotFoundError(prompt_id)
-    users = _references_to(prompt_id=prompt_id)
+async def api_delete_prompt(request: Request, prompt_id: str):
+    _require_component_edit_surface()
+    actor = _mutation_actor()
+    principal = _data_principal(request)
+    _require_user_capability(actor, "prompt.create")
+    prompt = prompt_registry.get_visible(
+        prompt_id,
+        principal.data_owner_id,
+        principal.organization_id,
+        principal.department,
+        _principal_roles(principal),
+    )
+    if prompt is None:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    users = _references_to(principal, prompt_id=prompt_id)
     if users:
         raise ComponentInUseError("prompt", prompt_id, users)
-    prompt_registry.delete_prompt(prompt_id)
+    try:
+        prompt_registry.delete_prompt_authorized(
+            prompt_id,
+            principal.data_owner_id,
+            principal.organization_id,
+            user_registry.is_capability_granted(actor, "prompt.edit.foreign"),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return {"status": "deleted", "prompt_id": prompt_id}
 
 
 @app.delete("/api/prompts/{prompt_id}/versions/{version_number}")
-async def api_delete_prompt_version(prompt_id: str, version_number: str):
-    _require_authenticated_admin_mutation()
-    users = _references_to(prompt_id=prompt_id, version_number=version_number)
+async def api_delete_prompt_version(request: Request, prompt_id: str, version_number: str):
+    _require_component_edit_surface()
+    actor = _mutation_actor()
+    principal = _data_principal(request)
+    _require_user_capability(actor, "prompt.create")
+    if prompt_registry.get_visible(
+        prompt_id,
+        principal.data_owner_id,
+        principal.organization_id,
+        principal.department,
+        _principal_roles(principal),
+    ) is None:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    users = _references_to(
+        principal, prompt_id=prompt_id, version_number=version_number
+    )
     if users:
         raise ComponentInUseError(f"version {version_number} of prompt", prompt_id, users)
-    prompt = prompt_registry.delete_version(prompt_id, version_number)
+    try:
+        prompt = prompt_registry.delete_version_authorized(
+            prompt_id,
+            version_number,
+            principal.data_owner_id,
+            principal.organization_id,
+            user_registry.is_capability_granted(actor, "prompt.edit.foreign"),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return {"status": "deleted", "prompt": prompt.model_dump()}
 
 
 @app.delete("/api/skills/{skill_id}")
-async def api_delete_skill(skill_id: str):
-    _require_authenticated_admin_mutation()
-    if not skill_registry.get_skill(skill_id):
-        raise SkillNotFoundError(skill_id)
-    users = _references_to(skill_id=skill_id)
+async def api_delete_skill(request: Request, skill_id: str):
+    _require_component_edit_surface()
+    actor = _mutation_actor()
+    principal = _data_principal(request)
+    _require_user_capability(actor, "skill.create")
+    if skill_registry.get_visible(
+        skill_id,
+        principal.data_owner_id,
+        principal.organization_id,
+        principal.department,
+        _principal_roles(principal),
+    ) is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    users = _references_to(principal, skill_id=skill_id)
     if users:
         raise ComponentInUseError("skill", skill_id, users)
-    skill_registry.delete_skill(skill_id)
+    try:
+        skill_registry.delete_skill_authorized(
+            skill_id,
+            principal.data_owner_id,
+            principal.organization_id,
+            user_registry.is_capability_granted(actor, "skill.edit.foreign"),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return {"status": "deleted", "skill_id": skill_id}
 
 
 @app.post("/api/prompts/{prompt_id}/permissions")
 async def api_update_prompt_permissions(
+    request: Request,
     prompt_id: str,
     visibility: str = Form("organization"),
     requires_approval: bool = Form(False)
 ):
-    _require_authenticated_admin_mutation()
-    prompt = prompt_registry.update_permissions(
-        prompt_id=prompt_id,
-        visibility=visibility,
-        requires_approval=requires_approval,
-        allowed_roles=["orchestrator", "task_solver"]
-    )
-    if not prompt:
-        raise HTTPException(status_code=404, detail="Prompt not found")
+    _require_component_edit_surface()
+    actor = _mutation_actor()
+    principal = _data_principal(request)
+    _require_user_capability(actor, "prompt.create")
+    try:
+        prompt = prompt_registry.update_permissions_authorized(
+            prompt_id=prompt_id,
+            visibility=visibility,
+            requires_approval=requires_approval,
+            allowed_roles=["orchestrator", "task_solver"],
+            requested_by=principal.data_owner_id,
+            organization_id=principal.organization_id,
+            department_id=principal.department if visibility == "department" else None,
+            can_edit_foreign=user_registry.is_capability_granted(
+                actor, "prompt.edit.foreign"
+            ),
+            can_publish_global=user_registry.is_capability_granted(
+                actor, "component.publish.global"
+            ),
+        )
+    except PromptNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Prompt not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "permissions_updated", "prompt": prompt.model_dump()}
 
 
@@ -1495,14 +2054,30 @@ async def api_update_prompt_permissions(
 # ---------------------------------------------------------
 
 @app.get("/api/skills")
-async def api_get_skills():
-    return [s.model_dump() for s in skill_registry.list_all()]
+async def api_get_skills(request: Request):
+    principal = _data_principal(request)
+    return [
+        s.model_dump()
+        for s in skill_registry.list_visible(
+            principal.data_owner_id,
+            principal.organization_id,
+            principal.department,
+            _principal_roles(principal),
+        )
+    ]
 
 
 @app.get("/api/skills/{skill_id}")
-async def api_get_skill(skill_id: str):
+async def api_get_skill(request: Request, skill_id: str):
     """One skill including its body, so the console can copy it without inlining 32 bodies."""
-    skill = skill_registry.get_skill(skill_id)
+    principal = _data_principal(request)
+    skill = skill_registry.get_visible(
+        skill_id,
+        principal.data_owner_id,
+        principal.organization_id,
+        principal.department,
+        _principal_roles(principal),
+    )
     if not skill:
         raise SkillNotFoundError(skill_id)
     return skill.model_dump()
@@ -1510,6 +2085,7 @@ async def api_get_skill(skill_id: str):
 
 @app.post("/api/skills/create")
 async def api_create_skill(
+    request: Request,
     name: str = Form(...),
     pillar: str = Form("domain"),
     description: str = Form(...),
@@ -1517,56 +2093,92 @@ async def api_create_skill(
     body: str = Form("")
 ):
     """Register an operator-authored skill so it is selectable in the chat console."""
-    _require_user_capability(_mutation_actor(), "skill.create")
+    actor = _mutation_actor()
+    principal = _data_principal(request)
+    _require_user_capability(actor, "skill.create")
     tools = [t.strip() for t in required_tools.split(",") if t.strip()]
-    skill = skill_registry.create_skill(
-        name=name,
-        pillar=pillar,
-        description=description,
-        body=body,
-        required_tools=tools,
-        execution_gate="locked" if settings.demo_mode else "auto",
-    )
+    try:
+        skill = skill_registry.create_skill_authorized(
+            name=name,
+            pillar=pillar,
+            description=description,
+            body=body,
+            required_tools=tools,
+            owner_id=principal.data_owner_id,
+            organization_id=principal.organization_id,
+            visibility="private",
+            execution_gate="locked" if settings.demo_mode else "auto",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "created", "skill": skill.model_dump()}
 
 
 @app.post("/api/skills/{skill_id}/version")
 async def api_add_skill_version(
+    request: Request,
     skill_id: str,
     new_version_number: str = Form(...),
     change_summary: str = Form(...),
     required_tools: str = Form("")
 ):
-    _require_authenticated_admin_mutation()
+    _require_component_edit_surface()
+    actor = _mutation_actor()
+    principal = _data_principal(request)
+    _require_user_capability(actor, "skill.create")
     tools = [t.strip() for t in required_tools.split(",") if t.strip()]
     try:
-        skill = skill_registry.add_skill_version(
+        skill = skill_registry.add_skill_version_authorized(
             skill_id=skill_id,
             new_version_number=new_version_number,
             change_summary=change_summary,
-            required_tools=tools
+            required_tools=tools,
+            requested_by=principal.data_owner_id,
+            organization_id=principal.organization_id,
+            can_edit_foreign=user_registry.is_capability_granted(
+                actor, "skill.edit.foreign"
+            ),
         )
         return {"status": "version_added", "skill": skill.model_dump()}
     except SkillNotFoundError:
         raise HTTPException(status_code=404, detail="Skill not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @app.post("/api/skills/{skill_id}/permissions")
 async def api_update_skill_permissions(
+    request: Request,
     skill_id: str,
     visibility: str = Form("organization"),
     execution_gate: str = Form("auto")
 ):
-    _require_authenticated_admin_mutation()
+    _require_component_edit_surface()
+    actor = _mutation_actor()
+    principal = _data_principal(request)
+    _require_user_capability(actor, "skill.create")
     try:
-        skill = skill_registry.update_permissions(
+        skill = skill_registry.update_permissions_authorized(
             skill_id=skill_id,
             visibility=visibility,
-            execution_gate=execution_gate
+            execution_gate=execution_gate,
+            requested_by=principal.data_owner_id,
+            organization_id=principal.organization_id,
+            department_id=principal.department if visibility == "department" else None,
+            can_edit_foreign=user_registry.is_capability_granted(
+                actor, "skill.edit.foreign"
+            ),
+            can_publish_global=user_registry.is_capability_granted(
+                actor, "component.publish.global"
+            ),
         )
         return {"status": "permissions_updated", "skill": skill.model_dump()}
     except SkillNotFoundError:
         raise HTTPException(status_code=404, detail="Skill not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/domains")
@@ -1580,17 +2192,22 @@ async def api_get_domains():
 
 @app.post("/api/tickets/create")
 async def api_create_ticket(
+    request: Request,
     title: str = Form(...),
     description: str = Form(...),
     agent_id: str = Form("agent:orchestrator"),
     priority: str = Form("normal")
 ):
     actor = _mutation_actor()
+    principal = _data_principal(request)
     _require_user_capability(actor, "ticket.create")
     pri = TicketPriority.NORMAL
-    if priority == "high": pri = TicketPriority.HIGH
-    elif priority == "critical": pri = TicketPriority.CRITICAL
-    elif priority == "low": pri = TicketPriority.LOW
+    if priority == "high":
+        pri = TicketPriority.HIGH
+    elif priority == "critical":
+        pri = TicketPriority.CRITICAL
+    elif priority == "low":
+        pri = TicketPriority.LOW
 
     ticket = ticket_master.create_approval_ticket(
         title=title,
@@ -1598,8 +2215,13 @@ async def api_create_ticket(
         agent_id=agent_id,
         tool_name="operator_manual_ticket",
         payload={"created_by": actor.user_id},
-        requested_by=actor.user_id,
-        priority=pri
+        requested_by=principal.data_owner_id,
+        owner_id=principal.data_owner_id,
+        department_id=principal.department,
+        visibility="private",
+        assigned_to_role="operator",
+        priority=pri,
+        organization_id=principal.organization_id,
     )
     return {"status": "created", "ticket": ticket.model_dump()}
 
@@ -1613,7 +2235,10 @@ async def api_list_tickets(request: Request):
 
 @app.post("/api/tickets/{ticket_id}/approve")
 async def api_approve_ticket(request: Request, ticket_id: str):
+    principal = _data_principal(request)
     pending = ticket_master.get_ticket(ticket_id)
+    if pending is None or pending not in _visible_tickets(principal):
+        raise HTTPException(status_code=404, detail="Ticket not found")
     if settings.demo_mode and pending and pending.tool_name in {
         "policy_binding_request", "policy_binding_removal_request"
     }:
@@ -1621,15 +2246,23 @@ async def api_approve_ticket(request: Request, ticket_id: str):
             status_code=403,
             detail="Policy-binding approvals are locked in the unauthenticated public demo.",
         )
-    _require_user_capability(_mutation_actor(), "approval.decide")
-    principal = _data_principal(request)
+    actor = _mutation_actor()
+    _require_user_capability(actor, "approval.decide")
     pending_doc_id = pending.payload.get("doc_id") if pending else None
     if pending_doc_id and processed_invoices.get_visible(pending_doc_id, principal) is None:
         raise HTTPException(status_code=404, detail="Structured document not found")
     try:
-        ticket = ticket_master.approve_ticket(ticket_id)
+        ticket = ticket_master.approve_ticket(
+            ticket_id,
+            decided_by=principal.data_owner_id,
+            decider_user_id=actor.user_id,
+            decider_roles=[actor.profile_id],
+            decider_organization_id=principal.organization_id,
+        )
     except TicketNotFoundError:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     # If ticket was a dispute email approval, update invoice state
     doc_id = ticket.payload.get("doc_id")
@@ -1640,12 +2273,7 @@ async def api_approve_ticket(request: Request, ticket_id: str):
         inv.status = InvoiceStatus.DISPUTED
         processed_invoices[doc_id] = inv
 
-    # The gateway parked the agent in WAITING_APPROVAL when it hit the ASK gate; release it now
-    agent = lifecycle_manager.get_agent(ticket.agent_id)
-    if agent and agent.status == AgentStatus.WAITING_APPROVAL:
-        lifecycle_manager.update_agent_status(ticket.agent_id, AgentStatus.IDLE)
-
-    policy_catalog.resolve_forward(ticket_id, approved=True)
+    policy_catalog.resolve_forward(ticket_id, approved=True, actor=_data_actor(request))
 
     return {"status": "approved", "ticket": ticket.model_dump()}
 
@@ -1656,7 +2284,10 @@ async def api_reject_ticket(
     ticket_id: str,
     reason: str = Form("Rejected by operator"),
 ):
+    principal = _data_principal(request)
     pending = ticket_master.get_ticket(ticket_id)
+    if pending is None or pending not in _visible_tickets(principal):
+        raise HTTPException(status_code=404, detail="Ticket not found")
     if settings.demo_mode and pending and pending.tool_name in {
         "policy_binding_request", "policy_binding_removal_request"
     }:
@@ -1664,22 +2295,28 @@ async def api_reject_ticket(
             status_code=403,
             detail="Policy-binding decisions are locked in the unauthenticated public demo.",
         )
-    _require_user_capability(_mutation_actor(), "approval.decide")
+    actor = _mutation_actor()
+    _require_user_capability(actor, "approval.decide")
     pending_doc_id = pending.payload.get("doc_id") if pending else None
     if pending_doc_id and processed_invoices.get_visible(
-        pending_doc_id, _data_principal(request)
+        pending_doc_id, principal
     ) is None:
         raise HTTPException(status_code=404, detail="Structured document not found")
     try:
-        ticket = ticket_master.reject_ticket(ticket_id, reason)
+        ticket = ticket_master.reject_ticket(
+            ticket_id,
+            reason,
+            decided_by=principal.data_owner_id,
+            decider_user_id=actor.user_id,
+            decider_roles=[actor.profile_id],
+            decider_organization_id=principal.organization_id,
+        )
     except TicketNotFoundError:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    agent = lifecycle_manager.get_agent(ticket.agent_id)
-    if agent and agent.status == AgentStatus.WAITING_APPROVAL:
-        lifecycle_manager.update_agent_status(ticket.agent_id, AgentStatus.IDLE)
-
-    policy_catalog.resolve_forward(ticket_id, approved=False)
+    policy_catalog.resolve_forward(ticket_id, approved=False, actor=_data_actor(request))
 
     return {"status": "rejected", "ticket": ticket.model_dump()}
 
@@ -1692,7 +2329,8 @@ async def api_ticket_correction_letter(request: Request, ticket_id: str):
     as a creator-owned private artifact before it is returned, so it survives a process restart.
     """
     ticket = ticket_master.get_ticket(ticket_id)
-    if ticket is None:
+    principal = _data_principal(request)
+    if ticket is None or ticket not in _visible_tickets(principal):
         raise TicketNotFoundError(ticket_id)
 
     doc_id = ticket.payload.get("doc_id")
@@ -1702,7 +2340,7 @@ async def api_ticket_correction_letter(request: Request, ticket_id: str):
             detail="This ticket is not an invoice dispute, so there is no correction letter"
         )
 
-    invoice = processed_invoices.get_visible(doc_id, _data_principal(request))
+    invoice = processed_invoices.get_visible(doc_id, principal)
     if invoice is None:
         raise HTTPException(
             status_code=404,
@@ -1714,7 +2352,12 @@ async def api_ticket_correction_letter(request: Request, ticket_id: str):
 
     # The same opt-out check the draft passed through. A letter is outbound correspondence too,
     # so a vendor who opted out must not get one rendered behind the gate's back.
-    permission = privacy_contact_hub.validate_send_permission(invoice.vendor_email)
+    permission = privacy_contact_hub.validate_send_permission(
+        invoice.vendor_email,
+        requested_by=principal.data_owner_id,
+        requested_department=principal.department,
+        requested_organization=principal.organization_id,
+    )
     if not permission["allowed"]:
         raise ContactOptOutViolationError(invoice.vendor_email or "unknown", permission["reason"])
 
@@ -1730,13 +2373,13 @@ async def api_ticket_correction_letter(request: Request, ticket_id: str):
         })
 
     filename = letter_filename(build_correction_letter(invoice, ticket.created_at))
-    principal = _data_principal(request)
     try:
         artifact = artifact_service.store_result(
             content=result.output,
             filename=filename,
             media_type="application/pdf",
             creator_id=principal.data_owner_id,
+            creator_organization=principal.organization_id,
             creator_department=principal.department,
             source_kind="correction_letter",
             source_ref=ticket.ticket_id,
@@ -1755,11 +2398,13 @@ async def api_ticket_correction_letter(request: Request, ticket_id: str):
 
 @app.post("/api/tasks/create")
 async def api_create_task(
+    request: Request,
     name: str = Form(...),
     assigned_agent: str = Form("agent:task-solver"),
     input_payload: str = Form("")
 ):
     _require_user_capability(_mutation_actor(), "task.manage")
+    principal = _data_principal(request)
     payload = {}
     if input_payload:
         try:
@@ -1769,11 +2414,21 @@ async def api_create_task(
 
     # The task is queued, not executed: there is no worker behind this endpoint, and
     # reporting a completed run with fabricated evidence would be a false claim.
-    span = telemetry.start_span(f"queue_task:{name}", assigned_agent, {"task_name": name})
+    span = telemetry.start_span(
+        f"queue_task:{name}",
+        assigned_agent,
+        {"task_name": name},
+        principal=principal,
+    )
     task = task_master.create_task(
         name=name,
         assigned_agent=assigned_agent,
-        input_data=payload
+        input_data=payload,
+        owner_id=principal.data_owner_id,
+        organization_id=principal.organization_id,
+        department_id=principal.department,
+        visibility="private",
+        actor_roles=_principal_roles(principal),
     )
     telemetry.end_span(span, status="OK")
 
@@ -1785,18 +2440,37 @@ async def api_create_task(
 
 
 @app.post("/api/tasks/{task_id}/cancel")
-async def api_cancel_task(task_id: str, reason: str = Form("Cancelled by the operator")):
+async def api_cancel_task(
+    request: Request,
+    task_id: str,
+    reason: str = Form("Cancelled by the operator"),
+):
     """Call off a task that has not run yet. The state machine refuses anything else."""
-    _require_user_capability(_mutation_actor(), "task.manage")
-    task = task_master.cancel_task(task_id, reason=reason)
+    actor = _mutation_actor()
+    _require_user_capability(actor, "task.manage")
+    principal = _data_principal(request)
+    task = task_master.cancel_authorized(
+        task_id,
+        reason=reason,
+        requested_by=principal.data_owner_id,
+        organization_id=principal.organization_id,
+        can_edit_foreign=user_registry.is_capability_granted(actor, "task.edit.foreign"),
+    )
     return {"status": "cancelled", "task": task.model_dump()}
 
 
 @app.delete("/api/tasks/{task_id}")
-async def api_delete_task(task_id: str):
+async def api_delete_task(request: Request, task_id: str):
     """Remove a settled record. Only a terminal task may go - see TaskMaster.delete_task."""
-    _require_user_capability(_mutation_actor(), "task.manage")
-    task_master.delete_task(task_id)
+    actor = _mutation_actor()
+    _require_user_capability(actor, "task.manage")
+    principal = _data_principal(request)
+    task_master.delete_authorized(
+        task_id,
+        requested_by=principal.data_owner_id,
+        organization_id=principal.organization_id,
+        can_edit_foreign=user_registry.is_capability_granted(actor, "task.edit.foreign"),
+    )
     return {"status": "deleted", "task_id": task_id}
 
 
@@ -1824,13 +2498,96 @@ def _schedule_spec_from_form(
     raise HTTPException(status_code=400, detail=f"Unknown routine kind '{kind}'. Use interval, daily or cron.")
 
 
+def _require_persistent_automation_surface() -> None:
+    if _public_demo_limits_active():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Persistent routines and schedules are disabled in the public demo; "
+                "use a manual run or an authenticated deployment."
+            ),
+        )
+
+
+def _require_template_edit(
+    request: Request,
+    template_id: str,
+    actor: UserIdentity,
+):
+    principal = _data_principal(request)
+    template = task_template_registry.get_template(template_id)
+    if template is None:
+        raise TemplateNotFoundError(template_id)
+    if not task_template_registry.can_edit(
+        template,
+        principal.data_owner_id,
+        principal.organization_id,
+        can_edit_foreign=user_registry.is_capability_granted(
+            actor, "template.edit.foreign"
+        ),
+    ):
+        raise TemplatePermissionError(template_id, principal.data_owner_id, template.owner)
+    return template
+
+
 @app.get("/api/task-templates")
-async def api_list_task_templates(viewer: Optional[str] = None):
-    return _routine_catalog(viewer=viewer)
+async def api_list_task_templates(request: Request):
+    return _routine_catalog(_data_principal(request))
+
+
+def _validate_step_component_access(
+    principal: RequestPrincipal, steps: List[Step]
+) -> None:
+    """Reject opaque, foreign or stale component references before a template is stored."""
+    roles = _principal_roles(principal)
+    for step in steps:
+        assigned_agent = lifecycle_manager.get_agent(step.assigned_agent)
+        if assigned_agent is None or not assigned_agent.is_tool_scoped(
+            EXECUTE_TEMPLATE_TOOL
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Step '{step.step_id}' references an agent that cannot execute templates."
+                ),
+            )
+        for skill_id in step.skill_ids:
+            if skill_registry.get_visible(
+                skill_id,
+                principal.data_owner_id,
+                principal.organization_id,
+                principal.department,
+                roles,
+            ) is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Step '{step.step_id}' references an unavailable skill.",
+                )
+        if step.prompt_source == "library" and step.prompt_id:
+            prompt = prompt_registry.get_visible(
+                step.prompt_id,
+                principal.data_owner_id,
+                principal.organization_id,
+                principal.department,
+                roles,
+            )
+            if prompt is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Step '{step.step_id}' references an unavailable prompt.",
+                )
+            if step.prompt_version and prompt_registry.get_version(
+                step.prompt_id, step.prompt_version
+            ) is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Step '{step.step_id}' references an unavailable prompt version.",
+                )
 
 
 @app.post("/api/task-templates")
 async def api_create_task_template(
+    request: Request,
     name: str = Form(...),
     # Accepted for compatibility with older clients, but never trusted as ownership evidence.
     owner: str = Form("operator"),
@@ -1848,6 +2605,7 @@ async def api_create_task_template(
     steps: str = Form("")
 ):
     actor = _mutation_actor()
+    principal = _data_principal(request)
     _require_user_capability(actor, "template.create")
     explicit_steps: Optional[List[Step]] = None
     if steps:
@@ -1863,9 +2621,20 @@ async def api_create_task_template(
             raise HTTPException(status_code=422, detail=str(exc))
 
     try:
+        candidate_steps = explicit_steps or [Step(
+            step_id="step-1",
+            position=0,
+            assigned_agent=assigned_agent,
+            skill_ids=[s.strip() for s in skill_ids.split(",") if s.strip()],
+            prompt_source=prompt_source,
+            prompt_id=prompt_id or None,
+            prompt_version=prompt_version or None,
+            custom_prompt_text=custom_prompt_text or None,
+        )]
+        _validate_step_component_access(principal, candidate_steps)
         template = task_template_registry.create_template(
             name=name,
-            owner=actor.user_id,
+            owner=principal.data_owner_id,
             prompt_source=prompt_source,
             prompt_id=prompt_id or None,
             prompt_version=prompt_version or None,
@@ -1875,7 +2644,9 @@ async def api_create_task_template(
             visibility=visibility,
             requires_approval=requires_approval,
             group=group or None,
-            steps=explicit_steps
+            steps=candidate_steps,
+            organization_id=principal.organization_id,
+            department_id=principal.department if visibility == "department" else None,
         )
     except PydanticValidationError as exc:
         # Only reachable via the explicit `steps` path above; the flat-field path builds one
@@ -1885,20 +2656,39 @@ async def api_create_task_template(
 
 
 @app.get("/api/task-templates/{template_id}")
-async def api_get_task_template(template_id: str):
-    template = task_template_registry.get_template(template_id)
+async def api_get_task_template(request: Request, template_id: str):
+    principal = _data_principal(request)
+    template = task_template_registry.get_visible(
+        template_id,
+        requested_by=principal.data_owner_id,
+        organization_id=principal.organization_id,
+        department_id=principal.department,
+        actor_roles=_principal_roles(principal),
+    )
     if not template:
         raise TemplateNotFoundError(template_id)
     return {
         "template": template.model_dump(),
         "catalog": routines.catalog_entry(template),
         # The "Verlauf" (run history): no second store, just this template's own TaskRecords.
-        "runs": [r.model_dump() for r in task_master.list_by_template(template_id)]
+        "runs": [
+            run.model_dump() for run in task_master.list_by_template(template_id)
+            if task_master.can_read(
+                run,
+                principal.data_owner_id,
+                principal.organization_id,
+                principal.department,
+            )
+        ]
     }
 
 
 @app.put("/api/task-templates/{template_id}/steps")
-async def api_update_task_template_steps(template_id: str, steps: str = Form(...)):
+async def api_update_task_template_steps(
+    request: Request,
+    template_id: str,
+    steps: str = Form(...),
+):
     """Replaces a template's whole step list in one call - add, change, remove and reorder a
     step are all the same operation here (concept doc, section E.4): the client submits the
     edited array, with each step's `position` set to its index in that array. Validation
@@ -1906,9 +2696,10 @@ async def api_update_task_template_steps(template_id: str, steps: str = Form(...
     `uas/task_templates.py`) happens on the model itself; this endpoint only translates its
     ValidationError into a 422 instead of a 500, the same way `api_create_task_template` does.
     """
-    _require_user_capability(_mutation_actor(), "template.manage")
-    if not task_template_registry.get_template(template_id):
-        raise TemplateNotFoundError(template_id)
+    actor = _mutation_actor()
+    _require_user_capability(actor, "template.manage")
+    principal = _data_principal(request)
+    _require_template_edit(request, template_id, actor)
 
     try:
         raw_steps = json.loads(steps)
@@ -1934,53 +2725,118 @@ async def api_update_task_template_steps(template_id: str, steps: str = Form(...
                    f"Choose from {', '.join(SUPPORTED_MODELS)}."
         )
 
+    _validate_step_component_access(principal, parsed_steps)
+
     try:
-        updated = task_template_registry.update_template(template_id, steps=parsed_steps)
+        updated = task_template_registry.update_authorized(
+            template_id,
+            requested_by=principal.data_owner_id,
+            organization_id=principal.organization_id,
+            can_edit_foreign=user_registry.is_capability_granted(
+                actor, "template.edit.foreign"
+            ),
+            steps=parsed_steps,
+        )
     except PydanticValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"status": "updated", "template": updated.model_dump()}
 
 
 @app.delete("/api/task-templates/{template_id}")
-async def api_delete_task_template(template_id: str):
+async def api_delete_task_template(request: Request, template_id: str):
     actor = _mutation_actor()
     _require_user_capability(actor, "template.manage")
-    routines.delete_template(template_id, requested_by=actor.user_id)
+    principal = _data_principal(request)
+    template = task_template_registry.get_visible(
+        template_id,
+        requested_by=principal.data_owner_id,
+        organization_id=principal.organization_id,
+        department_id=principal.department,
+        actor_roles=_principal_roles(principal),
+    )
+    if template is None:
+        raise TemplateNotFoundError(template_id)
+    routines.delete_template(template_id, requested_by=principal.data_owner_id)
     return {"status": "deleted", "template_id": template_id}
 
 
 @app.post("/api/task-templates/{template_id}/remove-for-me")
 async def api_remove_task_template_for_viewer(
-    template_id: str, viewer: Optional[str] = Form(None)
+    request: Request, template_id: str, viewer: Optional[str] = Form(None)
 ):
     """Hides a shared template from one viewer's own list without touching the template
     itself - "remove a shared item" is not "delete it" (concept doc, section A.4)."""
     actor = _mutation_actor()
     _require_user_capability(actor, "template.manage")
-    template = task_template_registry.remove_for_viewer(template_id, actor.user_id)
+    principal = _data_principal(request)
+    if task_template_registry.get_visible(
+        template_id,
+        principal.data_owner_id,
+        principal.organization_id,
+        principal.department,
+        _principal_roles(principal),
+    ) is None:
+        raise TemplateNotFoundError(template_id)
+    template = task_template_registry.remove_for_viewer(
+        template_id, principal.data_owner_id
+    )
     return {"status": "removed_for_viewer", "template": template.model_dump()}
 
 
 @app.post("/api/task-templates/{template_id}/restore-for-me")
 async def api_restore_task_template_for_viewer(
-    template_id: str, viewer: Optional[str] = Form(None)
+    request: Request, template_id: str, viewer: Optional[str] = Form(None)
 ):
     """Undoes `remove-for-me` - the action behind the "hidden for you" panel's Restore row."""
     actor = _mutation_actor()
     _require_user_capability(actor, "template.manage")
-    template = task_template_registry.restore_for_viewer(template_id, actor.user_id)
+    principal = _data_principal(request)
+    raw_template = task_template_registry.get_template(template_id)
+    if raw_template is None or not task_template_registry.can_read(
+        raw_template,
+        principal.data_owner_id,
+        principal.organization_id,
+        principal.department,
+        _principal_roles(principal),
+    ):
+        raise TemplateNotFoundError(template_id)
+    template = task_template_registry.restore_for_viewer(
+        template_id, principal.data_owner_id
+    )
     return {"status": "restored_for_viewer", "template": template.model_dump()}
 
 
 @app.post("/api/task-templates/{template_id}/enqueue")
-async def api_enqueue_task_template(template_id: str):
+async def api_enqueue_task_template(request: Request, template_id: str):
     _require_user_capability(_mutation_actor(), "task.manage")
-    task = await routines.enqueue_template(template_id, triggered_by="manual")
+    principal = _data_principal(request)
+    template = task_template_registry.get_visible(
+        template_id,
+        principal.data_owner_id,
+        principal.organization_id,
+        principal.department,
+        _principal_roles(principal),
+    )
+    if template is None:
+        raise TemplateNotFoundError(template_id)
+    # Revalidate persisted/legacy rows at the last gate as well as on create/update. This keeps
+    # a pre-migration malformed template from reaching the shared lifecycle registry.
+    _validate_step_component_access(principal, template.steps)
+    task = await routines.enqueue_template(
+        template_id,
+        triggered_by="manual",
+        owner_id=principal.data_owner_id,
+        organization_id=principal.organization_id,
+        department_id=principal.department,
+        visibility="private",
+        actor_roles=_principal_roles(principal),
+    )
     return {"status": "enqueued", "task": task.model_dump()}
 
 
 @app.put("/api/task-templates/{template_id}/routine")
 async def api_bind_routine(
+    request: Request,
     template_id: str,
     kind: str = Form(...),
     interval_seconds: Optional[int] = Form(None),
@@ -1990,9 +2846,10 @@ async def api_bind_routine(
     miss_policy: str = Form("skip"),
     enabled: bool = Form(True)
 ):
-    _require_user_capability(_mutation_actor(), "template.manage")
-    if not task_template_registry.get_template(template_id):
-        raise TemplateNotFoundError(template_id)
+    _require_persistent_automation_surface()
+    actor = _mutation_actor()
+    _require_user_capability(actor, "template.manage")
+    _require_template_edit(request, template_id, actor)
     spec = _schedule_spec_from_form(kind, interval_seconds, daily_time, cron_expression, timezone_name)
     binding = routines.routine_binding_registry.set_binding(
         template_id, spec, miss_policy=miss_policy, enabled=enabled
@@ -2001,22 +2858,27 @@ async def api_bind_routine(
 
 
 @app.delete("/api/task-templates/{template_id}/routine")
-async def api_unbind_routine(template_id: str):
-    _require_user_capability(_mutation_actor(), "template.manage")
+async def api_unbind_routine(request: Request, template_id: str):
+    _require_persistent_automation_surface()
+    actor = _mutation_actor()
+    _require_user_capability(actor, "template.manage")
+    _require_template_edit(request, template_id, actor)
     removed = routines.routine_binding_registry.remove_for_template(template_id)
     return {"status": "removed" if removed else "not_found"}
 
 
 @app.put("/api/task-templates/{template_id}/schedule")
 async def api_bind_schedule(
+    request: Request,
     template_id: str,
     due_at: str = Form(...),
     has_time: bool = Form(True),
     miss_policy: str = Form("skip")
 ):
-    _require_user_capability(_mutation_actor(), "template.manage")
-    if not task_template_registry.get_template(template_id):
-        raise TemplateNotFoundError(template_id)
+    _require_persistent_automation_surface()
+    actor = _mutation_actor()
+    _require_user_capability(actor, "template.manage")
+    _require_template_edit(request, template_id, actor)
     binding = routines.schedule_binding_registry.set_binding(
         template_id, due_at=due_at, has_time=has_time, miss_policy=miss_policy
     )
@@ -2024,8 +2886,11 @@ async def api_bind_schedule(
 
 
 @app.delete("/api/task-templates/{template_id}/schedule")
-async def api_unbind_schedule(template_id: str):
-    _require_user_capability(_mutation_actor(), "template.manage")
+async def api_unbind_schedule(request: Request, template_id: str):
+    _require_persistent_automation_surface()
+    actor = _mutation_actor()
+    _require_user_capability(actor, "template.manage")
+    _require_template_edit(request, template_id, actor)
     removed = routines.schedule_binding_registry.remove_pending_for_template(template_id)
     return {"status": "removed" if removed else "not_found"}
 
@@ -2053,12 +2918,19 @@ async def api_fire_routines(request: Request):
             "is unauthenticated. Set ROUTINES_FIRE_TOKEN (and have Cloud Scheduler send it, or "
             "switch to an OIDC-authenticated Cloud Run invocation) before a real deployment."
         )
+    if _public_demo_limits_active():
+        return {
+            "status": "disabled_in_public_demo",
+            "fired": [],
+            "skipped": [],
+            "not_due": 0,
+        }
     return await routines.fire_due()
 
 
 # Terminal `TaskState`s, for the purposes of the run console below: once a run is here, nothing
-# in this deployment resumes it automatically (an approved ticket releases the *agent* from
-# WAITING_APPROVAL, `api_approve_ticket` above, but never re-enters `routines.enqueue_template()`
+# in this deployment resumes it automatically (an approved ticket records the decision but never
+# re-enters `routines.enqueue_template()`
 # for the same task) - so `run_log_bus` for it is done, even on a run whose emitter code happens
 # not to have called `close()` yet.
 _RUN_CONSOLE_TERMINAL_STATES = (TaskState.COMPLETED, TaskState.FAILED, TaskState.AWAITING_APPROVAL)
@@ -2086,17 +2958,39 @@ async def ws_run_console(websocket: WebSocket, run_id: str):
     the same run while it is mid-flight, and a template with `requires_approval` sitting in
     AWAITING_APPROVAL, which this route also treats as closed (see `_RUN_CONSOLE_TERMINAL_STATES`).
     """
-    if not settings.demo_mode:
+    if settings.demo_mode:
+        workspace_token = valid_workspace_token(websocket.cookies.get(WORKSPACE_COOKIE))
+        if workspace_token is None:
+            await websocket.close(code=4401, reason="A demo workspace cookie is required.")
+            return
+        demo_user = user_registry.require_user(DEMO_USER_ID)
+        principal = demo_principal(
+            DEMO_USER_ID,
+            workspace_token,
+            organization_id=demo_user.organization_id,
+            department=demo_user.department,
+        )
+    else:
+        if not _same_origin(websocket.headers, websocket.url.scheme):
+            await websocket.close(code=4403, reason="Cross-site WebSocket refused.")
+            return
         if not settings.iap_audience:
             await websocket.close(code=4401, reason="IAP_AUDIENCE is missing.")
             return
         try:
-            _verified_iap_principal(websocket.headers.get(IAP_ASSERTION_HEADER, ""))
+            principal = _verified_iap_principal(
+                websocket.headers.get(IAP_ASSERTION_HEADER, "")
+            )
         except Exception:
             await websocket.close(code=4401, reason="IAP authentication failed.")
             return
     task = task_master.get_task(run_id)
-    if task is None:
+    if task is None or not task_master.can_read(
+        task,
+        principal.data_owner_id,
+        principal.organization_id,
+        principal.department,
+    ):
         # Denies the handshake outright (no `accept()` was ever sent) - the ASGI-level
         # equivalent of a 404, rather than accepting a socket for a run that can never emit
         # anything.
@@ -2195,6 +3089,7 @@ async def api_chat_sessions(request: Request):
         for session in chat_service.list_sessions(
             requested_by=principal.data_owner_id,
             requested_department=principal.department,
+            requested_organization=principal.organization_id,
         )
     ]
 
@@ -2206,6 +3101,7 @@ async def api_chat_session(request: Request, session_id: str):
         session_id,
         requested_by=principal.data_owner_id,
         requested_department=principal.department,
+        requested_organization=principal.organization_id,
     )
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
@@ -2221,6 +3117,7 @@ async def api_chat_session_sharing(
         session = chat_service.update_sharing(
             session_id,
             requested_by=principal.data_owner_id,
+            requested_organization=principal.organization_id,
             requested_department=principal.department,
             visibility=payload.visibility,
             shared_with=payload.shared_with,
@@ -2241,6 +3138,7 @@ async def api_chat_export(request: Request, session_id: str, format: str = "md")
         session_id,
         requested_by=principal.data_owner_id,
         requested_department=principal.department,
+        requested_organization=principal.organization_id,
     )
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
@@ -2259,6 +3157,7 @@ async def api_chat_export(request: Request, session_id: str, format: str = "md")
             filename=filename,
             media_type=media_type,
             creator_id=principal.data_owner_id,
+            creator_organization=principal.organization_id,
             creator_department=principal.department,
             source_kind="chat_export",
             source_ref=f"{session_id}:{format.lower()}",
@@ -2294,6 +3193,9 @@ async def api_chat_send(request: Request, payload: ChatSendRequest):
             prompt_id=payload.prompt_id,
             prompt_version=payload.prompt_version,
             owner_id=principal.data_owner_id,
+            organization_id=principal.organization_id,
+            department_id=principal.department,
+            actor_roles=_principal_roles(principal),
         )
     except ComponentAuthorizationError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -2326,6 +3228,9 @@ async def api_chat_race(request: Request, payload: ChatRaceRequest):
             prompt_id=payload.prompt_id,
             prompt_version=payload.prompt_version,
             owner_id=principal.data_owner_id,
+            organization_id=principal.organization_id,
+            department_id=principal.department,
+            actor_roles=_principal_roles(principal),
         )
     except ComponentAuthorizationError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -2395,6 +3300,68 @@ async def api_update_processed_document_sharing(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "updated", "record": record.model_dump()}
 
+
+@app.put("/api/omniledger/documents/{doc_id}/retention")
+async def api_set_processed_document_retention(
+    request: Request,
+    doc_id: str,
+    payload: RetentionRequest,
+):
+    principal = _data_principal(request)
+    actor = _mutation_actor()
+    try:
+        record = processed_invoices.set_retention(
+            doc_id,
+            principal,
+            policy=payload.policy,
+            retain_until=payload.retain_until,
+            can_manage=user_registry.is_capability_granted(
+                actor, "document.retention.manage"
+            ),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Structured document not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "updated", "record": record.model_dump()}
+
+
+@app.put("/api/omniledger/documents/{doc_id}/legal-hold")
+async def api_set_processed_document_legal_hold(
+    request: Request,
+    doc_id: str,
+    payload: LegalHoldRequest,
+):
+    principal = _data_principal(request)
+    actor = _mutation_actor()
+    _require_user_capability(actor, "document.legal_hold.manage")
+    try:
+        record = processed_invoices.set_legal_hold(
+            doc_id,
+            principal,
+            enabled=payload.enabled,
+            can_manage=True,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Structured document not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"status": "updated", "record": record.model_dump()}
+
+
+@app.delete("/api/omniledger/documents/{doc_id}")
+async def api_delete_processed_document(request: Request, doc_id: str):
+    principal = _data_principal(request)
+    try:
+        record = processed_invoices.delete_document(doc_id, principal)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Structured document not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"status": "deleted", "record": record.model_dump()}
+
 @app.post("/api/omniledger/process")
 async def api_process_invoice(
     request: Request,
@@ -2402,6 +3369,19 @@ async def api_process_invoice(
     preset_type: Optional[str] = Form("valid")
 ):
     _require_user_capability(_mutation_actor(), "document.process")
+    principal = _data_principal(request)
+    demo_quarantine_reason = (
+        _demo_usage_guard.quarantine_reason(
+            principal.data_owner_id, "agent:invoice-extractor"
+        )
+        if settings.demo_mode else None
+    )
+    if demo_quarantine_reason:
+        return JSONResponse(status_code=423, content={
+            "status": "BLOCKED_BY_WORKSPACE_QUARANTINE",
+            "reason": demo_quarantine_reason,
+            "scope": "current_demo_workspace",
+        })
     # 1. Ingest: read the uploaded document, or fall back to a named demo preset
     upload_bytes: Optional[bytes] = None
     upload_text: Optional[str] = None
@@ -2445,9 +3425,8 @@ async def api_process_invoice(
     else:
         filename = f"Invoice_Sample_{preset_type}.pdf"
 
-    # Tasks are an organization-wide control plane.  The durable document record below is
-    # access-scoped, but task names and inputs are not; never copy a private upload's filename
-    # into that global surface.  Demo presets are public synthetic data and may stay named.
+    # The task is private to its creator. Still avoid copying an upload filename into task
+    # metadata: names also flow into logs and operational error reports.
     uploaded = file is not None
     task_label = "private uploaded document" if uploaded else filename
     task_input = (
@@ -2459,10 +3438,12 @@ async def api_process_invoice(
         name=f"Ingest & Reconcile: {task_label}",
         assigned_agent="agent:invoice-extractor",
         input_data=task_input,
+        owner_id=principal.data_owner_id,
+        organization_id=principal.organization_id,
+        department_id=principal.department,
+        visibility="private",
     )
     task_master.update_task_state(task.task_id, TaskState.IN_PROGRESS)
-
-    agent_extractor = lifecycle_manager.get_agent("agent:invoice-extractor")
 
     # 2. Model Armor: inspect the real uploaded content; the canned attack is only a fallback
     scan_text: Optional[str] = upload_text
@@ -2474,18 +3455,33 @@ async def api_process_invoice(
     if scan_text:
         inspection = gateway.model_armor.inspect_prompt(scan_text)
         if not inspection.is_safe:
-            lifecycle_manager.update_agent_status(
-                "agent:invoice-extractor",
-                AgentStatus.QUARANTINED,
-                reason="Model Armor Alert: Blocked Adversarial Injection Attack"
+            quarantine_reason = "Model Armor Alert: Blocked Adversarial Injection Attack"
+            if settings.demo_mode:
+                _demo_usage_guard.quarantine(
+                    principal.data_owner_id,
+                    "agent:invoice-extractor",
+                    quarantine_reason,
+                )
+            else:
+                lifecycle_manager.update_agent_status(
+                    "agent:invoice-extractor",
+                    AgentStatus.QUARANTINED,
+                    reason=quarantine_reason,
+                )
+            task_master.update_task_state(
+                task.task_id,
+                TaskState.FAILED,
+                error="Model Armor Intercepted Injection Attack; QUARANTINE applied",
             )
-            task_master.update_task_state(task.task_id, TaskState.FAILED, error="Model Armor Intercepted Injection Attack")
             return JSONResponse(status_code=400, content={
                 "status": "BLOCKED_BY_MODEL_ARMOR",
                 "reason": "Adversarial Prompt Injection Detected",
                 "scenario": scenario,
                 "blocked_patterns": inspection.blocked_patterns,
-                "agent_status": agent_extractor.status.value if agent_extractor else "unknown"
+                "agent_status": "quarantined",
+                "quarantine_scope": (
+                    "current_demo_workspace" if settings.demo_mode else "deployment"
+                ),
             })
 
     # 3. Run the governed workflow. A gateway security verdict aborts the request, so the
@@ -2496,7 +3492,7 @@ async def api_process_invoice(
             filename,
             upload_bytes,
             upload_text,
-            _data_principal(request),
+            principal,
         )
     except (SecurityViolationError, QuarantineLockError) as exc:
         task_master.update_task_state(task.task_id, TaskState.FAILED, error=exc.message)
@@ -2524,7 +3520,15 @@ async def run_omniledger_workflow(
         })
 
     invoice = extraction.output
-    processed_invoices.put_scoped(invoice, principal)
+    processed_invoices.put_scoped(
+        invoice,
+        principal,
+        encryption_scheme=(
+            "google-managed-encryption-at-rest"
+            if requested_backend() == "firestore"
+            else "development-unencrypted-filesystem"
+        ),
+    )
 
     # 4. Compliance audit — executed by the compliance agent
     audit = await execute_via_gateway(
@@ -2552,6 +3556,7 @@ async def run_omniledger_workflow(
                 "memory_owner": principal.data_owner_id,
                 "memory_visibility": "personal",
                 "department_id": None,
+                "organization_id": principal.organization_id,
             },
             tool_create_reconciliation_draft
         )
@@ -2568,7 +3573,12 @@ async def run_omniledger_workflow(
         draft = await execute_via_gateway(
             "agent:vendor-dispute",
             "draft_vendor_dispute_email",
-            {"document": invoice},
+            {
+                "document": invoice,
+                "requested_by": principal.data_owner_id,
+                "requested_department": principal.department,
+                "requested_organization": principal.organization_id,
+            },
             tool_draft_vendor_dispute_email
         )
         if not draft.success:
@@ -2604,6 +3614,11 @@ async def run_omniledger_workflow(
             },
             priority=TicketPriority.HIGH,
             requested_by=principal.data_owner_id,
+            owner_id=principal.data_owner_id,
+            department_id=principal.department,
+            visibility="private",
+            assigned_to_role="operator",
+            organization_id=principal.organization_id,
         )
         task_master.update_task_state(task.task_id, TaskState.AWAITING_APPROVAL, output_data={"ticket_id": ticket.ticket_id, "doc_id": invoice.id})
 

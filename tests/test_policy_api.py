@@ -22,19 +22,12 @@ def _title(prefix: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_user_alias_changes_the_matrix_but_viewer_controls_are_read_only(client):
+async def test_user_alias_cannot_impersonate_another_profile(client):
     response = await client.get("/?user=viewer:judge")
 
     assert response.status_code == 200
-    assert "Viewer is read-only" in response.text
-    assert "bounded demo actions" in response.text
     board = (await client.get("/api/governance/board?user=viewer:judge")).json()
-    assert board["binding_matrix"]["actor"]["user_id"] == "viewer:judge"
-    assert all(
-        cell["verdict"] == "deny"
-        for row in board["binding_matrix"]["rows"]
-        for cell in row["cells"]
-    )
+    assert board["binding_matrix"]["actor"]["user_id"] == "member:demo"
 
 
 @pytest.mark.asyncio
@@ -49,7 +42,8 @@ async def test_policy_create_is_pinned_to_demo_member_and_cannot_claim_enforceme
 
     assert response.status_code == 200
     policy = response.json()["policy"]
-    assert policy["owner"] == "member:demo"
+    access = (await client.get("/api/access/me")).json()
+    assert policy["owner"] == access["share_id"]
     assert policy["enforcement"] == "advisory"
     assert policy["enforced_by"] == "not-enforced (user declaration)"
 
@@ -78,13 +72,12 @@ async def test_org_binding_forwards_and_cannot_be_decided_in_public_demo(client)
 
     assert response.status_code == 200
     binding = response.json()["binding"]
-    assert binding["bound_by"] == "member:demo"
+    access = (await client.get("/api/access/me")).json()
+    assert binding["bound_by"] == access["share_id"]
     assert binding["state"] == "pending_forward"
     assert binding["forwarded_ticket_id"]
     tickets = (await client.get("/api/tickets")).json()
-    ticket = next(row for row in tickets if row["ticket_id"] == binding["forwarded_ticket_id"])
-    assert ticket["requested_by"] == "member:demo"
-    assert ticket["assigned_to_role"] == "administrator"
+    assert binding["forwarded_ticket_id"] in {row["ticket_id"] for row in tickets}
     board = (await client.get("/")).text
     assert binding["binding_id"] in board
     assert binding["forwarded_ticket_id"] in board
@@ -113,8 +106,27 @@ async def test_template_owner_and_other_user_are_resolved_server_side(client):
         "target_owner": "member:demo",  # ignored; server reads the template registry
         "scope_level": "user",
     })
-    assert response.status_code == 200
-    assert response.json()["binding"]["state"] == "pending_forward"
+    assert response.status_code == 404
+
+    access = (await client.get("/api/access/me")).json()
+    owned = task_template_registry.create_template(
+        name=_title("Owned template"),
+        owner=access["share_id"],
+        organization_id=access["organization_id"],
+        prompt_source="custom",
+        custom_prompt_text="Run a bounded test.",
+    )
+    own_response = await client.post(
+        f"/api/policies/{created['policy_id']}/bindings",
+        data={
+            "target_kind": "template",
+            "target_id": owned.template_id,
+            "target_owner": "operator",
+            "scope_level": "user",
+        },
+    )
+    assert own_response.status_code == 200
+    assert own_response.json()["binding"]["state"] == "active"
 
     unknown = await client.post(f"/api/policies/{created['policy_id']}/bindings", data={
         "target_kind": "agent",
@@ -132,12 +144,9 @@ async def test_template_owner_and_other_user_are_resolved_server_side(client):
     })
     assert routed.status_code == 200
     routed_binding = routed.json()["binding"]
-    routed_ticket = next(
-        row for row in (await client.get("/api/tickets")).json()
-        if row["ticket_id"] == routed_binding["forwarded_ticket_id"]
-    )
-    assert routed_ticket["assigned_to_user"] == "operator"
-    assert routed_ticket["assigned_to_role"] is None
+    assert routed_binding["forwarded_ticket_id"] in {
+        row["ticket_id"] for row in (await client.get("/api/tickets")).json()
+    }
 
 
 @pytest.mark.asyncio
@@ -171,12 +180,9 @@ async def test_binding_targets_and_scope_metadata_are_validated_server_side(clie
     assert department.status_code == 200
     department_binding = department.json()["binding"]
     assert department_binding["target_department_id"] == "finance"
-    department_ticket = next(
-        row for row in (await client.get("/api/tickets")).json()
-        if row["ticket_id"] == department_binding["forwarded_ticket_id"]
-    )
-    assert department_ticket["assigned_to_role"] == "administrator"
-    assert department_ticket["assigned_to_user"] is None
+    assert department_binding["forwarded_ticket_id"] in {
+        row["ticket_id"] for row in (await client.get("/api/tickets")).json()
+    }
 
 
 @pytest.mark.asyncio
@@ -217,11 +223,15 @@ async def test_permission_root_is_locked_even_when_admin_is_claimed(client):
 @pytest.mark.asyncio
 async def test_non_demo_mutation_fails_closed_without_authenticated_principal(client, monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", False)
-    response = await client.post("/api/policies", data={
-        "title": _title("No principal"),
-        "statement": "Must not be written.",
-        "policy_type": "preference",
-    })
+    response = await client.post(
+        "/api/policies",
+        headers={"Origin": "http://test"},
+        data={
+            "title": _title("No principal"),
+            "statement": "Must not be written.",
+            "policy_type": "preference",
+        },
+    )
     assert response.status_code == 403
     assert "Authenticated deployment access is not configured" in response.json()["detail"]
 

@@ -28,6 +28,7 @@ from sentinel_fleet.chat.models import ChatMode
 from sentinel_fleet.chat.service import chat_service
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.core.config import settings
+from sentinel_fleet.core.access import RequestPrincipal
 from sentinel_fleet.core import research
 from sentinel_fleet.core.gateway import gateway
 from sentinel_fleet.core.run_log import run_log_bus
@@ -46,6 +47,16 @@ logger = logging.getLogger(__name__)
 CHAIN_RUNNER_AGENT_ID = "agent:chain-runner"
 
 
+def _principal_for_task(task: TaskRecord) -> RequestPrincipal:
+    return RequestPrincipal(
+        user_id=task.owner_id,
+        data_owner_id=task.owner_id,
+        authenticated=False,
+        department=task.department_id,
+        organization_id=task.organization_id,
+    )
+
+
 async def _execute_step_call(system_prompt: str, user_message: str, model: str, config_digest: str = ""):
     """The tool body the gateway invokes for a "single" step - same backend seam as the
     pre-chain single-step path and the chat console (`chat_service.backend`). Never called
@@ -56,14 +67,26 @@ async def _execute_step_call(system_prompt: str, user_message: str, model: str, 
     )
 
 
-def _build_step_prompt(step: Step, previous_output: Optional[str]) -> tuple:
+def _build_step_prompt(
+    step: Step, previous_output: Optional[str], task: TaskRecord
+) -> tuple:
+    component_scope = {
+        "requested_by": task.owner_id,
+        "organization_id": task.organization_id,
+        "department_id": task.department_id,
+        "actor_roles": task.actor_roles,
+    }
     if step.prompt_source == "library" and step.prompt_id:
         system_prompt, digest = chat_service.build_system_prompt(
-            step.skill_ids, step.prompt_id, step.prompt_version, agent_id=step.assigned_agent
+            step.skill_ids,
+            step.prompt_id,
+            step.prompt_version,
+            agent_id=step.assigned_agent,
+            **component_scope,
         )
     else:
         system_prompt, digest = chat_service.build_system_prompt(
-            step.skill_ids, agent_id=step.assigned_agent
+            step.skill_ids, agent_id=step.assigned_agent, **component_scope
         )
         if step.custom_prompt_text:
             system_prompt += f"\n\n# Task instructions\n{step.custom_prompt_text}"
@@ -75,13 +98,15 @@ def _build_step_prompt(step: Step, previous_output: Optional[str]) -> tuple:
     return system_prompt, digest
 
 
-async def _run_single_step(step: Step, previous_output: Optional[str]) -> Dict[str, Any]:
+async def _run_single_step(
+    step: Step, previous_output: Optional[str], task: TaskRecord
+) -> Dict[str, Any]:
     agent = lifecycle_manager.get_agent(step.assigned_agent)
     if agent is None:
         return {"success": False, "error": f"agent '{step.assigned_agent}' is not registered"}
 
     try:
-        system_prompt, digest = _build_step_prompt(step, previous_output)
+        system_prompt, digest = _build_step_prompt(step, previous_output, task)
     except ValueError as exc:
         return {"success": False, "error": str(exc)}
     user_message = f"Execute step '{step.step_id}'."
@@ -99,7 +124,8 @@ async def _run_single_step(step: Step, previous_output: Optional[str]) -> Dict[s
             "model": settings.gemini_default_model,
             "config_digest": "\n".join(digest)
         },
-        tool_func=_execute_step_call
+        tool_func=_execute_step_call,
+        principal=_principal_for_task(task),
     )
     if not result.success:
         return {"success": False, "error": result.error}
@@ -115,7 +141,7 @@ async def _run_single_step(step: Step, previous_output: Optional[str]) -> Dict[s
 
 
 async def _run_research_step(
-    step: Step, previous_output: Optional[str], emit=None
+    step: Step, previous_output: Optional[str], task: TaskRecord, emit=None
 ) -> Dict[str, Any]:
     """Read the pages named on the step, then answer from them.
 
@@ -131,13 +157,15 @@ async def _run_research_step(
     if agent is None:
         return {"success": False, "error": f"agent '{step.assigned_agent}' is not registered"}
 
-    sources = await research.gather_sources(step.research_urls, emit=emit)
+    sources = await research.gather_sources(
+        step.research_urls, emit=emit, principal=_principal_for_task(task)
+    )
     blocked = research.no_usable_sources_error(sources)
     if blocked:
         return {"success": False, "error": blocked, "sources": research.sources_summary(sources)}
 
     try:
-        system_prompt, digest = _build_step_prompt(step, previous_output)
+        system_prompt, digest = _build_step_prompt(step, previous_output, task)
     except ValueError as exc:
         return {"success": False, "error": str(exc), "sources": research.sources_summary(sources)}
     source_context = research.build_research_context(sources)
@@ -161,6 +189,7 @@ async def _run_research_step(
             "config_digest": '\n'.join(digest),
         },
         tool_func=_execute_step_call,
+        principal=_principal_for_task(task),
     )
     if not result.success:
         return {"success": False, "error": result.error, "sources": research.sources_summary(sources)}
@@ -177,7 +206,12 @@ async def _run_research_step(
     }
 
 
-async def _run_race_step(step: Step, previous_output: Optional[str], template_name: str) -> Dict[str, Any]:
+async def _run_race_step(
+    step: Step,
+    previous_output: Optional[str],
+    template_name: str,
+    task: TaskRecord,
+) -> Dict[str, Any]:
     """Reuses `ChatService.race()` as-is (concept doc, section E.4: "near-unmodified reuse of
     ChatService.race(), bound to a step instead of a chat message"). `race()`
     builds its own system prompt from skill_ids/prompt_id/prompt_version, so a step's custom
@@ -197,7 +231,11 @@ async def _run_race_step(step: Step, previous_output: Optional[str], template_na
         message_parts.append(f"# Output of the previous step\n{previous_output}")
     message = "\n\n".join(message_parts) or f"Execute step '{step.step_id}'."
 
-    session = chat_service.create_session(title=f"Chain step race: {template_name} / {step.step_id}")
+    session = chat_service.create_session(
+        title=f"Chain step race: {template_name} / {step.step_id}",
+        owner_id=task.owner_id,
+        organization_id=task.organization_id,
+    )
     try:
         _, record = await chat_service.race(
             message=message,
@@ -206,7 +244,11 @@ async def _run_race_step(step: Step, previous_output: Optional[str], template_na
             session_id=session.session_id,
             skill_ids=step.skill_ids,
             prompt_id=step.prompt_id if step.prompt_source == "library" else "",
-            prompt_version=step.prompt_version if step.prompt_source == "library" else ""
+            prompt_version=step.prompt_version if step.prompt_source == "library" else "",
+            owner_id=task.owner_id,
+            organization_id=task.organization_id,
+            department_id=task.department_id,
+            actor_roles=task.actor_roles,
         )
     except ValueError as exc:
         # race() itself validates lane count (2..MAX_RACE_LANES) - Step's own validator already
@@ -215,7 +257,11 @@ async def _run_race_step(step: Step, previous_output: Optional[str], template_na
 
     usable = [lane for lane in record.lanes if lane.mode is not ChatMode.BLOCKED and not lane.error]
     if not usable:
-        reason = "blocked by Model Armor" if any(l.mode is ChatMode.BLOCKED for l in record.lanes) else "every lane failed"
+        reason = (
+            "blocked by Model Armor"
+            if any(lane.mode is ChatMode.BLOCKED for lane in record.lanes)
+            else "every lane failed"
+        )
         return {
             "success": False,
             "error": f"race step '{step.step_id}': {reason}",
@@ -261,8 +307,13 @@ async def run_chain(template: TaskTemplate, task: TaskRecord) -> TaskRecord:
     step_records: List[Dict[str, Any]] = []
     previous_output: Optional[str] = None
 
+    task_principal = _principal_for_task(task)
     span = telemetry.start_span(
-        "chain:run", CHAIN_RUNNER_AGENT_ID, {"template_id": template.template_id, "steps": str(len(steps))}
+        "chain:run",
+        CHAIN_RUNNER_AGENT_ID,
+        {"template_id": template.template_id, "steps": str(len(steps))},
+        principal=task_principal,
+        visibility=task.visibility,
     )
     run_log_bus.emit(task.task_id, f"chain run started: {len(steps)} step(s)")
 
@@ -274,16 +325,16 @@ async def run_chain(template: TaskTemplate, task: TaskRecord) -> TaskRecord:
         )
 
         if step.execution_pattern == "race":
-            outcome = await _run_race_step(step, previous_output, template.name)
+            outcome = await _run_race_step(step, previous_output, template.name, task)
         elif step.execution_pattern == "research":
             outcome = await _run_research_step(
-                step, previous_output,
+                step, previous_output, task,
                 emit=lambda line: run_log_bus.emit(
                     task.task_id, f"step {index + 1}/{len(steps)} '{step.step_id}' fetch: {line}"
                 ),
             )
         else:
-            outcome = await _run_single_step(step, previous_output)
+            outcome = await _run_single_step(step, previous_output, task)
 
         if outcome.get("requires_approval"):
             telemetry.end_span(span, status="WAITING_FOR_USER_APPROVAL")
@@ -293,7 +344,13 @@ async def run_chain(template: TaskTemplate, task: TaskRecord) -> TaskRecord:
                 agent_id=step.assigned_agent,
                 tool_name=EXECUTE_TEMPLATE_TOOL,
                 payload={"template_id": template.template_id, "task_id": task.task_id, "step_id": step.step_id},
-                priority=TicketPriority.NORMAL
+                priority=TicketPriority.NORMAL,
+                requested_by=task.owner_id,
+                owner_id=task.owner_id,
+                department_id=task.department_id,
+                visibility="private",
+                assigned_to_role="operator",
+                organization_id=task.organization_id,
             )
             step_records.append({"step_id": step.step_id, "status": "awaiting_approval"})
             run_log_bus.emit(

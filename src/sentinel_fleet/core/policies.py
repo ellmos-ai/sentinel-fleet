@@ -1,7 +1,7 @@
 """Policy Engine for business, compliance, and runtime constraints."""
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from pydantic import BaseModel, Field
 
 
@@ -28,10 +28,6 @@ UST_REQUIRED_FIELDS = [
 # Rounding slack allowed between net + tax and the stated gross, in euro. Two cents: enough for
 # per-line-item rounding, small enough that a real arithmetic error still trips the check.
 MATH_TOLERANCE_EUR = 0.02
-
-# Consecutive gateway steps an agent may take without the run state advancing.
-DEFAULT_MAX_CONSECUTIVE_STEPS = 5
-
 
 class PolicyEvaluationResult(BaseModel):
     decision: PolicyDecisionType
@@ -77,20 +73,4 @@ class PolicyEngine:
             decision=PolicyDecisionType.PASS,
             policy_name="§ 14 UStG Tax Compliance",
             violations=[]
-        )
-
-    @staticmethod
-    def evaluate_step_budget(
-        consecutive_steps: int, max_allowed: int = DEFAULT_MAX_CONSECUTIVE_STEPS
-    ) -> PolicyEvaluationResult:
-        """Prevents infinite agent loops and hallucinations."""
-        if consecutive_steps >= max_allowed:
-            return PolicyEvaluationResult(
-                decision=PolicyDecisionType.BLOCK,
-                policy_name="Loop Prevention & Step Budget",
-                violations=[f"Agent reached {consecutive_steps} consecutive steps without state advance (limit: {max_allowed})"]
-            )
-        return PolicyEvaluationResult(
-            decision=PolicyDecisionType.PASS,
-            policy_name="Step Budget OK"
         )

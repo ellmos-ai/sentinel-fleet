@@ -22,6 +22,7 @@ from sentinel_fleet.chat.service import chat_service
 from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.core import chain_runner
 from sentinel_fleet.core.config import settings
+from sentinel_fleet.core.access import RequestPrincipal
 from sentinel_fleet.core.errors import (
     QuarantineLockError,
     SecurityViolationError,
@@ -262,15 +263,22 @@ def sorted_catalog(templates: List[TaskTemplate]) -> List[Dict[str, Any]]:
 # exactly like every other tool call in this app (concept doc, section D).
 # ---------------------------------------------------------------------------
 
-def _build_prompt(template: TaskTemplate) -> tuple:
+def _build_prompt(template: TaskTemplate, task: TaskRecord) -> tuple:
+    component_scope = {
+        "requested_by": task.owner_id,
+        "organization_id": task.organization_id,
+        "department_id": task.department_id,
+        "actor_roles": task.actor_roles,
+    }
     if template.prompt_source == "library" and template.prompt_id:
         system_prompt, digest = chat_service.build_system_prompt(
             template.skill_ids, template.prompt_id, template.prompt_version,
             agent_id=template.assigned_agent,
+            **component_scope,
         )
     else:
         system_prompt, digest = chat_service.build_system_prompt(
-            template.skill_ids, agent_id=template.assigned_agent
+            template.skill_ids, agent_id=template.assigned_agent, **component_scope
         )
         if template.custom_prompt_text:
             system_prompt += f"\n\n# Task instructions\n{template.custom_prompt_text}"
@@ -287,6 +295,16 @@ async def _execute_template_call(system_prompt: str, user_message: str, model: s
     deterministic-demo backend otherwise. Never called directly from a route."""
     return await chat_service.backend.complete(
         system_prompt=system_prompt, user_message=user_message, model=model, config_digest=config_digest
+    )
+
+
+def _principal_for_task(task: TaskRecord) -> RequestPrincipal:
+    return RequestPrincipal(
+        user_id=task.owner_id,
+        data_owner_id=task.owner_id,
+        authenticated=False,
+        department=task.department_id,
+        organization_id=task.organization_id,
     )
 
 
@@ -311,7 +329,13 @@ async def enqueue_template(
     template_id: str,
     triggered_by: str = "manual",
     source_binding_id: Optional[str] = None,
-    scheduled_for: Optional[str] = None
+    scheduled_for: Optional[str] = None,
+    *,
+    owner_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    department_id: Optional[str] = None,
+    visibility: Optional[str] = None,
+    actor_roles: Optional[List[str]] = None,
 ) -> TaskRecord:
     """Runs one template once: create the TaskRecord, then execute it through the gateway.
 
@@ -334,6 +358,18 @@ async def enqueue_template(
     if not template:
         raise TemplateNotFoundError(template_id)
 
+    task_visibility = visibility or {
+        "organization": "organization",
+        "department": "department",
+    }.get(template.visibility, "private")
+    task_owner = owner_id or template.owner
+    task_organization = organization_id or template.organization_id
+    task_department = (
+        department_id
+        if department_id is not None
+        else template.department_id if task_visibility == "department" else None
+    )
+
     task = task_master.create_task(
         name=f"Template run: {template.name}",
         assigned_agent=template.assigned_agent,
@@ -341,7 +377,12 @@ async def enqueue_template(
         source_template_id=template_id,
         source_binding_id=source_binding_id,
         triggered_by=triggered_by,
-        scheduled_for=scheduled_for
+        scheduled_for=scheduled_for,
+        owner_id=task_owner,
+        organization_id=task_organization,
+        department_id=task_department,
+        visibility=task_visibility,
+        actor_roles=actor_roles,
     )
     run_log_bus.emit(
         task.task_id, f"task {task.task_id} created for template '{template.name}' ({template_id}), "
@@ -363,7 +404,13 @@ async def enqueue_template(
             agent_id=template.assigned_agent,
             tool_name=EXECUTE_TEMPLATE_TOOL,
             payload={"template_id": template_id, "task_id": task.task_id},
-            priority=TicketPriority.NORMAL
+            priority=TicketPriority.NORMAL,
+            requested_by=task.owner_id,
+            owner_id=task.owner_id,
+            department_id=task.department_id,
+            visibility="private",
+            assigned_to_role="operator",
+            organization_id=task.organization_id,
         )
         run_log_bus.emit(task.task_id, f"template requires approval before running (ticket {ticket.ticket_id})")
         run_log_bus.close(task.task_id)
@@ -409,7 +456,7 @@ async def enqueue_template(
         )
 
     try:
-        system_prompt, user_message, digest = _build_prompt(template)
+        system_prompt, user_message, digest = _build_prompt(template, task)
     except ValueError as exc:
         run_log_bus.emit(task.task_id, f"step 1/1: failed - {exc}")
         run_log_bus.close(task.task_id)
@@ -427,7 +474,8 @@ async def enqueue_template(
                 "model": settings.gemini_default_model,
                 "config_digest": "\n".join(digest)
             },
-            tool_func=_execute_template_call
+            tool_func=_execute_template_call,
+            principal=_principal_for_task(task),
         )
     except (QuarantineLockError, SecurityViolationError) as exc:
         _settle_refused_run(task, exc)
@@ -440,15 +488,21 @@ async def enqueue_template(
 
     if result.requires_approval:
         # The gateway's own permission registry - not the template flag above - marked
-        # `execute_template` as ASK. The agent is already parked WAITING_APPROVAL; mirror
-        # that on the run instead of reporting a false completion.
+        # `execute_template` as ASK. The scoped task/ticket records the wait state instead of
+        # mutating the process-global agent identity.
         ticket = ticket_master.create_approval_ticket(
             title=f"Gateway approval: template run '{template.name}'",
             description=f"The gateway's permission registry marked '{EXECUTE_TEMPLATE_TOOL}' as ASK.",
             agent_id=template.assigned_agent,
             tool_name=EXECUTE_TEMPLATE_TOOL,
             payload={"template_id": template_id, "task_id": task.task_id},
-            priority=TicketPriority.NORMAL
+            priority=TicketPriority.NORMAL,
+            requested_by=task.owner_id,
+            owner_id=task.owner_id,
+            department_id=task.department_id,
+            visibility="private",
+            assigned_to_role="operator",
+            organization_id=task.organization_id,
         )
         run_log_bus.emit(task.task_id, f"step 1/1: awaiting approval (ticket {ticket.ticket_id})")
         run_log_bus.close(task.task_id)

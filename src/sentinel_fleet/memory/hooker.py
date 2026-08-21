@@ -1,18 +1,29 @@
 """MemoryHooker: Dynamic, low-overhead context clue injector."""
 
-from typing import List
-from sentinel_fleet.memory.bank import memory_bank
+from typing import List, Optional
+from sentinel_fleet.memory.bank import DEFAULT_ORGANIZATION_ID, memory_bank
 from sentinel_fleet.memory.gardener_rag import gardener
 
 
 class MemoryHooker:
     @staticmethod
-    def inject_context(task_description: str, max_clues: int = 3) -> str:
+    def inject_context(
+        task_description: str,
+        max_clues: int = 3,
+        requested_by: str = "operator",
+        requested_department: Optional[str] = None,
+        requested_organization: str = DEFAULT_ORGANIZATION_ID,
+    ) -> str:
         """Inject curated facts and relevant document snippets into agent prompt context."""
         clues: List[str] = []
 
         # 1. Search Curated Facts from USMC Memory Bank
-        memories = memory_bank.search_memories(task_description)
+        memories = memory_bank.search_memories(
+            task_description,
+            requested_by=requested_by,
+            requested_department=requested_department,
+            requested_organization=requested_organization,
+        )
         for m in memories[:max_clues]:
             clues.append(f"[{m.category.upper()}] {m.content}")
 

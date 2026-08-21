@@ -8,6 +8,7 @@ from sentinel_fleet.core.model_armor import ModelArmor
 from sentinel_fleet.core.policies import PolicyEngine
 from sentinel_fleet.core.telemetry import telemetry
 from sentinel_fleet.core.errors import SecurityViolationError, QuarantineLockError
+from sentinel_fleet.core.access import RequestPrincipal
 
 
 class GatewayExecutionResult:
@@ -50,10 +51,17 @@ class SovereignGateway:
         agent: AgentIdentity,
         tool_name: str,
         tool_args: Dict[str, Any],
-        tool_func: Callable
+        tool_func: Callable,
+        *,
+        principal: Optional[RequestPrincipal] = None,
     ) -> GatewayExecutionResult:
         """Zero-Trust Interceptor for all agent actions with concurrency locks and async armor."""
-        span = telemetry.start_span(f"tool_call:{tool_name}", agent.agent_id, {"tool": tool_name})
+        span = telemetry.start_span(
+            f"tool_call:{tool_name}",
+            agent.agent_id,
+            {"tool": tool_name},
+            principal=principal,
+        )
         agent_lock = await self._get_agent_lock(agent.agent_id)
 
         async with agent_lock:
@@ -69,8 +77,16 @@ class SovereignGateway:
 
                 # 2. Scoped Capability Check (PoLP)
                 if not agent.is_tool_scoped(tool_name):
-                    agent.status = AgentStatus.QUARANTINED
-                    agent.quarantine_reason = f"Attempted unauthorized tool execution: {tool_name}"
+                    is_public_demo_workspace = bool(
+                        principal
+                        and principal.data_owner_id.startswith("workspace:")
+                        and not principal.authenticated
+                    )
+                    if not is_public_demo_workspace:
+                        agent.status = AgentStatus.QUARANTINED
+                        agent.quarantine_reason = (
+                            f"Attempted unauthorized tool execution: {tool_name}"
+                        )
                     error_msg = f"Security Violation: Agent '{agent.agent_id}' is not scoped for tool '{tool_name}'"
                     telemetry.end_span(span, status="SECURITY_VIOLATION", error=error_msg)
                     raise SecurityViolationError(
@@ -103,7 +119,10 @@ class SovereignGateway:
                     )
 
                 if perm_action == PermissionAction.ASK:
-                    agent.status = AgentStatus.WAITING_APPROVAL
+                    # A pending decision belongs to the scoped ticket, not to a process-global
+                    # agent identity. Mutating the shared fleet row here would let one tenant's
+                    # ticket falsify the lifecycle shown to every other tenant. Task/ticket state
+                    # and the scoped telemetry span carry the wait state instead.
                     telemetry.end_span(span, status="WAITING_FOR_USER_APPROVAL")
                     return GatewayExecutionResult(
                         success=True,

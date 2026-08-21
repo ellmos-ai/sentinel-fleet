@@ -5,10 +5,12 @@ from httpx import ASGITransport, AsyncClient
 
 from sentinel_fleet.core.storage import LocalJsonStore
 from sentinel_fleet.core.access import RequestPrincipal
-from sentinel_fleet.domains.omniledger.models import InvoiceDocument
-from sentinel_fleet.web.server import (
+from sentinel_fleet.core.structured_documents import (
     PersistentInvoiceWorkspace,
     StoredInvoiceRecord,
+)
+from sentinel_fleet.domains.omniledger.models import InvoiceDocument
+from sentinel_fleet.web.server import (
     app,
     processed_invoices,
 )
@@ -92,7 +94,7 @@ async def test_structured_document_api_is_private_then_creator_shareable():
             invoice,
             RequestPrincipal(
                 "member:demo",
-                alice_access["data_owner_id"],
+                alice_access["share_id"],
                 department=alice_access["department"],
             ),
         )

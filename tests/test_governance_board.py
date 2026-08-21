@@ -20,13 +20,12 @@ from sentinel_fleet.chat.backends import MODEL_USAGE_EVENT
 from sentinel_fleet.core.identity import AgentIdentity, AgentRole, AgentStatus
 from sentinel_fleet.core.permissions import PermissionAction, PermissionRegistry
 from sentinel_fleet.core.policies import (
-    DEFAULT_MAX_CONSECUTIVE_STEPS,
     MATH_TOLERANCE_EUR,
     UST_REQUIRED_FIELDS,
     PolicyEngine,
 )
 from sentinel_fleet.core.telemetry import SpanRecord
-from sentinel_fleet.uas.task_templates import Step, TaskTemplate
+from sentinel_fleet.uas.task_templates import MAX_STEPS, Step, TaskTemplate
 from sentinel_fleet.uas.ticket_master import Ticket, TicketPriority, TicketStatus
 from sentinel_fleet.web import governance
 from sentinel_fleet.web.server import app
@@ -70,14 +69,14 @@ def _span(name, agent_id, status="OK", tool=None, at=None, events=None, error=No
 # Policies & scopes
 # ---------------------------------------------------------------------------
 
-def test_policy_catalogue_reports_the_engine_s_own_thresholds():
+def test_policy_catalogue_reports_the_enforced_schema_and_engine_thresholds():
     """The board must not restate a limit in its own words - it imports the constants the
     policy engine evaluates against, so a changed threshold cannot leave a stale board behind."""
     catalogue = governance.policy_catalogue()
     summaries = " ".join(entry["summary"] for entry in catalogue)
 
     assert f"{MATH_TOLERANCE_EUR:.2f}" in summaries
-    assert str(DEFAULT_MAX_CONSECUTIVE_STEPS) in summaries
+    assert str(MAX_STEPS) in summaries
     ust = next(entry for entry in catalogue if "UStG" in entry["name"])
     assert len(ust["checks"]) == len(UST_REQUIRED_FIELDS)
     assert {check["field"] for check in ust["checks"]} == {field for field, _ in UST_REQUIRED_FIELDS}
@@ -468,7 +467,7 @@ async def test_board_states_its_counting_window_on_the_page(client):
 async def test_policy_thresholds_reach_the_page(client):
     body = (await client.get("/")).text
     assert f"{MATH_TOLERANCE_EUR:.2f} EUR" in body
-    assert f"at most {DEFAULT_MAX_CONSECUTIVE_STEPS} consecutive" in body
+    assert f"at most {MAX_STEPS} steps" in body
 
 
 @pytest.mark.asyncio
@@ -485,29 +484,26 @@ async def test_usage_section_says_why_it_is_empty_in_demo_mode(client):
 
 @pytest.mark.asyncio
 async def test_agent_catalog_carries_the_execute_template_scope(client):
-    """The step editor builds its agent select in JS from this catalog, so the scope flag has to
-    travel with it. The seeded fleet splits cleanly: TaskSolver carries execute_template, the
-    invoice extractor does not - picking the latter for a single step is a run that the gateway
-    will refuse."""
+    """The step editor must not offer identities the template gateway will refuse."""
     body = (await client.get("/")).text
     catalog_json = body.split('id="agent-catalog"', 1)[1].split(">", 1)[1].split("</script>", 1)[0]
     catalog = {entry["agent_id"]: entry for entry in json.loads(catalog_json)}
 
     assert catalog["agent:task-solver"]["can_execute_template"] is True
-    assert catalog["agent:invoice-extractor"]["can_execute_template"] is False
+    assert "agent:invoice-extractor" not in catalog
+    assert "agent:web-reader" not in catalog
 
 
 @pytest.mark.asyncio
-async def test_both_agent_pickers_mark_a_missing_execute_template_scope(client):
+async def test_both_agent_pickers_only_offer_execute_template_scoped_agents(client):
     body = (await client.get("/")).text
-    # The wizard's select is server-rendered from the same catalog...
-    assert "no execute_template scope" in body
-    # ...and the step editor's JS-built select applies the same label and note.
+    assert "Only agents with <code>execute_template</code> in scope" in body
+    assert "no execute_template scope" not in body
     with open(Path(__file__).resolve().parents[1] / "src/sentinel_fleet/web/static/app.js",
               encoding="utf-8") as handle:
         script = handle.read()
-    assert "can_execute_template === false" in script
-    assert "refreshScopeNote" in script
+    assert "can_execute_template === false" not in script
+    assert "server catalog already contains only identities" in script
 
 
 @pytest.mark.asyncio

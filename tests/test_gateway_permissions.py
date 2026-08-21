@@ -89,7 +89,7 @@ async def test_gateway_locks_quarantined_agent():
 
 
 @pytest.mark.asyncio
-async def test_gateway_triggers_hitl_approval_for_ask_permission():
+async def test_gateway_triggers_scoped_hitl_without_mutating_shared_agent_status():
     gateway = SovereignGateway()
     agent = AgentIdentity(
         agent_id="test:comm-agent",
@@ -111,7 +111,7 @@ async def test_gateway_triggers_hitl_approval_for_ask_permission():
 
     assert result.success is True
     assert result.requires_approval is True
-    assert agent.status == AgentStatus.WAITING_APPROVAL
+    assert agent.status == AgentStatus.IDLE
 
 
 @pytest.mark.asyncio

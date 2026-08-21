@@ -16,10 +16,19 @@ from sentinel_fleet.uas.task_master import TaskState, task_master
 from sentinel_fleet.web.server import app
 
 client = TestClient(app)
+access = client.get("/api/access/me").json()
 
 
 def _task(name="ws probe"):
-    return task_master.create_task(name=name, assigned_agent="agent:task-solver", input_data={})
+    return task_master.create_task(
+        name=name,
+        assigned_agent="agent:task-solver",
+        input_data={},
+        owner_id=access["share_id"],
+        organization_id=access["organization_id"],
+        department_id=access["department"],
+        visibility="private",
+    )
 
 
 def test_unknown_run_id_is_rejected_before_the_handshake_completes():
@@ -103,8 +112,8 @@ def test_a_queued_run_replays_then_streams_a_live_line_then_closes_on_run_log_bu
             assert exc.code == 1000
 
 
-def test_a_second_viewer_only_sees_lines_after_it_subscribed_plus_the_replay():
-    """Two independent consoles on the same run: each gets its own subscriber queue, and
+def test_a_second_console_in_the_same_workspace_gets_replay_and_live_lines():
+    """Two consoles in the same authorized workspace each get their own subscriber queue, and
     connecting late does not lose the lines already emitted (they are in the buffer) or
     duplicate them (the seq-number guard in `core/run_log.py`)."""
     task = _task()
@@ -129,3 +138,17 @@ def test_a_second_viewer_only_sees_lines_after_it_subscribed_plus_the_replay():
             assert False, "expected the remaining socket to close after run_log_bus.close()"
         except WebSocketDisconnect:
             pass
+
+
+def test_another_workspace_cannot_open_a_private_run_log():
+    task = _task("private workspace run")
+    task_master.update_task_state(task.task_id, TaskState.IN_PROGRESS)
+    other = TestClient(app)
+    other.get("/api/access/me")
+
+    try:
+        with other.websocket_connect(f"/ws/run/{task.task_id}") as ws:
+            ws.receive_text()
+        assert False, "expected the private run console to be denied"
+    except WebSocketDisconnect as exc:
+        assert exc.code == 4404

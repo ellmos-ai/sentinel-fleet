@@ -1,6 +1,7 @@
 """Durable result-document storage and creator-owned access contracts."""
 
 import hashlib
+import json
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -14,6 +15,7 @@ from sentinel_fleet.core.artifacts import (
     LocalBlobStore,
 )
 from sentinel_fleet.core.storage import LocalJsonStore
+from sentinel_fleet.uas.task_master import TaskMaster, TaskRecord, TaskState
 from sentinel_fleet.web.server import app
 
 
@@ -110,6 +112,30 @@ def test_department_share_is_limited_to_the_creators_department(tmp_path):
         service.download(created.artifact_id, "carol", "operations")
 
 
+def test_organization_share_never_crosses_the_organization_boundary(tmp_path):
+    service, _, _ = _service(tmp_path)
+    created = service.store_result(
+        content=b"organization result",
+        filename="organization.txt",
+        media_type="text/plain",
+        creator_id="alice",
+        creator_organization="org-a",
+    )
+    service.update_sharing(
+        created.artifact_id,
+        requested_by="alice",
+        requested_organization="org-a",
+        visibility="organization",
+        shared_with=[],
+    )
+
+    assert service.download(
+        created.artifact_id, "bob", requested_organization="org-a"
+    )[1] == b"organization result"
+    with pytest.raises(ArtifactNotFoundError):
+        service.download(created.artifact_id, "mallory", requested_organization="org-b")
+
+
 def test_download_detects_blob_tampering(tmp_path):
     service, _, blob_root = _service(tmp_path)
     created = service.store_result(
@@ -144,6 +170,89 @@ def test_only_creator_can_delete_and_deleted_result_keeps_an_audit_tombstone(tmp
         service.download(created.artifact_id, "alice")
 
 
+def test_retention_and_legal_hold_are_enforced_not_just_described(tmp_path):
+    service, _, _ = _service(tmp_path)
+    created = service.store_result(
+        content=b"retain me",
+        filename="retained.txt",
+        media_type="text/plain",
+        creator_id="alice",
+        creator_organization="org-a",
+    )
+    service.set_retention(
+        created.artifact_id,
+        requested_organization="org-a",
+        policy="retain_until",
+        retain_until=10_000_000_000.0,
+    )
+    with pytest.raises(ArtifactAccessError, match="retained"):
+        service.delete_result(
+            created.artifact_id,
+            requested_by="alice",
+            requested_organization="org-a",
+        )
+    service.set_legal_hold(
+        created.artifact_id, requested_organization="org-a", enabled=True
+    )
+    with pytest.raises(ArtifactAccessError, match="Legal hold"):
+        service.set_retention(
+            created.artifact_id,
+            requested_organization="org-a",
+            policy="creator_managed",
+            retain_until=None,
+        )
+
+
+def test_completed_task_output_is_linked_to_a_private_downloadable_artifact(
+    tmp_path, monkeypatch
+):
+    from sentinel_fleet.core import artifacts as artifacts_module
+
+    service = ArtifactService(
+        metadata_store=LocalJsonStore(
+            "task-result-artifacts",
+            ArtifactRecord,
+            str(tmp_path / "task-result-artifacts.json"),
+        ),
+        blob_store=LocalBlobStore(tmp_path / "task-result-blobs"),
+    )
+    monkeypatch.setattr(artifacts_module, "artifact_service", service)
+    tasks = TaskMaster()
+    tasks._store = LocalJsonStore(
+        "task-result-tasks",
+        TaskRecord,
+        str(tmp_path / "task-result-tasks.json"),
+    )
+    task = tasks.create_task(
+        name="Generate report",
+        assigned_agent="agent:task-solver",
+        input_data={},
+        owner_id="alice",
+        organization_id="org-a",
+        visibility="private",
+    )
+
+    completed = tasks.update_task_state(
+        task.task_id,
+        TaskState.COMPLETED,
+        output_data={"summary": "ready"},
+    )
+
+    assert completed.result_artifact_id
+    artifact, content = service.download(
+        completed.result_artifact_id,
+        requested_by="alice",
+        requested_organization="org-a",
+    )
+    assert artifact.source_kind == "task_result"
+    assert json.loads(content) == {"summary": "ready"}
+    with pytest.raises(ArtifactNotFoundError):
+        service.download(
+            completed.result_artifact_id,
+            requested_by="bob",
+            requested_organization="org-a",
+        )
+
 @pytest.mark.asyncio
 async def test_chat_export_is_saved_then_shareable_by_its_creator():
     transport = ASGITransport(app=app)
@@ -151,8 +260,8 @@ async def test_chat_export_is_saved_then_shareable_by_its_creator():
         AsyncClient(transport=transport, base_url="http://test") as alice,
         AsyncClient(transport=transport, base_url="http://test") as bob,
     ):
-        alice_id = (await alice.get("/api/access/me")).json()["data_owner_id"]
-        bob_id = (await bob.get("/api/access/me")).json()["data_owner_id"]
+        alice_id = (await alice.get("/api/access/me")).json()["share_id"]
+        bob_id = (await bob.get("/api/access/me")).json()["share_id"]
         assert alice_id != bob_id
 
         created = await alice.post("/api/chat/send", json={"message": "Persist this result"})

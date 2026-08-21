@@ -9,7 +9,7 @@ from sentinel_fleet.core.errors import (
     SkillNotFoundError
 )
 from sentinel_fleet.core.model_armor import ModelArmor
-from sentinel_fleet.core.skills import skill_registry, ComponentV1SkillLoader
+from sentinel_fleet.core.skills import skill_registry
 from sentinel_fleet.core.privacy_contacts import privacy_contact_hub
 from sentinel_fleet.core.gateway import SovereignGateway
 from sentinel_fleet.core.identity import AgentIdentity, AgentRole
@@ -97,14 +97,24 @@ async def test_strict_ticket_master_errors_and_persistence():
         agent_id="agent:vendor-dispute",
         tool_name="send_external_email",
         payload={"to": "test@vendor.com"},
-        priority=TicketPriority.HIGH
+        priority=TicketPriority.HIGH,
+        requested_by="operator",
+        owner_id="operator",
+        organization_id="sentinel-demo",
     )
 
     fetched = ticket_master.get_ticket(ticket.ticket_id)
     assert fetched is not None
     assert fetched.priority == TicketPriority.HIGH
 
-    approved = ticket_master.approve_ticket(ticket.ticket_id, comment="All good")
+    approved = ticket_master.approve_ticket(
+        ticket.ticket_id,
+        comment="All good",
+        decided_by="operator",
+        decider_user_id="operator",
+        decider_roles=["operator"],
+        decider_organization_id="sentinel-demo",
+    )
     assert approved.status == "approved"
 
     # Missing ticket errors
