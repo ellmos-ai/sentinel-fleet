@@ -143,8 +143,13 @@ them `not-enforced (user declaration)` until a real executor exists.
 Four role profiles (administrator, operator, member and viewer) and reasoned per-user deviations
 feed one `explain_binding()` decision function. Its R1–R7 verdict is used by the API, the
 5-target × 4-scope matrix and the binding ledger: `allow` activates, `forward` creates a ticket
-for the target user or an administrator, and `deny` refuses. Process bindings remain visible as
-a planned matrix dimension but are not writable until a process registry exists.
+for the target user or an administrator, and `deny` refuses. `process` remains visible as an
+optional extension point, not as a required runtime component. Task Templates define and run
+multi-step work without it. An organization only needs to install a Process Registry when it
+wants a durable business-process layer spanning multiple templates or runs. That registry plugs
+in here with stable process IDs, version and status, owner/organization/department scope, links
+to templates and runs, binding validation, runtime enforcement and audit evidence. Until then,
+the API rejects process bindings rather than pretending to enforce them.
 
 In `DEMO_MODE=true`, `?user=` and legacy `?viewer=` are ignored for display, reads and writes;
 safe writes are pinned server-side to `member:demo`, and security-root administration remains

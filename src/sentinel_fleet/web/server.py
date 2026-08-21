@@ -1506,7 +1506,7 @@ async def api_bind_policy(
     elif target_kind == "process":
         raise HTTPException(
             status_code=422,
-            detail="Process bindings are not writable until a process registry exists.",
+            detail="Process is an optional extension point; no Process Registry is installed.",
         )
     if scope_level == "other_user":
         if not target_user_id:

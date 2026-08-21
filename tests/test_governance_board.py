@@ -443,6 +443,16 @@ async def test_governance_tab_renders_with_all_its_sections(client):
 
 
 @pytest.mark.asyncio
+async def test_process_binding_is_presented_as_an_optional_extension_point(client):
+    body = (await client.get("/")).text
+
+    assert "optional extension point" in body.lower()
+    assert "no Process Registry is installed" in body
+    assert "Task Templates with steps continue to run without it" in body
+    assert "Unsupported by API: no process registry exists" not in body
+
+
+@pytest.mark.asyncio
 async def test_matrix_renders_identity_columns_and_a_legend(client):
     body = (await client.get("/")).text
 

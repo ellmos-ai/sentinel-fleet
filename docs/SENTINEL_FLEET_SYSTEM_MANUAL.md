@@ -293,7 +293,16 @@ deployment must set that token in the Cloud Scheduler job's HTTP target, or invo
 through an OIDC-authenticated Cloud Run service-to-service call. Cloud Run without a token fails
 closed with HTTP 503.
 
-**Not in this MVP:** a process registry for process-policy bindings, parallel chain groups,
+The binding matrix reserves `process` as an **optional extension point**. It is not required for
+ordinary execution: Task Templates own validated steps, Task Records represent runs, and
+Routine/Schedule bindings trigger those templates. A Process Registry is only needed when an
+organization wants one durable business-process object to span multiple templates or runs. The
+future registry connects at this point and must provide stable process IDs, version and status,
+owner/organization/department scope, links to templates and runs, policy-binding validation,
+runtime enforcement and audit evidence. No such registry is installed in this MVP, so process
+binding requests fail closed.
+
+**Not in this MVP:** an installed process registry for process-policy bindings, parallel chain groups,
 executable loops, a distributed scheduler
 lease for multi-instance operation, the `idle_window` trigger kind, and a console/COMA execution
 path as an alternative to the Gemini chat backend. Public-demo administration remains locked;

@@ -1535,8 +1535,9 @@
           </div>
           <p class="item-desc">
             Supported target cells come from the same <code>explain_binding</code> function the API enforces.
-            Allow runs now, forward creates an approval ticket, deny refuses. Process bindings remain
-            visible as a planned rule dimension but are not writable until a process registry exists.
+            Allow runs now, forward creates an approval ticket, deny refuses. Process is an optional
+            extension point for organizations that need a durable layer across templates and runs.
+            No Process Registry is installed in this MVP; Task Templates with steps continue to run without it.
           </p>
           <div class="table-wrap">
             <table class="data-table matrix-table binding-matrix">
@@ -1550,8 +1551,8 @@
                   {% for cell in row.cells %}
                   <td class="mx-mark">
                     <span class="badge-status {% if not cell.supported_by_api %}stamp-quiet{% elif cell.verdict == 'allow' %}badge-ok{% elif cell.verdict == 'forward' %}badge-warn{% else %}badge-danger{% endif %}"
-                          title="{% if not cell.supported_by_api %}Unsupported by API: no process registry exists{% else %}{{ cell.reason }} · decisive {{ cell.decisive_rule }} · {{ cell.applied_rules|join(', ') }}{% endif %}">
-                      {% if cell.supported_by_api %}{{ cell.verdict }}{% else %}unsupported{% endif %}
+                          title="{% if not cell.supported_by_api %}Optional extension point: no Process Registry is installed{% else %}{{ cell.reason }} · decisive {{ cell.decisive_rule }} · {{ cell.applied_rules|join(', ') }}{% endif %}">
+                      {% if cell.supported_by_api %}{{ cell.verdict }}{% else %}extension point{% endif %}
                     </span>
                   </td>
                   {% endfor %}
