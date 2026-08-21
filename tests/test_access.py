@@ -144,6 +144,41 @@ async def test_exposed_demo_share_handle_cannot_be_replayed_as_a_workspace_cooki
 
 
 @pytest.mark.asyncio
+async def test_production_demo_workspace_cookie_is_secure_behind_tls_proxy(monkeypatch):
+    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "environment", "production")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=server.app), base_url="http://internal-cloud-run"
+    ) as client:
+        response = await client.get("/api/access/me")
+
+    set_cookie = response.headers["set-cookie"]
+    assert set_cookie.startswith(f"{WORKSPACE_COOKIE}=")
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=lax" in set_cookie
+    assert "Secure" in set_cookie
+
+
+@pytest.mark.asyncio
+async def test_cloud_run_workspace_cookie_is_secure_with_default_environment(monkeypatch):
+    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "environment", "development")
+    monkeypatch.setenv("K_SERVICE", "sentinel-fleet")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=server.app), base_url="http://internal-cloud-run"
+    ) as client:
+        response = await client.get("/api/access/me")
+
+    set_cookie = response.headers["set-cookie"]
+    assert set_cookie.startswith(f"{WORKSPACE_COOKIE}=")
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=lax" in set_cookie
+    assert "Secure" in set_cookie
+
+
+@pytest.mark.asyncio
 async def test_non_demo_request_uses_verified_iap_principal(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", False)
     monkeypatch.setattr(settings, "iap_audience", "expected-audience")

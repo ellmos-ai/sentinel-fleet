@@ -81,7 +81,7 @@ async def test_production_demo_limits_cost_routes_before_execution(monkeypatch):
         ),
     )
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(transport=transport, base_url="https://test") as client:
         first = await client.post("/api/chat/send", json={"message": "first"})
         second = await client.post("/api/chat/send", json={"message": "second"})
 
@@ -96,7 +96,7 @@ async def test_public_demo_cannot_create_or_fire_persistent_automation(monkeypat
     monkeypatch.setattr(settings, "environment", "production")
     template_id = "template:public-demo-probe"
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(transport=transport, base_url="https://test") as client:
         bound = await client.put(
             f"/api/task-templates/{template_id}/routine",
             data={"kind": "interval", "interval_seconds": 60},
@@ -123,7 +123,7 @@ async def test_public_demo_cannot_delete_persistent_automation_bindings(monkeypa
     )
     transport = ASGITransport(app=app)
     try:
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="https://test") as client:
             routine_delete = await client.delete(
                 f"/api/task-templates/{template_id}/routine"
             )

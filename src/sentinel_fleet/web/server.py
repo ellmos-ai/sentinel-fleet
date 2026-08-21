@@ -274,7 +274,14 @@ async def attach_request_principal(request: Request, call_next):
             WORKSPACE_COOKIE,
             workspace_token,
             httponly=True,
-            secure=request.url.scheme == "https",
+            # Cloud Run terminates TLS before the ASGI server, so the internal request URL may
+            # still be http. Production workspace cookies must remain HTTPS-only regardless of
+            # proxy-header reconstruction.
+            secure=(
+                settings.environment == "production"
+                or bool(os.getenv("K_SERVICE"))
+                or request.url.scheme == "https"
+            ),
             samesite="lax",
             max_age=60 * 60 * 24 * 30,
         )
