@@ -4,6 +4,7 @@
 > **Repository:** [github.com/ellmos-ai/sentinel-fleet](https://github.com/ellmos-ai/sentinel-fleet)  
 > **Google Cloud Hackathon 2026:** Track 1 (Autonomous Taskmaster) & Track 3 (Enterprise Multi-Agent Governance)  
 > **Target Runtime:** Google Cloud Run, Gemini 3.5 to 3.7 Flash via the Google GenAI SDK (`google-genai`), Google Cloud Firestore, OpenTelemetry with Cloud Trace export in the documented deployment profile
+> **Public Demo:** [Cloud Run control center](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app) · [3:20 guided video](https://youtu.be/eiCV_u36TQc) · [Devpost project](https://devpost.com/software/sentinelfleet-o3v56y)
 
 ---
 
@@ -177,13 +178,19 @@ The entire codebase is validated by a rigorous Pytest test suite covering unit l
 ```bash
 python -m pytest tests -v
 ```
-### Test Results: full suite green (verified 2026-08-21; run the command above for the current count)
+### Test Results: 553 passed (full suite, verified 2026-08-21)
 
 The suite covers the gateway (scoping, quarantine, HITL), model armor, the
 OmniLedger workflow, chat and race (including live-path failure modes), task
 templates with routine/schedule bindings and the `/api/routines/fire` trigger,
 storage (local and mocked Firestore), i18n regression, and every dashboard
-surface. Run it yourself to reproduce the stated count.
+surface. One upstream Starlette/httpx deprecation warning remains visible and does not fail the
+suite. Run it yourself to reproduce the stated count.
+
+The same generated architecture circuit is live at
+[`/blueprint`](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app/blueprint); the current source and
+public deployment both expose 51 modules and 158 internal imports.
+
 ---
 
 ## 8. Deployment & Quickstart

@@ -11,6 +11,11 @@
 
 > Built for the **Google Cloud All Things Agentic Hackathon** (Track 3: The Fortified Enterprise Fleet & Track 1: The Taskmaster).
 
+**Try it now:** [Live Cloud Run demo](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app) ·
+[3:20 guided demo video](https://youtu.be/eiCV_u36TQc) ·
+[Devpost project](https://devpost.com/software/sentinelfleet-o3v56y) ·
+[live architecture blueprint](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app/blueprint)
+
 ---
 
 ## 🌟 Executive Summary
@@ -170,7 +175,8 @@ Governance tab lists these storage and access boundaries explicitly.
 is not drawn by hand: every node is a module under `src/sentinel_fleet` and every trace is an
 import statement parsed out of it with `ast` on each request, laid out so an importer sits left of
 everything it imports. Hover a module to isolate what it wires into. The diagram cannot drift from
-the code, and the test suite checks every edge back against the importing module's source.
+the code, and the test suite checks every edge back against the importing module's source. The
+current source and public deployment both render **51 modules and 158 internal imports**.
 
 ---
 
@@ -194,6 +200,9 @@ Open **`http://localhost:8080`** for the operator console, the chat and race tab
 ```bash
 python -m pytest tests/ -v
 ```
+
+Release baseline: **553 passed** on 2026-08-21. One upstream Starlette/httpx deprecation
+warning remains visible; it does not fail the suite.
 
 ### 3. Reset the demo data
 
@@ -301,5 +310,5 @@ SentinelFleet is licensed under the **GNU Affero General Public License v3.0** (
 ## Scope, Provenance & Data Notes
 
 * **Demo, not advice.** The OmniLedger domain validates demo invoices against German statutory rules (§ 14 UStG, GoBD) as a technical showcase. It is an AI-assisted engineering demo — not tax, accounting or legal advice; whether any concrete use meets statutory requirements depends on the individual case.
-* **Provenance.** Built by Lukas Geiger for the Google Cloud All Things Agentic Hackathon with substantial AI coding assistance (Google Gemini, Anthropic Claude); all AI-generated code was human-directed and is covered by the currently verified full test suite. Some skill definitions are English rebrands of the author's private skills library.
+* **Provenance.** Built by Lukas Geiger for the Google Cloud All Things Agentic Hackathon with substantial AI coding assistance (Google Gemini, Anthropic Claude, and OpenAI Codex); all AI-generated code was human-directed and is covered by the currently verified 553-test suite. The guided video's original soundtrack was produced for this project with AI-assisted composition and does not reproduce the melody of the nautical work-song used as its stylistic reference. Some skill definitions are English rebrands of the author's private skills library.
 * **Data.** Chat messages and privacy-screened GREEN/YELLOW document uploads may be sent to the Gemini API when a `GEMINI_API_KEY` is configured. RED, UNSCREENED and truncated documents stay on the local extraction path; without a key, no model payload is sent to Gemini. Raw upload bytes are not retained; structured records, chat sessions, prompts, skills, logs and telemetry use Firestore in production, while generated result bytes use the configured private Cloud Storage bucket. The Web reader still performs operator-requested external GETs, and configured Cloud Trace receives its documented spans. Do not upload real invoices or personal data to a demo deployment, and please do not post case data in issues.
