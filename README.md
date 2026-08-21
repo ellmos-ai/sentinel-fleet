@@ -12,9 +12,11 @@
 > Built for the **Google Cloud All Things Agentic Hackathon** (Track 3: The Fortified Enterprise Fleet & Track 1: The Taskmaster).
 
 **Try it now:** [Live Cloud Run demo](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app) ·
-[3:20 guided demo video](https://youtu.be/eiCV_u36TQc) ·
+[3:20 guided demo video](https://youtu.be/Ab5kHsHo2fQ) ·
 [Devpost project](https://devpost.com/software/sentinelfleet-o3v56y) ·
 [live architecture blueprint](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app/blueprint)
+
+[![Watch the 3:20 SentinelFleet guided demo](https://img.youtube.com/vi/Ab5kHsHo2fQ/maxresdefault.jpg)](https://youtu.be/Ab5kHsHo2fQ)
 
 ---
 

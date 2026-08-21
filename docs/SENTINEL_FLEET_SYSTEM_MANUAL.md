@@ -4,7 +4,7 @@
 > **Repository:** [github.com/ellmos-ai/sentinel-fleet](https://github.com/ellmos-ai/sentinel-fleet)  
 > **Google Cloud Hackathon 2026:** Track 1 (Autonomous Taskmaster) & Track 3 (Enterprise Multi-Agent Governance)  
 > **Target Runtime:** Google Cloud Run, Gemini 3.5 to 3.7 Flash via the Google GenAI SDK (`google-genai`), Google Cloud Firestore, OpenTelemetry with Cloud Trace export in the documented deployment profile
-> **Public Demo:** [Cloud Run control center](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app) · [3:20 guided video](https://youtu.be/eiCV_u36TQc) · [Devpost project](https://devpost.com/software/sentinelfleet-o3v56y)
+> **Public Demo:** [Cloud Run control center](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app) · [3:20 guided video](https://youtu.be/Ab5kHsHo2fQ) · [Devpost project](https://devpost.com/software/sentinelfleet-o3v56y)
 
 ---
 
