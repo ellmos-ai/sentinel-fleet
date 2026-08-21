@@ -3,6 +3,7 @@
 
 const state = {
   sessionId: "",
+  currentSession: null,
   sessions: [],
   chatMode: "chat",
   selectedSkills: new Set(),
@@ -501,7 +502,7 @@ function renderSessionList() {
     meta.className = "session-item-meta";
     const turns = session.messages.length;
     const races = session.races.length;
-    meta.textContent = `${turns} messages${races ? ` / ${races} races` : ""}`;
+    meta.textContent = `${turns} messages${races ? ` / ${races} races` : ""} / ${session.visibility || "private"}`;
 
     button.append(title, meta);
     list.appendChild(button);
@@ -510,7 +511,12 @@ function renderSessionList() {
 
 function startNewSession() {
   state.sessionId = "";
+  state.currentSession = null;
+  document.getElementById("chat-sharing-controls").style.display = "none";
+  document.getElementById("chat-input").disabled = false;
+  document.getElementById("chat-send").disabled = false;
   document.getElementById("chat-title").textContent = "New conversation";
+  document.getElementById("chat-subtitle").textContent = "Every message is scanned by Model Armor, then routed through the gateway.";
   const transcript = document.getElementById("chat-transcript");
   transcript.replaceChildren();
   const empty = document.createElement("div");
@@ -532,7 +538,9 @@ async function openSession(sessionId) {
   const session = await res.json();
 
   state.sessionId = session.session_id;
+  state.currentSession = session;
   document.getElementById("chat-title").textContent = session.title;
+  renderChatSharing(session);
 
   const transcript = document.getElementById("chat-transcript");
   transcript.replaceChildren();
@@ -540,6 +548,42 @@ async function openSession(sessionId) {
   session.races.forEach(race => transcript.appendChild(renderRace(race)));
   transcript.scrollTop = transcript.scrollHeight;
   renderSessionList();
+}
+
+function renderChatSharing(session) {
+  const controls = document.getElementById("chat-sharing-controls");
+  const isOwner = session.owner_id === document.body.dataset.ownerId;
+  controls.style.display = isOwner ? "flex" : "none";
+  document.getElementById("chat-input").disabled = !isOwner;
+  document.getElementById("chat-send").disabled = !isOwner;
+  document.getElementById("chat-subtitle").textContent = isOwner
+    ? "You created this conversation and control its sharing."
+    : `Read-only conversation shared as ${session.visibility}.`;
+  if (!isOwner) return;
+  document.getElementById("chat-visibility").value = session.visibility || "private";
+  document.getElementById("chat-shares").value = (session.shared_with || []).join(", ");
+}
+
+async function saveChatSharing() {
+  if (!state.sessionId || !state.currentSession) return;
+  const visibility = document.getElementById("chat-visibility").value;
+  const sharedWith = document.getElementById("chat-shares").value
+    .split(",").map(value => value.trim()).filter(Boolean);
+  try {
+    const res = await fetch(`/api/chat/sessions/${encodeURIComponent(state.sessionId)}/sharing`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visibility, shared_with: sharedWith })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || "Could not change conversation sharing");
+    state.currentSession = data.session;
+    renderChatSharing(data.session);
+    await loadSessions();
+    showToast("Conversation sharing updated.");
+  } catch (err) {
+    showToast(err.message);
+  }
 }
 
 function modeStamp(mode) {
@@ -851,7 +895,12 @@ async function sendChat() {
       if (data.title) document.getElementById("chat-title").textContent = data.title;
     }
     transcript.scrollTop = transcript.scrollHeight;
-    loadSessions();
+    await loadSessions();
+    const current = state.sessions.find(session => session.session_id === state.sessionId);
+    if (current) {
+      state.currentSession = current;
+      renderChatSharing(current);
+    }
   } catch (err) {
     document.getElementById("pending-turn")?.remove();
     setChatError(err.message);
@@ -860,13 +909,31 @@ async function sendChat() {
   }
 }
 
-function exportSession(format) {
+async function exportSession(format) {
   if (!state.sessionId) {
     setChatError("Send a message first: there is nothing to export yet.");
     switchTab("tab-chat");
     return;
   }
-  window.location.href = `/api/chat/sessions/${state.sessionId}/export?format=${format}`;
+  try {
+    const response = await fetch(`/api/chat/sessions/${state.sessionId}/export?format=${format}`);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail || "The export could not be stored.");
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `sentinelfleet-${state.sessionId}.${format}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showToast("Export saved privately in Documents and downloaded.");
+  } catch (err) {
+    setChatError(err.message);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1147,6 +1214,43 @@ const submitNewTicket = e => submitForm(e, "/api/tickets/create", "Could not cre
 const submitNewTask = e => submitForm(e, "/api/tasks/create", "Could not queue the task");
 const submitNewMemory = e => submitForm(e, "/api/memory/create", "Could not store the entry");
 const submitNewPolicy = e => submitForm(e, "/api/policies", "Could not create the policy");
+
+async function saveArtifactSharing(artifactId) {
+  const visibility = document.getElementById(`artifact-visibility-${artifactId}`).value;
+  const rawShares = document.getElementById(`artifact-shares-${artifactId}`).value;
+  const sharedWith = rawShares.split(",").map(value => value.trim()).filter(Boolean);
+  await postAndReload(
+    `/api/artifacts/${encodeURIComponent(artifactId)}/sharing`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visibility, shared_with: sharedWith })
+    },
+    "Could not change document sharing"
+  );
+}
+
+function deleteArtifact(artifactId) {
+  if (!confirm("Delete this result document? It becomes inaccessible immediately.")) return;
+  postAndReload(
+    `/api/artifacts/${encodeURIComponent(artifactId)}`,
+    { method: "DELETE" },
+    "Could not delete the result document"
+  );
+}
+
+async function saveProcessedDocumentSharing(documentId) {
+  const visibility = document.getElementById(`document-visibility-${documentId}`).value;
+  await postAndReload(
+    `/api/omniledger/documents/${encodeURIComponent(documentId)}/sharing`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visibility })
+    },
+    "Could not change structured document sharing"
+  );
+}
 
 function bindPolicy(policyId, scopeLevel) {
   const body = new FormData();
@@ -1438,10 +1542,10 @@ This one does erase: the run and its `
   );
 }
 
-function deleteTaskTemplate(templateId, owner) {
+function deleteTaskTemplate(templateId) {
   if (!confirm("Delete this task template? Remove its routine and schedule bindings first if this fails.")) return;
   postAndReload(
-    `/api/task-templates/${templateId}?requested_by=${encodeURIComponent(owner)}`,
+    `/api/task-templates/${templateId}`,
     { method: "DELETE" },
     "Could not delete the template"
   );
@@ -1577,7 +1681,7 @@ function buildHistoryRun(run) {
   const view = document.createElement("button");
   view.type = "button";
   view.className = "btn btn-sm";
-  view.textContent = "View run";
+  view.textContent = "View log";
   view.onclick = () => openConsoleModal(run.task_id, run.name);
   head.appendChild(view);
 

@@ -1,9 +1,8 @@
 """User identities, role profiles and capability evaluation.
 
-This is an authorization model, not authentication.  The web demo names a user through the
-query string; a real identity provider is deliberately outside the hackathon cut.  The useful
-part here is still real: one registry, named profiles, reasoned deviations and one wildcard
-matcher shared with the agent gateway.
+This is an authorization model, not authentication. The public demo uses one fixed member actor
+for bounded organization actions and a separate unguessable browser workspace for private data;
+the query-string user is display-only. A real identity provider remains a deployment gate.
 """
 
 import time
@@ -31,9 +30,24 @@ CAPABILITIES = (
     "policy.bind.organization",
     "permissions.edit",
     "template.create",
+    "template.manage",
     "template.edit.foreign",
     "approval.decide",
     "user.manage",
+    "agent.control",
+    "chat.use",
+    "document.process",
+    "prompt.create",
+    "skill.create",
+    "task.manage",
+    "ticket.create",
+    "web.read",
+    "contact.create.personal",
+    "contact.manage.department",
+    "contact.manage.organization",
+    "memory.create.personal",
+    "memory.manage.department",
+    "memory.manage.organization",
 )
 
 # These names currently feed an actual decision point. The remaining profile grants document the
@@ -48,6 +62,23 @@ ENFORCED_CAPABILITIES = frozenset({
     "policy.bind.department",
     "policy.bind.organization",
     "template.edit.foreign",
+    "template.create",
+    "template.manage",
+    "approval.decide",
+    "agent.control",
+    "chat.use",
+    "document.process",
+    "prompt.create",
+    "skill.create",
+    "task.manage",
+    "ticket.create",
+    "web.read",
+    "contact.create.personal",
+    "contact.manage.department",
+    "contact.manage.organization",
+    "memory.create.personal",
+    "memory.manage.department",
+    "memory.manage.organization",
 })
 
 
@@ -108,13 +139,25 @@ SEED_PROFILES = (
             "policy.create", "policy.edit.own", "policy.edit.foreign", "policy.bind.user",
             "policy.bind.user.foreign", "template.create", "template.edit.foreign",
             "approval.decide",
+            "agent.control", "chat.use", "document.process", "prompt.create",
+            "skill.create", "task.manage", "ticket.create", "template.manage", "web.read",
+            "contact.create.personal", "contact.manage.organization",
+            "contact.manage.department", "memory.create.personal",
+            "memory.manage.department", "memory.manage.organization",
         },
     ),
     RoleProfile(
         profile_id="member",
         name="Member",
         description="Creates policies and binds them to their own work; broader scope is forwarded.",
-        grants={"policy.create", "policy.edit.own", "policy.bind.user", "template.create"},
+        grants={
+            "policy.create", "policy.edit.own", "policy.bind.user", "template.create",
+            "template.manage", "approval.decide", "agent.control", "chat.use",
+            "document.process", "prompt.create", "skill.create", "task.manage",
+            "ticket.create", "web.read",
+            "contact.create.personal", "contact.manage.department",
+            "memory.create.personal", "memory.manage.department",
+        },
     ),
     RoleProfile(
         profile_id="viewer",
@@ -142,8 +185,14 @@ class UserRegistry:
 
     def _seed(self) -> None:
         for profile in SEED_PROFILES:
-            if self._profiles.get(profile.profile_id) is None:
+            existing = self._profiles.get(profile.profile_id)
+            if existing is None:
                 self._profiles.put(profile.profile_id, profile.model_copy(deep=True))
+            elif not profile.grants.issubset(existing.grants):
+                # Add newly enforced capabilities to the shipped profiles on upgrade without
+                # erasing any reasoned local extension an operator already added.
+                existing.grants.update(profile.grants)
+                self._profiles.put(profile.profile_id, existing)
         for user in SEED_USERS:
             if self._users.get(user.user_id) is None:
                 self._users.put(user.user_id, user.model_copy(deep=True))

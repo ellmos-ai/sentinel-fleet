@@ -112,19 +112,92 @@ class ChatService:
 
     # -- sessions ---------------------------------------------------------------
 
-    def create_session(self, title: str = "") -> ChatSession:
+    def create_session(
+        self,
+        title: str = "",
+        owner_id: str = "operator",
+    ) -> ChatSession:
         session = ChatSession(
             session_id=_new_id("chat"),
-            title=title.strip() or "New conversation"
+            title=title.strip() or "New conversation",
+            owner_id=owner_id,
         )
         self._store.put(session.session_id, session)
         return session
 
-    def get_session(self, session_id: str) -> Optional[ChatSession]:
-        return self._store.get(session_id)
+    @staticmethod
+    def can_read(
+        session: ChatSession,
+        requested_by: str,
+        requested_department: Optional[str] = None,
+    ) -> bool:
+        return (
+            session.owner_id == requested_by
+            or session.visibility == "organization"
+            or requested_by in session.shared_with
+            or (
+                session.visibility == "department"
+                and bool(requested_department)
+                and session.department_id == requested_department
+            )
+        )
 
-    def list_sessions(self) -> List[ChatSession]:
-        return sorted(self._store.list_all(), key=lambda s: s.updated_at, reverse=True)
+    def get_session(
+        self,
+        session_id: str,
+        requested_by: Optional[str] = None,
+        requested_department: Optional[str] = None,
+    ) -> Optional[ChatSession]:
+        session = self._store.get(session_id)
+        if session is None:
+            return None
+        if requested_by is not None and not self.can_read(
+            session, requested_by, requested_department
+        ):
+            return None
+        return session
+
+    def list_sessions(
+        self,
+        requested_by: Optional[str] = None,
+        requested_department: Optional[str] = None,
+    ) -> List[ChatSession]:
+        sessions = self._store.list_all()
+        if requested_by is not None:
+            sessions = [
+                session for session in sessions
+                if self.can_read(session, requested_by, requested_department)
+            ]
+        return sorted(sessions, key=lambda s: s.updated_at, reverse=True)
+
+    def update_sharing(
+        self,
+        session_id: str,
+        *,
+        requested_by: str,
+        requested_department: Optional[str],
+        visibility: str,
+        shared_with: Sequence[str],
+    ) -> ChatSession:
+        session = self._store.get(session_id)
+        if session is None:
+            raise KeyError(session_id)
+        if session.owner_id != requested_by:
+            raise PermissionError("Only the chat creator may change sharing")
+        if visibility not in {"private", "department", "organization"}:
+            raise ValueError("visibility must be private, department or organization")
+        if visibility == "department" and not requested_department:
+            raise ValueError("A user without a department cannot use department sharing")
+        session.visibility = visibility
+        session.department_id = requested_department if visibility == "department" else None
+        session.shared_with = []
+        for value in shared_with:
+            target = value.strip()
+            if target and target != requested_by and len(target) <= 200 and target not in session.shared_with:
+                session.shared_with.append(target)
+            if len(session.shared_with) >= 50:
+                break
+        return self._persist(session)
 
     def _persist(self, session: ChatSession) -> ChatSession:
         session.updated_at = time.time()
@@ -294,14 +367,17 @@ class ChatService:
         model: str = "",
         skill_ids: Optional[Sequence[str]] = None,
         prompt_id: str = "",
-        prompt_version: str = ""
+        prompt_version: str = "",
+        owner_id: str = "operator",
     ) -> Tuple[ChatSession, ChatMessage]:
         model = model or SUPPORTED_MODELS[0]
         skill_ids = list(skill_ids or [])
 
-        session = self.get_session(session_id) if session_id else None
+        session = self._store.get(session_id) if session_id else None
+        if session_id and (session is None or session.owner_id != owner_id):
+            raise PermissionError("Chat session does not exist or belongs to another workspace.")
         if session is None:
-            session = self.create_session(title=message[:60])
+            session = self.create_session(title=message[:60], owner_id=owner_id)
 
         session.messages.append(ChatMessage(
             message_id=_new_id("msg"),
@@ -353,7 +429,8 @@ class ChatService:
         session_id: str = "",
         skill_ids: Optional[Sequence[str]] = None,
         prompt_id: str = "",
-        prompt_version: str = ""
+        prompt_version: str = "",
+        owner_id: str = "operator",
     ) -> Tuple[ChatSession, RaceRecord]:
         """Send one prompt to several models at once and record every lane.
 
@@ -368,9 +445,14 @@ class ChatService:
         if len(models) > MAX_RACE_LANES:
             raise ValueError(f"A race runs at most {MAX_RACE_LANES} lanes")
 
-        session = self.get_session(session_id) if session_id else None
+        session = self._store.get(session_id) if session_id else None
+        if session_id and (session is None or session.owner_id != owner_id):
+            raise PermissionError("Chat session does not exist or belongs to another workspace.")
         if session is None:
-            session = self.create_session(title=f"Race: {message[:48]}")
+            session = self.create_session(
+                title=f"Race: {message[:48]}",
+                owner_id=owner_id,
+            )
 
         record = RaceRecord(race_id=_new_id("race"), prompt=message)
 

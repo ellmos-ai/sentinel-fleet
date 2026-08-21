@@ -1,8 +1,9 @@
 """DSGVO Privacy Contacts & Vendor Address Book Engine based on PrivacyMailDesk & .UMBRUCH."""
 
 import time
+import uuid
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sentinel_fleet.core.storage import get_store
 from sentinel_fleet.core.errors import ContactNotFoundError, ContactOptOutViolationError
 
@@ -18,6 +19,11 @@ class PrivacyContact(BaseModel):
     # opt-out. Optional with a default so records persisted before this field still load.
     postal_address: Optional[str] = None
     category: str = "vendor"  # vendor | institution | personal | subscriber
+    relationship: str = "external"  # internal | external
+    # organization records are shared; personal records belong to one data workspace/user.
+    visibility: str = "organization"  # personal | organization
+    owner_id: Optional[str] = None
+    department_id: Optional[str] = None
     # DSGVO / GDPR Protection Level
     # S1 = 6 months, S2 = 12 months, S3 = 36 months (Tax relevant), S4 = Permanent until revocation
     protection_level: str = "S3"
@@ -27,6 +33,22 @@ class PrivacyContact(BaseModel):
     last_contacted_at: float = Field(default_factory=time.time)
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
+
+    @model_validator(mode="after")
+    def _scope_is_coherent(self) -> "PrivacyContact":
+        if self.relationship not in {"internal", "external"}:
+            raise ValueError("relationship must be 'internal' or 'external'")
+        if self.visibility not in {"personal", "department", "organization"}:
+            raise ValueError("visibility must be personal, department or organization")
+        if self.visibility == "personal" and not self.owner_id:
+            raise ValueError("a personal contact needs an owner_id")
+        if self.visibility == "department" and not self.department_id:
+            raise ValueError("a department contact needs a department_id")
+        if self.visibility != "personal":
+            self.owner_id = None
+        if self.visibility != "department":
+            self.department_id = None
+        return self
 
 
 class PrivacyContactHub:
@@ -95,6 +117,26 @@ class PrivacyContactHub:
             return contacts
         return [c for c in contacts if not c.is_tombstone]
 
+    def list_visible(
+        self,
+        requested_by: str,
+        requested_department: Optional[str] = None,
+        include_tombstones: bool = False,
+    ) -> List[PrivacyContact]:
+        return [
+            contact
+            for contact in self.list_all(include_tombstones=include_tombstones)
+            if (
+                contact.visibility == "organization"
+                or contact.owner_id == requested_by
+                or (
+                    contact.visibility == "department"
+                    and bool(requested_department)
+                    and contact.department_id == requested_department
+                )
+            )
+        ]
+
     def get_contact_by_id(self, contact_id: str) -> Optional[PrivacyContact]:
         return self._store.get(contact_id)
 
@@ -111,9 +153,13 @@ class PrivacyContactHub:
         organization: str,
         category: str = "vendor",
         protection_level: str = "S3",
-        postal_address: str = ""
+        postal_address: str = "",
+        relationship: str = "external",
+        visibility: str = "organization",
+        owner_id: Optional[str] = None,
+        department_id: Optional[str] = None,
     ) -> PrivacyContact:
-        contact_id = f"cnt-{int(time.time()*1000)}"
+        contact_id = f"cnt-{uuid.uuid4().hex}"
         contact = PrivacyContact(
             contact_id=contact_id,
             name=name,
@@ -121,16 +167,39 @@ class PrivacyContactHub:
             organization=organization,
             postal_address=postal_address or None,
             category=category,
+            relationship=relationship,
+            visibility=visibility,
+            owner_id=owner_id,
+            department_id=department_id,
             protection_level=protection_level,
             opt_in_status="confirmed"
         )
         self._store.put(contact_id, contact)
         return contact
 
-    def mark_opt_out(self, contact_id: str, reason: str = "Operator opt-out") -> PrivacyContact:
+    def mark_opt_out(
+        self,
+        contact_id: str,
+        reason: str = "Operator opt-out",
+        requested_by: Optional[str] = None,
+        requested_department: Optional[str] = None,
+        can_manage_department: bool = False,
+        can_manage_organization: bool = False,
+    ) -> PrivacyContact:
         contact = self._store.get(contact_id)
         if not contact:
             raise ContactNotFoundError(contact_id)
+        if requested_by is not None:
+            personal_owner = contact.visibility == "personal" and contact.owner_id == requested_by
+            department_manager = (
+                contact.visibility == "department"
+                and bool(requested_department)
+                and contact.department_id == requested_department
+                and can_manage_department
+            )
+            organization_manager = contact.visibility == "organization" and can_manage_organization
+            if not (personal_owner or department_manager or organization_manager):
+                raise PermissionError("This contact belongs to another scope.")
 
         contact.opt_in_status = "unsubscribed"
         contact.is_tombstone = True
@@ -157,9 +226,19 @@ class PrivacyContactHub:
 
         return {"allowed": True, "reason": f"GDPR clear: protection level {contact.protection_level} in force."}
 
-    def run_dsgvo_retention_audit(self) -> Dict[str, Any]:
-        """Audits contacts for retention compliance."""
-        all_contacts = self._store.list_all()
+    def run_dsgvo_retention_audit(
+        self,
+        requested_by: Optional[str] = None,
+        requested_department: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Audit only the contact set the caller is allowed to see."""
+        all_contacts = (
+            self.list_visible(
+                requested_by, requested_department, include_tombstones=True
+            )
+            if requested_by is not None
+            else self._store.list_all()
+        )
         total = len(all_contacts)
         active = len([c for c in all_contacts if not c.is_tombstone])
         tombstones = len([c for c in all_contacts if c.is_tombstone])

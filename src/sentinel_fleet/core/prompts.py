@@ -1,7 +1,7 @@
-"""Prompt Registry, Versioning & RBAC Permissions Engine based on profiprompt-library-v1."""
+"""Durable prompt registry, versioning and RBAC metadata."""
 
 import time
-from typing import Dict, List, Optional
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from sentinel_fleet.core.errors import (
@@ -9,6 +9,7 @@ from sentinel_fleet.core.errors import (
     PromptNotFoundError,
     PromptVersionNotFoundError,
 )
+from sentinel_fleet.core.storage import BaseStore, get_store
 
 
 class PromptVersionRecord(BaseModel):
@@ -43,8 +44,8 @@ class PromptItem(BaseModel):
 
 
 class PromptRegistry:
-    def __init__(self):
-        self._prompts: Dict[str, PromptItem] = {}
+    def __init__(self, store: Optional[BaseStore[PromptItem]] = None):
+        self._store = store or get_store("prompts", PromptItem)
         self._seed_canonical_library()
 
     def _seed_canonical_library(self):
@@ -128,13 +129,14 @@ class PromptRegistry:
             )
         ]
         for p in seeds:
-            self._prompts[p.id] = p
+            if self._store.get(p.id) is None:
+                self._store.put(p.id, p)
 
     def list_all(self) -> List[PromptItem]:
-        return list(self._prompts.values())
+        return self._store.list_all()
 
     def get_prompt(self, prompt_id: str) -> Optional[PromptItem]:
-        return self._prompts.get(prompt_id)
+        return self._store.get(prompt_id)
 
     def get_version(self, prompt_id: str, version_number: str) -> Optional[PromptVersionRecord]:
         """Resolve one specific version of a prompt.
@@ -185,8 +187,7 @@ class PromptRegistry:
             requires_approval=requires_approval,
             versions=[version_rec]
         )
-        self._prompts[prompt_id] = prompt
-        return prompt
+        return self._store.put(prompt_id, prompt)
 
     def add_prompt_version(
         self,
@@ -214,7 +215,7 @@ class PromptRegistry:
         prompt.active_version = new_version_number
         prompt.current_text = new_text
         prompt.updated_at = time.time()
-        return prompt
+        return self._store.put(prompt_id, prompt)
 
     def delete_prompt(self, prompt_id: str) -> bool:
         """Remove a prompt and all of its versions.
@@ -223,10 +224,7 @@ class PromptRegistry:
         lives a layer above this module and importing it here would close a cycle, the same
         reason `delete_template()` leaves its binding check to its own caller.
         """
-        if prompt_id not in self._prompts:
-            return False
-        del self._prompts[prompt_id]
-        return True
+        return self._store.delete(prompt_id)
 
     def delete_version(self, prompt_id: str, version_number: str) -> PromptItem:
         """Remove one version. The last remaining one cannot go: a prompt without a version is a
@@ -247,7 +245,7 @@ class PromptRegistry:
             prompt.active_version = newest.version_number
             prompt.current_text = newest.text
         prompt.updated_at = time.time()
-        return prompt
+        return self._store.put(prompt_id, prompt)
 
     def update_permissions(
         self,
@@ -263,7 +261,7 @@ class PromptRegistry:
         prompt.requires_approval = requires_approval
         prompt.allowed_roles = allowed_roles
         prompt.updated_at = time.time()
-        return prompt
+        return self._store.put(prompt_id, prompt)
 
 
 prompt_registry = PromptRegistry()

@@ -208,7 +208,7 @@
         <div>
         <div class="flow-title">Observability Mesh &amp; OpenTelemetry Tracing</div>
         <div class="flow-meta">
-          Every tool call is recorded as an OpenTelemetry span (in-memory exporter; Cloud Trace export can be enabled via ENABLE_CLOUD_TRACE). Loop detectors step in on anomalies.
+          Every tool call is recorded as a durable span record; Cloud Trace export can also be enabled via ENABLE_CLOUD_TRACE. Loop detectors step in on anomalies.
         </div>
         <div class="flow-chips">
           <span class="chip-item">OpenTelemetry SDK (Cloud Trace optional)</span>

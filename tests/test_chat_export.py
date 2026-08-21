@@ -115,6 +115,7 @@ async def test_export_endpoint_serves_every_format_as_a_download():
             assert response.status_code == 200, f"{fmt} export failed"
             assert media in response.headers["content-type"]
             assert f'filename="sentinelfleet-{session_id}.{fmt}"' in response.headers["content-disposition"]
+            assert response.headers["x-sentinel-artifact-id"].startswith("artifact-")
             assert response.content
 
 

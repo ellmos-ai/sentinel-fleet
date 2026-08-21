@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 import yaml
 from pydantic import BaseModel, Field
 from sentinel_fleet.core.errors import SkillNotFoundError, SkillSchemaValidationError
+from sentinel_fleet.core.storage import BaseStore, get_store
 
 
 class SkillVersionRecord(BaseModel):
@@ -50,6 +51,7 @@ class AgentSkill(BaseModel):
     })
     versions: List[SkillVersionRecord] = Field(default_factory=list)
     updated_at: float = Field(default_factory=time.time)
+    origin: str = "bundled"  # bundled | operator
 
 
 class ComponentV1SkillLoader:
@@ -121,8 +123,15 @@ class ComponentV1SkillLoader:
 
 
 class SkillRegistry:
-    def __init__(self, skills_dir: Optional[str] = None):
-        self._skills: Dict[str, AgentSkill] = {}
+    def __init__(
+        self,
+        skills_dir: Optional[str] = None,
+        store: Optional[BaseStore[AgentSkill]] = None,
+    ):
+        self._store = store or get_store("skills", AgentSkill)
+        self._skills: Dict[str, AgentSkill] = {
+            skill.skill_id: skill for skill in self._store.list_all()
+        }
         # Locate the canonical skills directory. The source-tree-relative path only works for
         # editable installs and checkouts; a container built with a plain `pip install .` runs
         # this file from site-packages, where `../../../skills` points into the interpreter
@@ -151,17 +160,27 @@ class SkillRegistry:
         discovered = ComponentV1SkillLoader.load_from_directory(self._skills_dir)
         if discovered:
             for s in discovered:
-                self._skills[s.skill_id] = s
+                existing = self._store.get(s.skill_id)
+                if existing is None:
+                    existing = self._store.put(s.skill_id, s)
+                self._skills[s.skill_id] = existing
         else:
-            # Loud, not silent: falling back to 3 seeds means the deployment lost its bundled
-            # skill library - exactly the failure mode that hid the Cloud Run path bug.
+            # Loud, not silent: a missing bundled library is a deployment defect. Durable
+            # operator-authored and previously loaded records remain usable across a restart.
             import logging
-            logging.getLogger(__name__).warning(
-                "No component-v1 skills found under %s - falling back to %d built-in seed "
-                "skills. Set SENTINEL_SKILLS_DIR if the bundled skills/ directory lives "
-                "elsewhere.", self._skills_dir, 3
-            )
-            self._seed_default_skills()
+            if self._skills:
+                logging.getLogger(__name__).warning(
+                    "No component-v1 skills found under %s - using %d durable registry records. "
+                    "Set SENTINEL_SKILLS_DIR if the bundled skills/ directory lives elsewhere.",
+                    self._skills_dir, len(self._skills),
+                )
+            else:
+                logging.getLogger(__name__).warning(
+                    "No component-v1 skills found under %s - falling back to %d built-in seed "
+                    "skills. Set SENTINEL_SKILLS_DIR if the bundled skills/ directory lives "
+                    "elsewhere.", self._skills_dir, 3,
+                )
+                self._seed_default_skills()
 
     def _seed_default_skills(self):
         # Fallback seeds if filesystem is not mounted
@@ -195,7 +214,10 @@ class SkillRegistry:
             )
         ]
         for s in fallback_seeds:
-            self._skills[s.skill_id] = s
+            existing = self._store.get(s.skill_id)
+            if existing is None:
+                existing = self._store.put(s.skill_id, s)
+            self._skills[s.skill_id] = existing
 
     def list_all(self) -> List[AgentSkill]:
         return list(self._skills.values())
@@ -250,10 +272,11 @@ class SkillRegistry:
             required_tools=required_tools or [],
             tags=tags or [],
             visibility=visibility,
-            execution_gate=execution_gate
+            execution_gate=execution_gate,
+            origin="operator",
         )
-        self._skills[skill.skill_id] = skill
-        return skill
+        self._skills[skill.skill_id] = self._store.put(skill.skill_id, skill)
+        return self._skills[skill.skill_id]
 
     def add_skill_version(
         self,
@@ -277,7 +300,8 @@ class SkillRegistry:
         skill.version = new_version_number
         skill.required_tools = required_tools
         skill.updated_at = time.time()
-        return skill
+        self._skills[skill_id] = self._store.put(skill_id, skill)
+        return self._skills[skill_id]
 
     def delete_skill(self, skill_id: str) -> bool:
         """Remove a skill from the registry.
@@ -290,7 +314,7 @@ class SkillRegistry:
         if skill_id not in self._skills:
             return False
         del self._skills[skill_id]
-        return True
+        return self._store.delete(skill_id)
 
     def update_permissions(
         self,
@@ -305,7 +329,8 @@ class SkillRegistry:
         skill.visibility = visibility
         skill.execution_gate = execution_gate
         skill.updated_at = time.time()
-        return skill
+        self._skills[skill_id] = self._store.put(skill_id, skill)
+        return self._skills[skill_id]
 
 
 skill_registry = SkillRegistry()

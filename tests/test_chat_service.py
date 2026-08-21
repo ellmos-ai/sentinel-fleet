@@ -152,3 +152,67 @@ async def test_missing_session_returns_404():
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/api/chat/sessions/chat-DOESNOTEXIST")
         assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_private_chat_sessions_are_isolated_between_demo_workspaces():
+    """Two anonymous demo browsers must not share one global conversation list."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as alice:
+        created = await alice.post("/api/chat/send", json={"message": "Alice private note"})
+        assert created.status_code == 200
+        session_id = created.json()["session_id"]
+        assert any(
+            session["session_id"] == session_id
+            for session in (await alice.get("/api/chat/sessions")).json()
+        )
+
+    # A fresh client has a different HttpOnly workspace cookie.
+    async with AsyncClient(transport=transport, base_url="http://test") as bob:
+        listed = await bob.get("/api/chat/sessions")
+        assert listed.status_code == 200
+        assert all(session["session_id"] != session_id for session in listed.json())
+        assert (await bob.get(f"/api/chat/sessions/{session_id}")).status_code == 404
+        assert (await bob.get(f"/api/chat/sessions/{session_id}/export?format=md")).status_code == 404
+        hijack = await bob.post(
+            "/api/chat/send",
+            json={"message": "append to Alice", "session_id": session_id},
+        )
+        assert hijack.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_chat_creator_can_share_read_access_without_sharing_write_access():
+    transport = ASGITransport(app=app)
+    async with (
+        AsyncClient(transport=transport, base_url="http://test") as alice,
+        AsyncClient(transport=transport, base_url="http://test") as bob,
+    ):
+        bob_id = (await bob.get("/api/access/me")).json()["data_owner_id"]
+        created = await alice.post("/api/chat/send", json={"message": "Share this chat"})
+        session_id = created.json()["session_id"]
+
+        shared = await alice.put(
+            f"/api/chat/sessions/{session_id}/sharing",
+            json={"visibility": "private", "shared_with": [bob_id]},
+        )
+        assert shared.status_code == 200
+        assert (await bob.get(f"/api/chat/sessions/{session_id}")).status_code == 200
+        assert (await bob.get(f"/api/chat/sessions/{session_id}/export?format=md")).status_code == 200
+
+        write = await bob.post(
+            "/api/chat/send",
+            json={"message": "Must remain read-only", "session_id": session_id},
+        )
+        assert write.status_code == 404
+        assert (await bob.put(
+            f"/api/chat/sessions/{session_id}/sharing",
+            json={"visibility": "organization", "shared_with": []},
+        )).status_code == 403
+
+        department = await alice.put(
+            f"/api/chat/sessions/{session_id}/sharing",
+            json={"visibility": "department", "shared_with": []},
+        )
+        assert department.status_code == 200
+        assert department.json()["session"]["department_id"] == "finance"

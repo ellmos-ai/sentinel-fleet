@@ -6,7 +6,7 @@
 [![Gemini 3.5](https://img.shields.io/badge/Gemini-3.5%20Flash%20Vision-orange.svg)](https://deepmind.google/technologies/gemini/)
 [![Zero-Trust Model Armor](https://img.shields.io/badge/Security-Model%20Armor%20%26%20Zero--Trust-green.svg)](#security--governance)
 [![Google GenAI SDK](https://img.shields.io/badge/SDK-google--genai-4285F4.svg)](https://googleapis.github.io/python-genai/)
-[![Pytest](https://img.shields.io/badge/pytest-448%2F448%20passed-brightgreen.svg)](tests/)
+[![Pytest](https://img.shields.io/badge/pytest-476%2F476%20passed-brightgreen.svg)](tests/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
 > Built for the **Google Cloud All Things Agentic Hackathon** (Track 3: The Fortified Enterprise Fleet & Track 1: The Taskmaster).
@@ -139,11 +139,20 @@ feed one `explain_binding()` decision function. Its R1–R7 verdict is used by t
 for the target user or an administrator, and `deny` refuses. Process bindings remain visible as
 a planned matrix dimension but are not writable until a process registry exists.
 
-This is authorization modelling, not authentication. `?user=` and legacy `?viewer=` change only
-the displayed registered identity. In `DEMO_MODE=true`, safe writes are pinned server-side to
-`member:demo`; prompt/skill administration, permission edits and policy-ticket decisions remain
-locked. In `DEMO_MODE=false`, every HTTP/WebSocket route except health and the token-gated
-scheduler fails closed until Cloud Run IAM/IAP or another verified identity layer is installed.
+In `DEMO_MODE=true`, `?user=` and legacy `?viewer=` change only the displayed registered identity;
+safe writes are pinned server-side to `member:demo`, and security-root administration remains
+locked. In `DEMO_MODE=false`, every HTTP request and run-log WebSocket validates IAP's signed JWT,
+its audience and issuer, then resolves `sub` or `email` through the explicit `IAP_USER_MAP` to one
+registered user. Missing, forged, suspended or unmapped identities fail closed; unsigned identity
+headers are never trusted.
+
+Private demo data does not use the display alias. Each browser receives an unguessable HttpOnly
+workspace ID: private chat histories, contacts, memory and documents are filtered by that owner.
+All scoped record types support department and deployment-wide visibility. Chats and generated
+results additionally support named shares; only the creator changes chat/document sharing or
+writes to a shared chat. Generated chat exports and correction letters are stored before download, private by default,
+and may be downloaded or deleted only after their record-level access check. The
+Governance tab lists these storage and access boundaries explicitly.
 
 ---
 
@@ -180,13 +189,14 @@ python -m pytest tests/ -v
 
 ### 3. Reset the demo data
 
-Every store the console writes to lives as JSON under `data/`, which is gitignored. Deleting
-those files puts the deployment back to its first-run state: the seeded agents, skills, prompts,
-contacts and task templates are recreated on the next start, and everything a session added —
-processed invoices, approval tickets, chat sessions, spans — is gone.
+Every local metadata store the console writes to lives as JSON under `data/`; result-document
+bytes live under `data/artifacts/`. Both are gitignored. Deleting them puts the deployment back
+to its first-run state: the seeded agents, skills, prompts, contacts and task templates are
+recreated on the next start, and everything a session added is gone.
 
 ```bash
-rm data/*.json     # then restart: python app.py
+rm data/*.json
+rm -rf data/artifacts     # then restart: python app.py
 ```
 
 There is no script and no reset button on purpose. Wiping a governed system's evidence should
@@ -194,17 +204,30 @@ take a deliberate act at the filesystem, not a click in the surface that produce
 
 ### 4. Deploy to Google Cloud Run
 
-These are the commands the hosted demo was actually deployed with (project ID and file
-paths generalised; secret values never leave Secret Manager):
+This deployment template matches the current source requirements (project ID and file paths
+generalised; secret values never leave Secret Manager). Running it changes the live service;
+the repository update itself does not deploy anything:
 
 ```bash
-# One-time: store the Gemini key and the routines fire token as secrets
+# One-time: create a dedicated runtime identity, store secrets, and create a private
+# uniform-access result bucket. Do not use the project's default Editor identity.
+gcloud iam service-accounts create sentinel-fleet-runtime
 gcloud secrets create gemini-api-key --data-file=gemini_api_key.txt
 gcloud secrets create routines-fire-token --data-file=fire_token.txt
+gcloud storage buckets create gs://<your-result-bucket> --location=europe-west3 --uniform-bucket-level-access
+gcloud projects add-iam-policy-binding <project-id> \
+  --member="serviceAccount:sentinel-fleet-runtime@<project-id>.iam.gserviceaccount.com" --role="roles/datastore.user"
+gcloud projects add-iam-policy-binding <project-id> \
+  --member="serviceAccount:sentinel-fleet-runtime@<project-id>.iam.gserviceaccount.com" --role="roles/secretmanager.secretAccessor"
+gcloud projects add-iam-policy-binding <project-id> \
+  --member="serviceAccount:sentinel-fleet-runtime@<project-id>.iam.gserviceaccount.com" --role="roles/cloudtrace.agent"
+gcloud storage buckets add-iam-policy-binding gs://<your-result-bucket> \
+  --member="serviceAccount:sentinel-fleet-runtime@<project-id>.iam.gserviceaccount.com" --role="roles/storage.objectUser"
 
 # Build from source (the Dockerfile copies sources BEFORE `pip install .`) and deploy
 gcloud run deploy sentinel-fleet --source . --region europe-west3 \
-  --set-env-vars "DEMO_MODE=true" \
+  --service-account "sentinel-fleet-runtime@<project-id>.iam.gserviceaccount.com" \
+  --set-env-vars "DEMO_MODE=true,RESULT_BUCKET=<your-result-bucket>" \
   --update-secrets "GEMINI_API_KEY=gemini-api-key:latest,ROUTINES_FIRE_TOKEN=routines-fire-token:latest" \
   --max-instances 1
 
@@ -216,6 +239,22 @@ gcloud scheduler jobs create http routines-fire --location europe-west3 \
   --headers "X-Fire-Token=<your-token>,Content-Type=application/json" \
   --message-body "{}"
 ```
+
+Before removing a legacy `roles/editor` grant, read back the runtime service account's bindings
+and verify the four narrow roles above. Only then remove Editor and read the policy back again:
+
+```bash
+gcloud projects get-iam-policy <project-id> --flatten="bindings[].members" \
+  --filter="bindings.members:sentinel-fleet-runtime@<project-id>.iam.gserviceaccount.com" \
+  --format="table(bindings.role)"
+gcloud projects remove-iam-policy-binding <project-id> \
+  --member="serviceAccount:sentinel-fleet-runtime@<project-id>.iam.gserviceaccount.com" --role="roles/editor"
+```
+
+For a private deployment, configure IAP for the service, set `DEMO_MODE=false`, set the exact
+signed-header audience as `IAP_AUDIENCE`, and map immutable claims to existing registry IDs, for
+example `IAP_USER_MAP={"email:operator@example.org":"operator"}`. The app verifies the JWT; merely
+setting `X-Goog-Authenticated-User-Email` never authenticates a request.
 
 Scale-to-zero stays intact: there is no in-process tick loop, the Scheduler wakes the
 service only when bindings may be due. One process-wide lock plus `--max-instances 1` prevents
@@ -231,8 +270,10 @@ Firestore lease/transaction first.
 * **Adversarial Injection Detection:** Canonicalised boundary matching scans nested string arguments, selected prompts and skills, previous outputs and web context before model use.
 * **Quarantine Protocol:** Malicious inputs immediately quarantine the executing agent and notify the operator via high-priority TicketMaster tickets.
 * **Bounded document intake:** Upload size, type, PDF page count, extracted text and Gemini concurrency are capped. RED, UNSCREENED or truncated privacy screens stay on the local extraction path and are never sent as raw files to Gemini.
+* **Separated document retention:** Uploaded source bytes are request-scoped and not retained. Extracted/audited records are durable in Firestore (JSON locally). Generated results use creator-managed retention with no silent automatic expiry: the creator may delete them, bytes are removed and a non-content tombstone records the deletion. A legal hold blocks deletion.
+* **Encrypted result storage:** Production result bytes use Cloud Storage's Google-managed AES-256 server-side encryption and HTTPS transport. Local development files are explicitly labelled plaintext and must contain synthetic data only. Downloads are proxied through the authorized API; the bucket is never made public.
 * **Pinned web transport:** Every redirect hop is revalidated and the HTTP/TLS connection is pinned to the validated public IP, closing DNS-rebinding TOCTOU.
-* **Deployment boundary:** The public interactive build has no login. Use only synthetic demo data; production access remains fail-closed until IAM/IAP or equivalent verified authentication is configured.
+* **Deployment boundary:** The public interactive build has no login. Use only synthetic demo data. Non-demo access fails closed unless a signed IAP assertion maps to an active registered user.
 
 ---
 
@@ -245,5 +286,5 @@ SentinelFleet is licensed under the **GNU Affero General Public License v3.0** (
 ## Scope, Provenance & Data Notes
 
 * **Demo, not advice.** The OmniLedger domain validates demo invoices against German statutory rules (§ 14 UStG, GoBD) as a technical showcase. It is an AI-assisted engineering demo — not tax, accounting or legal advice; whether any concrete use meets statutory requirements depends on the individual case.
-* **Provenance.** Built by Lukas Geiger for the Google Cloud All Things Agentic Hackathon with substantial AI coding assistance (Google Gemini, Anthropic Claude); all AI-generated code was human-directed and is covered by the currently verified 448-test suite. Some skill definitions are English rebrands of the author's private skills library.
-* **Data.** Chat messages and privacy-screened GREEN/YELLOW document uploads may be sent to the Gemini API when a `GEMINI_API_KEY` is configured. RED, UNSCREENED and truncated documents stay on the local extraction path; without a key, no model payload is sent to Gemini. The Web reader still performs operator-requested external GETs, and configured Firestore/Cloud Trace backends still receive their documented records. Do not upload real invoices or personal data to a demo deployment, and please do not post case data in issues.
+* **Provenance.** Built by Lukas Geiger for the Google Cloud All Things Agentic Hackathon with substantial AI coding assistance (Google Gemini, Anthropic Claude); all AI-generated code was human-directed and is covered by the currently verified 476-test suite. Some skill definitions are English rebrands of the author's private skills library.
+* **Data.** Chat messages and privacy-screened GREEN/YELLOW document uploads may be sent to the Gemini API when a `GEMINI_API_KEY` is configured. RED, UNSCREENED and truncated documents stay on the local extraction path; without a key, no model payload is sent to Gemini. Raw upload bytes are not retained; structured records, chat sessions, prompts, skills, logs and telemetry use Firestore in production, while generated result bytes use the configured private Cloud Storage bucket. The Web reader still performs operator-requested external GETs, and configured Cloud Trace receives its documented spans. Do not upload real invoices or personal data to a demo deployment, and please do not post case data in issues.

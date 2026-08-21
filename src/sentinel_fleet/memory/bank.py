@@ -56,9 +56,13 @@ class MemoryEntry(BaseModel):
     key: str
     content: str
     # Who may change this entry, following the same rule TaskTemplate uses: the owner decides.
-    # Entries the deployment ships own themselves (SEED_OWNER) and are curatable by anyone,
-    # because they belong to the installation rather than to a person.
+    # Entries shipped by the deployment use SEED_OWNER. HTTP callers still need the
+    # organization-memory capability to curate them; trusted service calls keep compatibility.
     owner: str = "operator"
+    # Older entries were organization-wide. New personal entries set this explicitly and are
+    # filtered by their unforgeable request owner rather than a submitted form field.
+    visibility: str = "organization"  # personal | organization
+    department_id: Optional[str] = None
     created_at: float = Field(default_factory=time.time)
     updated_at: Optional[float] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -88,6 +92,16 @@ class MemoryEntry(BaseModel):
             metadata.setdefault("legacy_category", raw)
             data["metadata"] = metadata
         return data
+
+    @model_validator(mode="after")
+    def _scope_is_coherent(self) -> "MemoryEntry":
+        if self.visibility not in {"personal", "department", "organization"}:
+            raise ValueError("visibility must be personal, department or organization")
+        if self.visibility == "department" and not self.department_id:
+            raise ValueError("department memory needs a department_id")
+        if self.visibility != "department":
+            self.department_id = None
+        return self
 
     @property
     def is_seed(self) -> bool:
@@ -122,7 +136,10 @@ class MemoryBank:
             if existing is not None and existing.metadata.get("edited_by"):
                 continue
             if existing is None or existing.content != text:
-                self.store_memory(cat, k, text, metadata={"seed": True}, owner=SEED_OWNER)
+                self.store_memory(
+                    cat, k, text, metadata={"seed": True}, owner=SEED_OWNER,
+                    visibility="organization",
+                )
 
     def store_memory(
         self,
@@ -131,6 +148,8 @@ class MemoryBank:
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
         owner: str = "operator",
+        visibility: str = "personal",
+        department_id: Optional[str] = None,
     ) -> MemoryEntry:
         entry = MemoryEntry(
             id=f"mem-{uuid.uuid4().hex[:8]}",
@@ -138,16 +157,87 @@ class MemoryBank:
             key=key,
             content=content,
             owner=owner,
+            visibility=visibility,
+            department_id=department_id,
             metadata=metadata or {}
         )
-        self._store.put(key, entry)
+        self._store.put(self._storage_key(entry), entry)
         return entry
 
-    def _authorise(self, key: str, requested_by: str) -> MemoryEntry:
-        entry = self._store.get(key)
+    @staticmethod
+    def _storage_key(entry: MemoryEntry) -> str:
+        if entry.visibility == "organization":
+            # Retain the historical document key for organization entries and seed compatibility.
+            return entry.key
+        if entry.visibility == "department":
+            return f"department:{entry.department_id}::{entry.key}"
+        return f"{entry.owner}::{entry.key}"
+
+    def _find(
+        self,
+        key: str,
+        requested_by: Optional[str] = None,
+        requested_department: Optional[str] = None,
+    ) -> tuple[Optional[str], Optional[MemoryEntry]]:
+        if requested_by is not None:
+            scoped_key = f"{requested_by}::{key}"
+            personal = self._store.get(scoped_key)
+            if personal is not None:
+                return scoped_key, personal
+        if requested_department is not None:
+            scoped_key = f"department:{requested_department}::{key}"
+            department_entry = self._store.get(scoped_key)
+            if department_entry is not None:
+                return scoped_key, department_entry
+        organization = self._store.get(key)
+        if organization is not None:
+            return key, organization
+        # Trusted internal compatibility for direct callers/tests that know the logical key but
+        # not the owner's storage namespace. Ambiguous keys are intentionally not guessed.
+        matches = [
+            entry for entry in self._store.list_all()
+            if entry.key == key and (requested_by is None or entry.owner == requested_by)
+        ]
+        if len(matches) == 1:
+            entry = matches[0]
+            return self._storage_key(entry), entry
+        return None, None
+
+    def _authorise(
+        self,
+        key: str,
+        requested_by: str,
+        requested_department: Optional[str] = None,
+        can_manage_department: Optional[bool] = None,
+        can_manage_organization: Optional[bool] = None,
+    ) -> MemoryEntry:
+        _store_key, entry = self._find(
+            key,
+            requested_by=requested_by,
+            requested_department=requested_department,
+        )
+        if entry is None and can_manage_organization is None:
+            # Trusted internal callers historically addressed entries by logical key only. Keep
+            # that API while HTTP callers remain non-enumerating and owner-scoped.
+            _store_key, entry = self._find(key)
         if entry is None:
             raise MemoryEntryNotFoundError(key)
-        if entry.owner != requested_by and entry.owner != SEED_OWNER:
+        if entry.visibility == "organization":
+            # ``None`` is the trusted internal/service path retained for direct callers. HTTP
+            # routes always pass a real capability verdict (True/False).
+            allowed = (
+                can_manage_organization is True
+                or (can_manage_organization is None and entry.owner in {requested_by, SEED_OWNER})
+            )
+        elif entry.visibility == "department":
+            allowed = (
+                bool(requested_department)
+                and entry.department_id == requested_department
+                and can_manage_department is not False
+            )
+        else:
+            allowed = entry.owner == requested_by
+        if not allowed:
             raise MemoryPermissionError(key, requested_by, entry.owner)
         return entry
 
@@ -157,6 +247,9 @@ class MemoryBank:
         category: str,
         content: str,
         requested_by: str = "operator",
+        requested_department: Optional[str] = None,
+        can_manage_department: Optional[bool] = None,
+        can_manage_organization: Optional[bool] = None,
     ) -> MemoryEntry:
         """Correct an entry in place. The key is the identity, so it does not change here.
 
@@ -164,21 +257,49 @@ class MemoryBank:
         agent that called it, never the retrieved entry's text, so an edit changes what agents
         will read next - not what the record says they read before.
         """
-        entry = self._authorise(key, requested_by)
+        entry = self._authorise(
+            key,
+            requested_by,
+            requested_department,
+            can_manage_department,
+            can_manage_organization,
+        )
         entry.category = normalise_category(category)
         entry.content = content
         entry.updated_at = time.time()
         # Marks the entry as curated so the startup seeding stops healing it back.
         entry.metadata = {**entry.metadata, "edited_by": requested_by}
-        self._store.put(key, entry)
+        self._store.put(self._storage_key(entry), entry)
         return entry
 
-    def delete_memory(self, key: str, requested_by: str = "operator") -> bool:
-        self._authorise(key, requested_by)
-        return self._store.delete(key)
+    def delete_memory(
+        self,
+        key: str,
+        requested_by: str = "operator",
+        requested_department: Optional[str] = None,
+        can_manage_department: Optional[bool] = None,
+        can_manage_organization: Optional[bool] = None,
+    ) -> bool:
+        entry = self._authorise(
+            key,
+            requested_by,
+            requested_department,
+            can_manage_department,
+            can_manage_organization,
+        )
+        return self._store.delete(self._storage_key(entry))
 
-    def get_memory(self, key: str) -> Optional[MemoryEntry]:
-        return self._store.get(key)
+    def get_memory(
+        self,
+        key: str,
+        requested_by: Optional[str] = None,
+        requested_department: Optional[str] = None,
+    ) -> Optional[MemoryEntry]:
+        return self._find(
+            key,
+            requested_by=requested_by,
+            requested_department=requested_department,
+        )[1]
 
     def search_memories(self, query: str) -> List[MemoryEntry]:
         query_lower = query.lower()
@@ -190,6 +311,22 @@ class MemoryBank:
 
     def list_all(self) -> List[MemoryEntry]:
         return self._store.list_all()
+
+    def list_visible(
+        self, requested_by: str, requested_department: Optional[str] = None
+    ) -> List[MemoryEntry]:
+        return [
+            entry for entry in self._store.list_all()
+            if (
+                entry.visibility == "organization"
+                or entry.owner == requested_by
+                or (
+                    entry.visibility == "department"
+                    and bool(requested_department)
+                    and entry.department_id == requested_department
+                )
+            )
+        ]
 
 
 memory_bank = MemoryBank()

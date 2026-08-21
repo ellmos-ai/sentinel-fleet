@@ -7,7 +7,14 @@ import asyncio
 
 import pytest
 
-from sentinel_fleet.core.run_log import MAX_RETAINED_LINES, RUN_CLOSED, RunLog, RunLogBus
+from sentinel_fleet.core.run_log import (
+    MAX_RETAINED_LINES,
+    RUN_CLOSED,
+    RunLog,
+    RunLogBus,
+    RunLogRecord,
+)
+from sentinel_fleet.core.storage import LocalJsonStore
 
 
 # ---------------------------------------------------------------------------
@@ -163,3 +170,20 @@ def test_bus_close_of_an_unknown_run_does_not_raise():
     bus = RunLogBus()
     bus.close("never-emitted-to")  # must be a no-op, not an error
     assert bus.is_closed("never-emitted-to") is False
+
+
+def test_a_new_bus_replays_a_run_from_the_durable_store(tmp_path):
+    """Regression: TaskRecords survived a restart while their run logs disappeared."""
+    path = str(tmp_path / "run_logs.json")
+    first_store = LocalJsonStore("run_logs", RunLogRecord, persistence_path=path)
+    first = RunLogBus(store=first_store)
+    first.emit("TASK-PERSISTED", "step survived")
+    first.close("TASK-PERSISTED")
+
+    second_store = LocalJsonStore("run_logs", RunLogRecord, persistence_path=path)
+    second = RunLogBus(store=second_store)
+    lines, last_seq, closed = second.snapshot("TASK-PERSISTED")
+
+    assert lines[0].endswith("step survived")
+    assert last_seq == 1
+    assert closed is True

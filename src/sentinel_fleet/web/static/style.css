@@ -460,7 +460,7 @@ a { color: var(--accent); }
   --group-accent: var(--ink-2);
   --group-layer: var(--surface-sunk);
   --group-rule: var(--rule);
-  min-width: 0;
+  min-width: max-content;
   border: 1px solid var(--group-rule);
   border-top: 3px solid var(--group-accent);
   border-radius: var(--r-2);
@@ -500,7 +500,9 @@ a { color: var(--accent); }
 .tab-group-links {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  /* A category may move to the next rail row, but its links stay on one line. This keeps the
+     Governance label from splitting locally at a narrower zoom than the public reference. */
+  flex-wrap: nowrap;
   gap: 2px;
   padding: 5px;
 }
@@ -1695,6 +1697,7 @@ a { color: var(--accent); }
 
   .tab-group {
     width: 100%;
+    min-width: 0;
   }
 
   .tab-group-title { display: none; }
@@ -1743,6 +1746,7 @@ a { color: var(--accent); }
     display: none;
     border-top: 1px solid var(--group-rule);
     padding: var(--s-1);
+    flex-wrap: wrap;
   }
 
   .tab-group.is-open .tab-group-links { display: flex; }

@@ -8,6 +8,8 @@ SENTINEL_SKILLS_DIR env > source tree > cwd) and the now-loud fallback.
 """
 
 import logging
+from sentinel_fleet.core.storage import LocalJsonStore
+from sentinel_fleet.core.skills import AgentSkill
 
 from sentinel_fleet.core.skills import SkillRegistry
 
@@ -40,7 +42,10 @@ def test_env_var_overrides_default_skills_dir(tmp_path, monkeypatch):
 def test_missing_directory_falls_back_to_seeds_and_warns(tmp_path, caplog):
     missing = tmp_path / "does-not-exist"
     with caplog.at_level(logging.WARNING, logger="sentinel_fleet.core.skills"):
-        registry = SkillRegistry(skills_dir=str(missing))
+        registry = SkillRegistry(
+            skills_dir=str(missing),
+            store=LocalJsonStore("isolated-skills", AgentSkill, str(tmp_path / "skills.json")),
+        )
     assert len(registry._skills) == 3
     assert any("falling back" in record.message for record in caplog.records)
 

@@ -22,6 +22,21 @@ EMOJI = re.compile(
 )
 
 
+async def _console_with_template(client: AsyncClient, name: str) -> str:
+    """Render template-dependent controls without relying on another test's seeded state."""
+    created = await client.post("/api/task-templates", data={
+        "name": name,
+        "steps": '[{"step_id":"step-1","custom_prompt_text":"UI probe."}]',
+    })
+    assert created.status_code == 200
+    template_id = created.json()["template"]["template_id"]
+    try:
+        return (await client.get("/")).text
+    finally:
+        removed = await client.delete(f"/api/task-templates/{template_id}")
+        assert removed.status_code == 200
+
+
 @pytest.mark.asyncio
 async def test_console_renders_the_chat_panel_with_its_controls():
     transport = ASGITransport(app=app)
@@ -62,7 +77,7 @@ async def test_task_card_renders_the_step_editor_modal():
     the page for openStepsModal() to have anything to work with."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        body = (await client.get("/")).text
+        body = await _console_with_template(client, "Step editor UI probe")
 
     assert 'id="modal-steps"' in body
     assert 'id="steps-editor-list"' in body
@@ -318,7 +333,7 @@ async def test_the_tab_rail_uses_three_layered_groups_without_horizontal_overflo
 
     order = re.findall(r'id="btn-(tab-[a-z]+)"', rail)
     assert order == [
-        "tab-overview", "tab-chat",
+        "tab-overview", "tab-chat", "tab-documents",
         "tab-fleet", "tab-tickets", "tab-prompts", "tab-memory", "tab-governance",
         "tab-domains", "tab-contacts", "tab-telemetry",
     ], "work, then control, then reference"
@@ -332,6 +347,8 @@ async def test_the_tab_rail_uses_three_layered_groups_without_horizontal_overflo
     assert "overflow-x: auto" not in rail_rule
     assert "overflow: visible" in rail_rule
     assert "flex-wrap: wrap" in stylesheet
+    assert ".tab-group-links {" in stylesheet
+    assert "flex-wrap: nowrap" in stylesheet
 
 
 def test_compact_tab_groups_are_an_accessible_accordion():
@@ -531,7 +548,7 @@ async def test_the_fleet_tab_can_be_navigated_and_filtered():
     where scrolling finds anything."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        body = (await client.get("/")).text
+        body = await _console_with_template(client, "Template filter UI probe")
 
     fleet = body.split('id="tab-fleet"')[1].split('id="tab-tickets"')[0]
     for anchor in ("fleet-tasks", "fleet-queue", "fleet-directory"):
@@ -558,7 +575,7 @@ def test_paging_keeps_a_history_panel_with_its_own_row():
 async def test_template_rows_show_two_actions_and_fold_the_rest():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        body = (await client.get("/")).text
+        body = await _console_with_template(client, "Template actions UI probe")
 
     assert 'class="row-more"' in body, "the extra row actions need a disclosure"
     assert "row-more-menu" in body
@@ -684,7 +701,16 @@ async def test_the_fleet_tab_leads_with_the_throwaway_run():
 async def test_memory_entries_can_be_reached_from_the_table():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/api/memory/create", data={
+            "category": "working",
+            "key": "test:console-actions",
+            "content": "Private entry whose controls must be reachable.",
+            "visibility": "personal",
+        })
+        assert created.status_code == 200
         body = (await client.get("/")).text
+        removed = await client.delete("/api/memory/test:console-actions")
+        assert removed.status_code == 200
 
     memory = body.split('id="tab-memory"')[1].split('id="tab-prompts"')[0]
     assert "openMemoryEditor(" in memory and "deleteMemoryEntry(" in memory
@@ -830,3 +856,5 @@ async def test_the_memory_tab_speaks_the_operators_usmc_vocabulary():
         assert f'value="{value}"' in body, f"the {value} type is not selectable"
     # The old labels are gone from the pickers, not merely aliased behind them.
     assert 'value="entity"' not in body and 'value="policy"' not in body
+    for legacy in ("fact", "policy", "entity", "lesson", "session_checkpoint", "session"):
+        assert f"<code>{legacy}</code>" in memory

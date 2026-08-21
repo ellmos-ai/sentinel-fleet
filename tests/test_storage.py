@@ -63,6 +63,38 @@ def test_local_store_persists_and_reloads(tmp_path):
     assert LocalJsonStore("samples", Sample, persistence_path=str(path)).get("a") is None
 
 
+def test_local_store_fails_closed_on_corrupt_existing_file(tmp_path):
+    path = tmp_path / "samples.json"
+    path.write_text("{not valid json", encoding="utf-8")
+    with pytest.raises(StorageBackendError, match="load failed"):
+        LocalJsonStore("samples", Sample, persistence_path=str(path))
+
+
+def test_local_store_rolls_back_memory_when_persistence_fails(tmp_path, monkeypatch):
+    store = LocalJsonStore("samples", Sample, persistence_path=str(tmp_path / "samples.json"))
+    store.put("a", Sample(id="a", label="original"))
+
+    def fail_save():
+        raise StorageBackendError("disk unavailable")
+
+    monkeypatch.setattr(store, "_save_to_disk", fail_save)
+    with pytest.raises(StorageBackendError, match="disk unavailable"):
+        store.put("a", Sample(id="a", label="replacement"))
+    assert store.get("a").label == "original"
+
+
+def test_local_store_does_not_expose_mutable_internal_records():
+    store = LocalJsonStore("samples", Sample)
+    store.put("a", Sample(id="a", label="stored"))
+
+    fetched = store.get("a")
+    fetched.label = "changed without put"
+    listed = store.list_all()
+    listed[0].label = "also changed without put"
+
+    assert store.get("a").label == "stored"
+
+
 def test_get_store_returns_local_store_outside_production(monkeypatch, tmp_path):
     monkeypatch.setenv("USE_FIRESTORE", "false")
     monkeypatch.setattr("sentinel_fleet.core.storage.settings.environment", "development", raising=False)

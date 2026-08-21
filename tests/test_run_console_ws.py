@@ -70,6 +70,15 @@ def test_a_task_state_marked_terminal_closes_the_socket_even_if_the_bus_was_neve
             pass
 
 
+def test_a_historical_terminal_task_explains_that_no_durable_log_exists():
+    task = _task("historical task")
+    task_master.update_task_state(task.task_id, TaskState.IN_PROGRESS)
+    task_master.update_task_state(task.task_id, TaskState.COMPLETED, output_data={})
+
+    with client.websocket_connect(f"/ws/run/{task.task_id}") as ws:
+        assert "predates persistent run logs" in ws.receive_text()
+
+
 def test_a_queued_run_replays_then_streams_a_live_line_then_closes_on_run_log_bus_close():
     task = _task()
     run_log_bus.emit(task.task_id, "before connect")

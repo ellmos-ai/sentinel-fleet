@@ -1,6 +1,8 @@
 """Unit tests for the OpenTelemetry instrumentation and its bounded buffers."""
 
 from sentinel_fleet.core.telemetry import MAX_RETAINED_SPANS, TelemetryService
+from sentinel_fleet.core.storage import LocalJsonStore
+from sentinel_fleet.core.telemetry import SpanRecord
 
 
 def test_spans_reach_the_opentelemetry_exporter():
@@ -44,3 +46,23 @@ def test_both_buffers_are_bounded_and_ids_stay_unique():
     assert len(service.get_exported_spans()) == MAX_RETAINED_SPANS
     # The dropped spans are still counted, so the number reported stays truthful
     assert service.get_exported_span_total() >= overflow
+
+
+def test_dashboard_spans_survive_a_service_restart(tmp_path):
+    """Regression: Firestore-backed records elsewhere survived while Telemetry became empty."""
+    path = str(tmp_path / "telemetry.json")
+    first_store = LocalJsonStore("telemetry_spans", SpanRecord, persistence_path=path)
+    first = TelemetryService(store=first_store)
+    span = first.start_span("tool_call:persisted", "agent:test")
+    first.add_event(span, "evidence", {"verdict": "green"})
+    first.end_span(span, status="OK")
+
+    second_store = LocalJsonStore("telemetry_spans", SpanRecord, persistence_path=path)
+    second = TelemetryService(store=second_store)
+    restored = second.get_recent_spans()
+
+    assert len(restored) == 1
+    assert restored[0].name == "tool_call:persisted"
+    assert restored[0].events[0]["name"] == "evidence"
+    assert restored[0].end_time is not None
+    assert second.get_persisted_span_total() == 1

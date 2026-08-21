@@ -7,6 +7,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from sentinel_fleet.core.config import settings
+from sentinel_fleet.uas.task_templates import task_template_registry
 from sentinel_fleet.web.server import app
 
 
@@ -99,12 +100,12 @@ async def test_template_owner_and_other_user_are_resolved_server_side(client):
         "statement": "Do not trust client ownership claims.",
         "policy_type": "preference",
     })).json()["policy"]
-    foreign = (await client.post("/api/task-templates", data={
-        "name": _title("Foreign template"),
-        "owner": "operator",
-        "prompt_source": "custom",
-        "custom_prompt_text": "Run a bounded test.",
-    })).json()["template"]
+    foreign = task_template_registry.create_template(
+        name=_title("Foreign template"),
+        owner="operator",
+        prompt_source="custom",
+        custom_prompt_text="Run a bounded test.",
+    ).model_dump()
 
     response = await client.post(f"/api/policies/{created['policy_id']}/bindings", data={
         "target_kind": "template",

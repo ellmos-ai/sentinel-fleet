@@ -3,6 +3,7 @@
 import os
 import json
 import threading
+import uuid
 from typing import TypeVar, Generic, Type, Dict, List, Optional, Any
 from pydantic import BaseModel
 from sentinel_fleet.core.config import settings
@@ -50,42 +51,68 @@ class LocalJsonStore(BaseStore[T]):
                 with self._lock:
                     for k, v in raw_dict.items():
                         self._data[k] = self.model_cls.model_validate(v)
-        except Exception:
-            pass
+        except Exception as exc:
+            raise StorageBackendError(
+                f"Local store load failed for {self.collection_name}: {exc}"
+            ) from exc
 
     def _save_to_disk(self):
         if not self.persistence_path:
             return
+        temporary_path = f"{self.persistence_path}.{uuid.uuid4().hex}.tmp"
         try:
-            os.makedirs(os.path.dirname(self.persistence_path), exist_ok=True)
+            os.makedirs(os.path.dirname(self.persistence_path) or ".", exist_ok=True)
             with self._lock:
-                serialized = {k: v.model_dump() for k, v in self._data.items()}
-            with open(self.persistence_path, "w", encoding="utf-8") as f:
+                serialized = {k: v.model_dump(mode="json") for k, v in self._data.items()}
+            with open(temporary_path, "w", encoding="utf-8") as f:
                 json.dump(serialized, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary_path, self.persistence_path)
+        except Exception as exc:
+            try:
+                os.unlink(temporary_path)
+            except OSError:
+                pass
+            raise StorageBackendError(
+                f"Local store write failed for {self.collection_name}: {exc}"
+            ) from exc
 
     def get(self, key: str) -> Optional[T]:
         with self._lock:
-            return self._data.get(key)
+            item = self._data.get(key)
+            return item.model_copy(deep=True) if item is not None else None
 
     def put(self, key: str, item: T) -> T:
         with self._lock:
-            self._data[key] = item
-            self._save_to_disk()
+            had_previous = key in self._data
+            previous = self._data.get(key)
+            self._data[key] = item.model_copy(deep=True)
+            try:
+                self._save_to_disk()
+            except Exception:
+                if had_previous:
+                    self._data[key] = previous
+                else:
+                    self._data.pop(key, None)
+                raise
             return item
 
     def delete(self, key: str) -> bool:
         with self._lock:
             if key in self._data:
-                del self._data[key]
-                self._save_to_disk()
+                previous = self._data.pop(key)
+                try:
+                    self._save_to_disk()
+                except Exception:
+                    self._data[key] = previous
+                    raise
                 return True
             return False
 
     def list_all(self) -> List[T]:
         with self._lock:
-            return list(self._data.values())
+            return [item.model_copy(deep=True) for item in self._data.values()]
 
     def count(self) -> int:
         with self._lock:
@@ -93,8 +120,13 @@ class LocalJsonStore(BaseStore[T]):
 
     def clear(self):
         with self._lock:
+            previous = self._data.copy()
             self._data.clear()
-            self._save_to_disk()
+            try:
+                self._save_to_disk()
+            except Exception:
+                self._data = previous
+                raise
 
 
 class StorageBackendError(RuntimeError):
@@ -132,7 +164,9 @@ class FirestoreStore(BaseStore[T]):
 
     def put(self, key: str, item: T) -> T:
         try:
-            self._client.collection(self.collection_name).document(key).set(item.model_dump())
+            self._client.collection(self.collection_name).document(key).set(
+                item.model_dump(mode="json")
+            )
             return item
         except Exception as exc:
             raise StorageBackendError(f"Firestore write failed for {self.collection_name}/{key}: {exc}") from exc

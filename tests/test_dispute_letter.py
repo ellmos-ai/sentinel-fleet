@@ -125,6 +125,7 @@ async def test_endpoint_serves_the_letter_for_a_dispute_ticket(client):
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/pdf"
     assert "correction-letter-CS-2026-9912.pdf" in response.headers["content-disposition"]
+    assert response.headers["x-sentinel-artifact-id"].startswith("artifact-")
     assert response.content.startswith(b"%PDF")
     assert "CS-2026-9912" in _pdf_text(response.content)
 

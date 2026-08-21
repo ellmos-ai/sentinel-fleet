@@ -1,9 +1,11 @@
 """Unit tests for USMC Memory Bank & GARDENER RAG."""
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sentinel_fleet.memory.bank import MemoryBank, memory_bank
 from sentinel_fleet.memory.gardener_rag import GardenerRAG
 from sentinel_fleet.memory.hooker import MemoryHooker
+from sentinel_fleet.web.server import app
 
 
 def test_memory_bank_store_and_search():
@@ -46,7 +48,8 @@ async def test_an_entry_can_be_corrected_and_deleted():
             "category": "working", "key": "person:ceo", "content": "Filed wrong."
         })
         assert created.status_code == 200
-        assert created.json()["entry"]["owner"] == "operator"
+        assert created.json()["entry"]["owner"].startswith("workspace:")
+        assert created.json()["entry"]["visibility"] == "personal"
 
         updated = await client.put("/api/memory/person:ceo", data={
             "category": "facts", "content": "Jane Doe, CEO, Acme Corp GmbH."
@@ -75,6 +78,73 @@ def test_only_the_owner_may_change_an_entry():
     kept = memory_bank.get_memory("test:owned")
     assert kept.content == "Belongs to someone else."
     memory_bank.delete_memory("test:owned", requested_by="alice")
+
+
+@pytest.mark.asyncio
+async def test_two_browser_workspaces_may_use_the_same_private_key_without_colliding():
+    transport = ASGITransport(app=app)
+    async with (
+        AsyncClient(transport=transport, base_url="http://test") as alice,
+        AsyncClient(transport=transport, base_url="http://test") as bob,
+    ):
+        key = "test:private-same-key"
+        assert (await alice.post(
+            "/api/memory/create",
+            data={"category": "facts", "key": key, "content": "Alice", "visibility": "personal"},
+        )).status_code == 200
+        assert (await bob.post(
+            "/api/memory/create",
+            data={"category": "facts", "key": key, "content": "Bob", "visibility": "personal"},
+        )).status_code == 200
+
+        alice_rows = [row for row in (await alice.get("/api/memory")).json() if row["key"] == key]
+        bob_rows = [row for row in (await bob.get("/api/memory")).json() if row["key"] == key]
+        assert [row["content"] for row in alice_rows] == ["Alice"]
+        assert [row["content"] for row in bob_rows] == ["Bob"]
+
+        denied = await alice.post(
+            "/api/memory/create",
+            data={
+                "category": "facts", "key": "test:org-denied",
+                "content": "No", "visibility": "organization",
+            },
+        )
+        assert denied.status_code == 403
+
+        department_key = "test:department-shared"
+        department = await alice.post(
+            "/api/memory/create",
+            data={
+                "category": "facts",
+                "key": department_key,
+                "content": "Finance shared",
+                "visibility": "department",
+            },
+        )
+        assert department.status_code == 200
+        assert any(
+            row["key"] == department_key and row["department_id"] == "finance"
+            for row in (await bob.get("/api/memory")).json()
+        )
+        assert (await alice.delete(f"/api/memory/{department_key}")).status_code == 200
+
+
+def test_department_memory_is_not_visible_to_another_department():
+    key = "test:department-isolation"
+    memory_bank.store_memory(
+        "facts", key, "Finance only", owner="member:demo",
+        visibility="department", department_id="finance",
+    )
+    try:
+        assert any(row.key == key for row in memory_bank.list_visible("alice", "finance"))
+        assert not any(row.key == key for row in memory_bank.list_visible("bob", "operations"))
+    finally:
+        memory_bank.delete_memory(
+            key,
+            requested_by="member:demo",
+            requested_department="finance",
+            can_manage_department=True,
+        )
 
 
 def test_an_edited_seed_is_not_healed_back_on_startup():

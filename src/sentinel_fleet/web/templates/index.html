@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
 </head>
-<body>
+<body data-owner-id="{{ data_owner_id }}" data-department="{{ data_department or '' }}">
   {% include "_icons.html" %}
   {% set current_view = "console" %}
   {% set masthead_role = "operator console" %}
@@ -63,6 +63,10 @@
             <button id="btn-tab-chat" class="tab-btn on-work"
                     aria-controls="tab-chat" onclick="switchTab('tab-chat')">
               <svg class="icon"><use href="#i-chat"/></svg> Chat
+            </button>
+            <button id="btn-tab-documents" class="tab-btn on-work"
+                    aria-controls="tab-documents" onclick="switchTab('tab-documents')">
+              <svg class="icon"><use href="#i-document"/></svg> Documents <span class="tab-count">{{ artifact_total }}</span>
             </button>
           </div>
         </div>
@@ -323,6 +327,7 @@
             </div>
             {% endif %}
             {% for inv in invoices[-3:]|reverse %}
+            {% set document_record = invoice_records.get(inv.id) %}
             <div class="record pillar-domain">
               <div class="item-top">
                 <span class="item-title">{{ inv.vendor_name }}</span>
@@ -331,6 +336,7 @@
                 </span>
               </div>
               <div class="item-meta numeric">{{ inv.invoice_number }}</div>
+              {% if document_record %}<div class="item-meta">Scope: {{ document_record.visibility }}{% if document_record.department_id %} · {{ document_record.department_id }}{% endif %}</div>{% endif %}
               <div class="item-desc numeric">
                 {{ "%.2f"|format(inv.gross_amount) }} {{ inv.currency }}
                 (net {{ "%.2f"|format(inv.net_amount) }} plus {{ "%.1f"|format(inv.tax_rate) }}% VAT)
@@ -345,6 +351,16 @@
                    is only trustworthy if the reasons for the gaps are on the same card. -->
               <div class="item-meta" style="margin-top: var(--s-1)">
                 Read as <b>{{ inv.extraction_mode.value }}</b>: {{ inv.extraction_notes|join(' / ') }}
+              </div>
+              {% endif %}
+              {% if document_record and document_record.owner_id == data_owner_id %}
+              <div class="item-actions" style="margin-top: var(--s-2)">
+                <select id="document-visibility-{{ inv.id }}" class="select-input" style="max-width: 260px">
+                  <option value="private" {% if document_record.visibility == 'private' %}selected{% endif %}>Private</option>
+                  {% if data_department %}<option value="department" {% if document_record.visibility == 'department' %}selected{% endif %}>Department: {{ data_department }}</option>{% endif %}
+                  <option value="organization" {% if document_record.visibility == 'organization' %}selected{% endif %}>Organisation-wide</option>
+                </select>
+                <button class="btn btn-sm" onclick='saveProcessedDocumentSharing({{ inv.id|tojson }})'>Save scope</button>
               </div>
               {% endif %}
             </div>
@@ -389,6 +405,88 @@
       </div>
     </section>
 
+    <!-- RESULT DOCUMENTS -->
+    <section id="tab-documents" class="tab-pane" style="display: none;">
+      <p class="tab-role">
+        Generated result documents are stored durably and are private by default. Only the
+        creator can change sharing. A named share grants one workspace access, Department grants
+        the creator's department access, and Organisation grants every workspace on this deployment access.
+      </p>
+      <div class="section-head">
+        <div>
+          <span class="eyebrow">Result storage</span>
+          <h2>Documents you may access</h2>
+          <p>
+            Your share ID is <span class="numeric">{{ data_owner_id }}</span>. In this public demo
+            it identifies this browser workspace, not a verified human account; clearing the
+            cookie loses that identity. Production sharing therefore remains gated on IAM/IAP.
+          </p>
+        </div>
+        <span class="badge-status badge-info numeric">{{ artifact_total }} visible</span>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          {% if not artifacts %}
+          <div class="empty-state">
+            <svg class="icon icon-lg"><use href="#i-document"/></svg>
+            <h4>No saved result documents</h4>
+            <p>Export a chat or render a correction letter. The generated file is stored privately before download.</p>
+          </div>
+          {% endif %}
+          {% for artifact in artifacts %}
+          <div class="record pillar-memory">
+            <div class="item-top">
+              <span class="item-title">{{ artifact.filename }}</span>
+              <span class="badge-status {% if artifact.visibility == 'private' %}badge-purple{% else %}badge-info{% endif %}">
+                {{ artifact.visibility }}
+              </span>
+            </div>
+            <div class="item-meta numeric">
+              {{ artifact.source_kind }} · {{ artifact.byte_size }} bytes · SHA-256 {{ artifact.sha256[:12] }}…
+            </div>
+            <div class="item-meta">Retention: creator-managed, no automatic expiry · Encryption: {{ artifact.encryption }}</div>
+            <div class="item-desc">
+              {% if artifact.creator_id == data_owner_id %}
+              Created by this workspace.
+              {% else %}
+              Shared with this workspace by another creator.
+              {% endif %}
+              {% if artifact.shared_with %} Named shares: {{ artifact.shared_with|length }}.{% endif %}
+            </div>
+            <div class="item-actions">
+              <a class="btn btn-sm" href="/api/artifacts/{{ artifact.artifact_id }}/download">
+                <svg class="icon"><use href="#i-download"/></svg> Download
+              </a>
+            </div>
+            {% if artifact.creator_id == data_owner_id %}
+            <div class="composer-controls" style="margin-top: var(--s-3)">
+              <div>
+                <label class="field-label" for="artifact-visibility-{{ artifact.artifact_id }}">Visibility</label>
+                <select id="artifact-visibility-{{ artifact.artifact_id }}" class="select-input">
+                  <option value="private" {% if artifact.visibility == 'private' %}selected{% endif %}>Private or named shares only</option>
+                  {% if data_department %}<option value="department" {% if artifact.visibility == 'department' %}selected{% endif %}>Department: {{ data_department }}</option>{% endif %}
+                  <option value="organization" {% if artifact.visibility == 'organization' %}selected{% endif %}>Organisation-wide</option>
+                </select>
+              </div>
+              <div style="flex: 1 1 360px">
+                <label class="field-label" for="artifact-shares-{{ artifact.artifact_id }}">Share IDs, comma-separated</label>
+                <input id="artifact-shares-{{ artifact.artifact_id }}" class="text-input"
+                       value="{{ artifact.shared_with|join(', ') }}"
+                       placeholder="workspace:recipient-id">
+              </div>
+              <div style="align-self: end">
+                <button class="btn btn-sm" onclick="saveArtifactSharing('{{ artifact.artifact_id }}')">Save sharing</button>
+                <button class="btn btn-sm btn-reject" onclick="deleteArtifact('{{ artifact.artifact_id }}')">Delete</button>
+              </div>
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
     <!-- CHAT -->
     <section id="tab-chat" class="tab-pane" style="display: none;">
       <!-- The live test brought its first order here, out of habit from every other chat tool,
@@ -421,6 +519,21 @@
               <button class="btn btn-sm" onclick="exportSession('html')" title="Download as HTML">html</button>
               <button class="btn btn-sm" onclick="exportSession('pdf')" title="Download as PDF">pdf</button>
             </div>
+          </div>
+          <div id="chat-sharing-controls" class="composer-controls" style="display: none; padding: 0 var(--s-4) var(--s-3)">
+            <div>
+              <label class="field-label" for="chat-visibility">Conversation visibility</label>
+              <select id="chat-visibility" class="select-input">
+                <option value="private">Private or named shares only</option>
+                {% if data_department %}<option value="department">Department: {{ data_department }}</option>{% endif %}
+                <option value="organization">Organisation-wide</option>
+              </select>
+            </div>
+            <div style="flex: 1 1 320px">
+              <label class="field-label" for="chat-shares">Share IDs, comma-separated</label>
+              <input id="chat-shares" class="text-input" placeholder="workspace:recipient-id">
+            </div>
+            <div style="align-self: end"><button class="btn btn-sm" onclick="saveChatSharing()">Save sharing</button></div>
           </div>
 
           <div id="chat-transcript" class="chat-transcript">
@@ -591,8 +704,9 @@
       <div class="section-head">
         <div>
           <h3>Privacy contacts</h3>
-          <p>The counterparties your fleet writes to: vendors, partners and institutions of your own
-             organisation. Each carries a GDPR retention level - S1 six months, S2 twelve months,
+          <p>The counterparties your fleet writes to and its internal contacts are distinguished
+             explicitly. Personal records stay in this browser workspace; organisation records are shared with the fleet. Each carries
+             a GDPR retention level - S1 six months, S2 twelve months,
              S3 thirty-six months for tax-relevant correspondence under § 147 AO, S4 until revoked.
              An opt-out leaves a tombstone that blocks future contact.</p>
         </div>
@@ -610,7 +724,7 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>Name</th><th>Email</th><th>Postal address</th><th>Category</th><th>Level</th>
+                <th>Name</th><th>Email</th><th>Postal address</th><th>Relationship</th><th>Scope</th><th>Category</th><th>Level</th>
                 <th>Consent</th><th>Retention reason</th><th>Action</th>
               </tr>
             </thead>
@@ -620,17 +734,21 @@
                 <td><b>{{ c.name }}</b><div class="item-meta">{{ c.organization or '-' }}</div></td>
                 <td><code>{{ c.email }}</code></td>
                 <td class="item-meta">{% if c.postal_address %}{{ c.postal_address }}{% else %}-{% endif %}</td>
+                <td><span class="badge-status">{{ c.relationship }}</span></td>
+                <td><span class="badge-status badge-info">{{ c.visibility }}</span>{% if c.department_id %}<div class="item-meta">{{ c.department_id }}</div>{% endif %}</td>
                 <td><span class="badge-status">{{ c.category }}</span></td>
                 <td><span class="badge-status badge-purple">{{ c.protection_level }}</span></td>
                 <td><span class="badge-status {% if c.opt_in_status == 'confirmed' %}badge-ok{% else %}badge-danger{% endif %}">{{ c.opt_in_status }}</span></td>
                 <td class="item-meta">{{ c.dsgvo_notes }}</td>
                 <td>
-                  {% if c.opt_in_status == 'confirmed' %}
+                  {% set can_edit_contact = (c.visibility == 'personal' and c.owner_id == data_owner_id) or (c.visibility == 'department' and c.department_id == data_department and can_manage_department_contacts) or (c.visibility == 'organization' and can_manage_org_contacts) %}
+                  {% if c.opt_in_status == 'confirmed' and can_edit_contact %}
                   <button class="btn btn-sm btn-reject" onclick='optOutContact({{ c.contact_id|tojson }})'>
                     <svg class="icon"><use href="#i-ban"/></svg> Opt out
                   </button>
-                  {% else %}
+                  {% elif c.opt_in_status != 'confirmed' %}
                   <span class="badge-status badge-danger">tombstone</span>
+                  {% else %}<span class="item-meta">read-only</span>
                   {% endif %}
                 </td>
               </tr>
@@ -717,7 +835,7 @@
                 <td>
                   <div class="item-actions" style="margin: 0">
                     {% if t.source_template_id %}
-                    <button class="btn btn-sm" onclick='openConsoleModal({{ t.task_id|tojson }}, {{ t.name|tojson }})'>View run</button>
+                    <button class="btn btn-sm" onclick='openConsoleModal({{ t.task_id|tojson }}, {{ t.name|tojson }})'>View log</button>
                     {% if t.state.value in ('failed', 'cancelled') %}
                     <!-- A refused or called-off run is not re-dispatched by anything else; this
                          is where the operator decides to give it another try. -->
@@ -861,7 +979,7 @@
                         <button class="btn btn-sm" {% if viewer == demo_mutation_user_id %}onclick='hideTemplateForViewer({{ row.template_id|tojson }}, {{ viewer|tojson }})'{% else %}disabled title="Display aliases cannot mutate another user’s view"{% endif %}>Hide from my view</button>
                         {% endif %}
                         {% if row.can_delete %}
-                        <button class="btn btn-sm btn-reject" onclick='deleteTaskTemplate({{ row.template_id|tojson }}, {{ row.owner|tojson }})'>Delete</button>
+                        <button class="btn btn-sm btn-reject" onclick='deleteTaskTemplate({{ row.template_id|tojson }})'>Delete</button>
                         {% endif %}
                       </div>
                     </details>
@@ -1040,15 +1158,40 @@
         </button>
       </div>
       <div class="card">
+        <div class="card-header">
+          <h4>Old and current category names</h4>
+          <span class="badge-status stamp-quiet">compatibility mapping</span>
+        </div>
+        <p class="item-desc">
+          Original SentinelFleet records still load without rewriting. Their old label is kept in
+          metadata; new entries use the four current USMC-style names. <code>working</code> is new
+          and receives unresolved or in-flight state.
+        </p>
         <div class="table-wrap">
           <table class="data-table">
-            <thead><tr><th>Category</th><th>Key</th><th>Content</th><th>Owner</th><th>Action</th></tr></thead>
+            <thead><tr><th>Original name</th><th>Current name</th><th>Meaning now</th></tr></thead>
+            <tbody>
+              <tr><td><code>fact</code></td><td><code>facts</code></td><td>Stable facts and rules</td></tr>
+              <tr><td><code>policy</code></td><td><code>facts</code></td><td>Rules agents treat as given</td></tr>
+              <tr><td><code>entity</code></td><td><code>facts</code></td><td>Stable counterparty or entity details</td></tr>
+              <tr><td><code>lesson</code></td><td><code>lessons</code></td><td>What should not go wrong again</td></tr>
+              <tr><td><code>session_checkpoint</code></td><td><code>sessions</code></td><td>What a run or conversation left behind</td></tr>
+              <tr><td><code>session</code></td><td><code>sessions</code></td><td>Earlier shorthand for a retained session</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" style="margin-top: var(--s-4)">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Category</th><th>Key</th><th>Content</th><th>Scope</th><th>Owner</th><th>Action</th></tr></thead>
             <tbody>
               {% for m in memories %}
               <tr>
                 <td><span class="badge-status badge-purple">{{ m.category }}</span></td>
                 <td><code>{{ m.key }}</code></td>
                 <td>{{ m.content }}</td>
+                <td><span class="badge-status badge-info">{{ m.visibility }}</span>{% if m.department_id %}<div class="item-meta">{{ m.department_id }}</div>{% endif %}</td>
                 <td class="item-meta numeric">
                   {{ m.owner }}
                   {% if m.metadata.get('legacy_category') %}<div class="item-meta">was &#34;{{ m.metadata.get('legacy_category') }}&#34;</div>{% endif %}
@@ -1056,12 +1199,13 @@
                   {% if m.metadata.get('edited_by') %}<div class="item-meta">edited, no longer re-seeded</div>{% endif %}
                 </td>
                 <td>
-                  <div class="item-actions" style="margin: 0">
+                  {% set can_edit_memory = (m.visibility == 'personal' and m.owner == data_owner_id) or (m.visibility == 'department' and m.department_id == data_department and can_manage_department_memory) or (m.visibility == 'organization' and can_manage_org_memory) %}
+                  {% if can_edit_memory %}<div class="item-actions" style="margin: 0">
                     <button class="btn btn-sm"
                             onclick='openMemoryEditor({{ m.key|tojson }}, {{ m.category|tojson }}, {{ m.content|tojson }}, {{ (m.metadata.get("seed") or false)|tojson }})'>Edit</button>
                     <button class="btn btn-sm btn-reject"
                             onclick='deleteMemoryEntry({{ m.key|tojson }}, {{ (m.metadata.get("seed") or false)|tojson }})'>Delete</button>
-                  </div>
+                  </div>{% else %}<span class="item-meta">read-only</span>{% endif %}
                 </td>
               </tr>
               {% endfor %}
@@ -1179,8 +1323,8 @@
         <div>
           <h3>Telemetry — the full gate ledger</h3>
           <p>Read-only. Every governed tool call, in order, with its verdict - the short box on
-             the Overview tab shows the last three of these. Recorded in process, exported to
-             Cloud Trace when ENABLE_CLOUD_TRACE is set.</p>
+             the Overview tab shows the last three of these. Persisted with the application data
+             and additionally exported to Cloud Trace when ENABLE_CLOUD_TRACE is set.</p>
         </div>
         <span class="badge-status badge-info numeric">{{ spans|length }} spans</span>
       </div>
@@ -1233,6 +1377,35 @@
         Safe demo writes run only as <code>member:demo</code>; organization-wide requests are
         forwarded, and security-root edits remain locked.
         {% endif %}
+      </div>
+
+      <div class="card" style="margin-bottom: var(--s-4)">
+        <div class="card-header">
+          <h3><svg class="icon"><use href="#i-lock"/></svg> Data access and storage boundaries</h3>
+          <span class="badge-status badge-info">enforced API paths</span>
+        </div>
+        <p class="item-desc">
+          The database is not exposed directly. Every browser read or mutation passes through an
+          API decision. In this public demo “Organisation” means every visitor to this deployment;
+          every visitor is also the same Finance demo member, so “Department” has the same public
+          reach here. Real user and department boundaries require the signed-IAP deployment mode.
+        </p>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Data</th><th>Stored in</th><th>Read</th><th>Change</th></tr></thead>
+            <tbody>
+              <tr><td>Chat histories</td><td>{{ storage_backend }}</td><td>Creator, named shares, department, or organisation</td><td>Messages and sharing: creator only</td></tr>
+              <tr><td>Result documents</td><td>{{ storage_backend }} metadata + {{ result_blob_backend }}</td><td>Creator, named shares, department, or organisation</td><td>Sharing: creator only; private by default</td></tr>
+              <tr><td>Personal contacts and memory</td><td>{{ storage_backend }}</td><td>Owning workspace only</td><td>Owner only</td></tr>
+              <tr><td>Department contacts and memory</td><td>{{ storage_backend }}</td><td>Registered users in the same department</td><td>Same-department capability</td></tr>
+              <tr><td>Organisation contacts and memory</td><td>{{ storage_backend }}</td><td>All organisation workspaces</td><td>Named organisation capability</td></tr>
+              <tr><td>Uploaded source bytes</td><td>Not retained</td><td>Request-scoped processing only</td><td>Re-upload to process again</td></tr>
+              <tr><td>Extracted document records</td><td>{{ storage_backend }}</td><td>Organisation control-plane view</td><td>Workflow and approval routes only</td></tr>
+              <tr><td>Prompts, skills, tasks, tickets and templates</td><td>{{ storage_backend }}</td><td>Organisation control-plane view</td><td>Capability-gated; security-root administration locked</td></tr>
+              <tr><td>User and role profiles</td><td>{{ storage_backend }}</td><td>Demo registry is visible for audit</td><td>User administration locked without authentication</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div class="gov-window">
@@ -1941,6 +2114,23 @@
             <option value="vendor">Vendor</option>
             <option value="institution">Institution or public authority</option>
             <option value="partner">Business partner</option>
+            <option value="personal">Personal contact</option>
+            <option value="subscriber">Subscriber</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Relationship</label>
+          <select name="relationship" class="select-input">
+            <option value="external">External counterparty</option>
+            <option value="internal">Internal colleague or unit</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Visibility</label>
+          <select name="visibility" class="select-input">
+            <option value="personal">Personal — only this private workspace</option>
+            {% if data_department %}<option value="department" {% if not can_manage_department_contacts %}disabled{% endif %}>Department — {{ data_department }}{% if not can_manage_department_contacts %} (permission required){% endif %}</option>{% endif %}
+            <option value="organization" {% if not can_manage_org_contacts %}disabled{% endif %}>Organisation — shared fleet record{% if not can_manage_org_contacts %} (operator required){% endif %}</option>
           </select>
         </div>
         <div class="form-group">
@@ -2014,7 +2204,8 @@
         </div>
         <div class="form-group">
           <label>Owner</label>
-          <input type="text" name="owner" class="text-input" value="operator">
+          <input type="text" class="text-input" value="{{ demo_mutation_user_id }}" disabled>
+          <p class="item-desc">Ownership comes from the server-side mutation actor, never this form.</p>
         </div>
         <div class="form-group">
           <label>Assigned agent</label>
@@ -2429,14 +2620,14 @@
   <div id="modal-console" class="modal-overlay">
     <div class="modal-card modal-card-wide">
       <div class="modal-header">
-        <h3>Run console</h3>
+        <h3>Run log</h3>
         <button class="btn btn-sm btn-icon" onclick="closeConsoleModal()" aria-label="Close">
           <svg class="icon"><use href="#i-close"/></svg>
         </button>
       </div>
       <p class="item-meta" id="console-task-name" style="margin-bottom: var(--s-3)"></p>
       <p class="item-desc" style="margin-top: calc(-1 * var(--s-2))">
-        Read-only log of this run - no input goes back to the server. Phase 1 executes a run
+        Read-only status log of this run - not a chat transcript, and no input goes back to the server. Phase 1 executes a run
         synchronously inside the request that queued it, so most runs are already finished by
         the time this opens: the buffer below is then a full replay, not a live stream.
       </p>
@@ -2563,6 +2754,14 @@
         <div class="form-group">
           <label>Content</label>
           <textarea name="content" class="textarea-input" required></textarea>
+        </div>
+        <div class="form-group">
+          <label>Visibility</label>
+          <select name="visibility" class="select-input">
+            <option value="personal">Personal — only this private workspace</option>
+            {% if data_department %}<option value="department" {% if not can_manage_department_memory %}disabled{% endif %}>Department — {{ data_department }}{% if not can_manage_department_memory %} (permission required){% endif %}</option>{% endif %}
+            <option value="organization" {% if not can_manage_org_memory %}disabled{% endif %}>Organisation — shared fleet memory{% if not can_manage_org_memory %} (operator required){% endif %}</option>
+          </select>
         </div>
         <div class="form-actions">
           <button type="button" class="btn" onclick="toggleModal('modal-memory')">Cancel</button>

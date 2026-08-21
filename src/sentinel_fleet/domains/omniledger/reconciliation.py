@@ -1,7 +1,7 @@
 """Ledger Reconciliation & Booking Engine based on RechnungsSteller."""
 
 import time
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from sentinel_fleet.core.storage import get_store
 from sentinel_fleet.domains.omniledger.models import InvoiceDocument, InvoiceStatus
 from sentinel_fleet.memory.bank import memory_bank
@@ -11,7 +11,14 @@ class LedgerReconciler:
     def __init__(self):
         self._store = get_store("ledger", InvoiceDocument)
 
-    def book_invoice(self, doc: InvoiceDocument) -> InvoiceDocument:
+    def book_invoice(
+        self,
+        doc: InvoiceDocument,
+        *,
+        memory_owner: str = "system",
+        memory_visibility: str = "organization",
+        department_id: Optional[str] = None,
+    ) -> InvoiceDocument:
         """Books a verified invoice into the general ledger."""
         if not doc.compliance_passed:
             raise ValueError(f"Cannot book non-compliant invoice {doc.id}")
@@ -26,7 +33,10 @@ class LedgerReconciler:
             category="sessions",
             key=f"ledger:invoice:{doc.invoice_number}",
             content=f"Booked: invoice {doc.invoice_number} from {doc.vendor_name} ({doc.gross_amount:.2f} {doc.currency}) dated {doc.invoice_date}",
-            metadata={"doc_id": doc.id, "vendor": doc.vendor_name, "amount": doc.gross_amount}
+            metadata={"doc_id": doc.id, "vendor": doc.vendor_name, "amount": doc.gross_amount},
+            owner=memory_owner,
+            visibility=memory_visibility,
+            department_id=department_id,
         )
 
         return doc

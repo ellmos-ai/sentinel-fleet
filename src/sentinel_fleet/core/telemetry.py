@@ -2,12 +2,13 @@
 
 import time
 import logging
-import itertools
+import uuid
 from collections import deque
 from contextvars import ContextVar, Token
 from typing import Any, Deque, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 from sentinel_fleet.core.config import settings
+from sentinel_fleet.core.storage import BaseStore, get_store
 
 logger = logging.getLogger(__name__)
 
@@ -84,12 +85,19 @@ def _otel_safe_attributes(agent_id: str, attributes: Optional[Dict[str, Any]]) -
 
 
 class TelemetryService:
-    """Dual-sink tracing: real OpenTelemetry spans plus a bounded record list for the dashboard."""
+    """OpenTelemetry tracing plus a durable audit record for the dashboard.
 
-    def __init__(self):
+    ``store`` is optional so small isolated services in unit tests remain memory-only.  The
+    application singleton supplies the configured JSON/Firestore store.
+    """
+
+    def __init__(self, store: Optional[BaseStore[SpanRecord]] = None):
+        self._store = store
         self.spans: Deque[SpanRecord] = deque(maxlen=MAX_RETAINED_SPANS)
+        if self._store is not None:
+            restored = sorted(self._store.list_all(), key=lambda span: span.start_time)
+            self.spans.extend(restored[-MAX_RETAINED_SPANS:])
         self.active_trace_id: str = f"trace-{int(time.time()*1000)}"
-        self._span_counter = itertools.count(1)
         self._live_otel_spans: Dict[str, Any] = {}
         self._tracer = None
         self._exporter = None
@@ -147,7 +155,8 @@ class TelemetryService:
         return self._tracer is not None
 
     def start_span(self, name: str, agent_id: str, attributes: Optional[Dict[str, Any]] = None) -> SpanRecord:
-        span_id = f"span-{next(self._span_counter):04d}"
+        # A process-local counter reused ids after every cold start and overwrote a durable row.
+        span_id = f"span-{uuid.uuid4().hex[:16]}"
         trace_id = self.active_trace_id
 
         if self._tracer is not None:
@@ -167,12 +176,18 @@ class TelemetryService:
             attributes=attributes or {}
         )
         self.spans.append(record)
+        self._persist(record)
         return record
+
+    def _persist(self, span: SpanRecord) -> None:
+        if self._store is not None:
+            self._store.put(span.span_id, span)
 
     def end_span(self, span: SpanRecord, status: str = "OK", error: Optional[str] = None):
         span.end_time = time.time()
         span.status = status
         span.error_message = error
+        self._persist(span)
 
         otel_span = self._live_otel_spans.pop(span.span_id, None)
         if otel_span is None:
@@ -192,6 +207,7 @@ class TelemetryService:
             "timestamp": time.time(),
             "payload": payload or {}
         })
+        self._persist(span)
         otel_span = self._live_otel_spans.get(span.span_id)
         if otel_span is not None:
             otel_span.add_event(event_name, attributes=_otel_safe_attributes(span.agent_id, payload))
@@ -230,5 +246,9 @@ class TelemetryService:
             return 0
         return self._exporter.exported_total
 
+    def get_persisted_span_total(self) -> int:
+        """Number of durable dashboard records, or the retained memory count without a store."""
+        return self._store.count() if self._store is not None else len(self.spans)
 
-telemetry = TelemetryService()
+
+telemetry = TelemetryService(store=get_store("telemetry_spans", SpanRecord))

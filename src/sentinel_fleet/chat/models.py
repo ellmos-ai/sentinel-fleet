@@ -2,8 +2,8 @@
 
 import time
 from enum import Enum
-from typing import Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import Dict, List, Literal, Optional
+from pydantic import BaseModel, Field, model_validator
 
 
 class ChatRole(str, Enum):
@@ -68,7 +68,21 @@ class RaceRecord(BaseModel):
 class ChatSession(BaseModel):
     session_id: str
     title: str
+    # Private by default. Older records load under a deliberately unreachable legacy owner
+    # instead of becoming visible to every new public-demo visitor.
+    owner_id: str = "workspace:legacy-unassigned"
+    visibility: Literal["private", "department", "organization"] = "private"
+    department_id: Optional[str] = None
+    shared_with: List[str] = Field(default_factory=list)
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
     messages: List[ChatMessage] = Field(default_factory=list)
     races: List[RaceRecord] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _scope_is_coherent(self) -> "ChatSession":
+        if self.visibility == "department" and not self.department_id:
+            raise ValueError("department-visible chat needs a department_id")
+        if self.visibility != "department":
+            self.department_id = None
+        return self
