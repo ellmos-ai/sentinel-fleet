@@ -1,6 +1,7 @@
 """Durable prompt registry, versioning and RBAC metadata."""
 
 import hashlib
+import re
 import time
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
@@ -16,6 +17,19 @@ from sentinel_fleet.core.storage import BaseStore, get_store
 LEGACY_SCOPE = "legacy-unassigned"
 DEMO_ORGANIZATION = "sentinel-demo"
 SYSTEM_COMPONENT_OWNER = "system:sentinel"
+
+
+def _slug_from_title(title: str) -> str:
+    """A storage- and markup-safe identifier slug.
+
+    The old form only replaced spaces, so quotes, slashes and everything else a title carries
+    flowed straight into the id - which is both an attribute-injection vector wherever the id
+    is rendered and a storage hazard (Firestore document ids must not contain '/'). Everything
+    outside [a-z0-9-] becomes a dash; an id collision after slugging surfaces through the same
+    "identifier is unavailable" path a verbatim duplicate title does.
+    """
+    slug = re.sub(r"[^a-z0-9-]+", "-", title.lower()).strip("-")
+    return re.sub(r"-{2,}", "-", slug) or "untitled"
 ComponentVisibility = Literal["private", "department", "organization", "restricted", "public"]
 
 
@@ -331,7 +345,7 @@ class PromptRegistry:
         allowed_users: Optional[List[str]] = None,
         global_public: bool = False,
     ) -> PromptItem:
-        prompt_id = f"prompt:{title.lower().replace(' ', '-')}"
+        prompt_id = f"prompt:{_slug_from_title(title)}"
         version_rec = PromptVersionRecord(
             version_id=f"ver-{int(time.time()*1000)}",
             prompt_id=prompt_id,
@@ -383,7 +397,7 @@ class PromptRegistry:
     ) -> PromptItem:
         self._validate_principal_scope(owner_id, organization_id)
         self._validate_visibility(visibility, department_id, can_publish_global)
-        prompt_id = f"prompt:{title.lower().replace(' ', '-')}"
+        prompt_id = f"prompt:{_slug_from_title(title)}"
         if self.get_prompt(prompt_id) is not None:
             raise ValueError("Component identifier is unavailable")
         return self.create_prompt(

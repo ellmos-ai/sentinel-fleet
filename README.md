@@ -209,7 +209,7 @@ Open **`http://localhost:8080`** for the operator console, the chat and race tab
 python -m pytest tests/ -v
 ```
 
-Release baseline: **559 passed** on 2026-08-22. One upstream Starlette/httpx deprecation
+Release baseline: **560 passed** on 2026-08-22. One upstream Starlette/httpx deprecation
 warning remains visible; it does not fail the suite. Run the command above for the current
 count — it is the source of truth whenever this paragraph and the suite drift apart.
 
@@ -300,7 +300,7 @@ Firestore lease/transaction first.
 * **Zero-Trust Tool Scoping:** Agents only have access to their assigned tools via `gateway.py`.
 * **Fail-closed permissions:** Every seeded tool has an explicit rule; unknown tools are denied.
 * **Adversarial Injection Detection:** Canonicalised boundary matching scans nested string arguments, selected prompts and skills, previous outputs and web context before model use.
-* **Quarantine Protocol:** Malicious inputs immediately quarantine the executing agent. In the public demo that lock is isolated to the originating browser workspace, preventing one anonymous visitor from disabling the shared deployment; authenticated deployments retain the operator-controlled deployment quarantine.
+* **Quarantine Protocol:** Malicious documents and prompts flagged by Model Armor immediately quarantine the executing agent. In the public demo that lock is isolated to the originating browser workspace, preventing one anonymous visitor from disabling the shared deployment; authenticated deployments retain the operator-controlled deployment quarantine. Gateway scope violations are refused, logged and traced but do not auto-quarantine fleet-wide - a deliberately open design decision, declared in the system manual's boundaries.
 * **Bounded public showcase:** In the single-instance public demo, rolling workspace and service-wide hourly ceilings bound persistent writes and model/web workflows. A template contains at most eight steps; each race has at most four models and each research step at most five named fetches. The global workflow ceiling cannot be bypassed by rotating the workspace cookie. This in-process guard is not a substitute for distributed rate limiting when scaling beyond one instance.
 * **Bounded document intake:** Upload size, type, PDF page count, extracted text and Gemini concurrency are capped. RED, UNSCREENED or truncated privacy screens stay on the local extraction path and are never sent as raw files to Gemini.
 * **Separated document retention:** Uploaded source bytes are request-scoped and not retained. Extracted/audited records are durable in Firestore (JSON locally). Generated results use creator-managed retention with no silent automatic expiry: the creator may delete them, bytes are removed and a non-content tombstone records the deletion. A legal hold blocks deletion.

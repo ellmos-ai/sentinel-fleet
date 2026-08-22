@@ -178,7 +178,7 @@ The entire codebase is validated by a rigorous Pytest test suite covering unit l
 ```bash
 python -m pytest tests -v
 ```
-### Test Results: 559 passed (full suite, verified 2026-08-22)
+### Test Results: 560 passed (full suite, verified 2026-08-22)
 
 The suite covers the gateway (scoping, quarantine, HITL), model armor, the
 OmniLedger workflow, chat and race (including live-path failure modes), task

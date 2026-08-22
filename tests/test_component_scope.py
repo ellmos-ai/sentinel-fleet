@@ -302,3 +302,25 @@ def test_public_component_creation_requires_explicit_global_publish_permission(t
     )
     assert public_skill.global_public
     assert skills.can_read(public_skill, "visitor", "org-b")
+
+
+def test_prompt_ids_are_slugged_storage_and_markup_safe(tmp_path):
+    """Quotes, slashes and friends must not survive into the prompt id.
+
+    The old slug only replaced spaces: a title like 'a"/onmouseover=x' put quote and slash
+    into the id, which is an attribute-injection vector wherever the id is rendered and a
+    storage hazard (Firestore document ids must not contain '/').
+    """
+    registry = _prompt_registry(tmp_path)
+    created = registry.create_prompt_authorized(
+        title='Bad "Title"/with\specials?',
+        purpose="Slug hardening",
+        category="test",
+        text="body",
+        variables=[],
+        tags=[],
+        owner_id="alice",
+        organization_id="org-a",
+    )
+    assert created.id == "prompt:bad-title-with-specials"
+    assert not (set(created.id) & set('"\'/\\<>?& '))
