@@ -4,7 +4,7 @@ import os
 import json
 import threading
 import uuid
-from typing import TypeVar, Generic, Type, Dict, List, Optional, Any
+from typing import TypeVar, Generic, Type, Dict, List, Optional
 from pydantic import BaseModel
 from sentinel_fleet.core.config import settings
 
@@ -202,11 +202,7 @@ class FirestoreStore(BaseStore[T]):
 
 
 def requested_backend() -> str:
-    if (
-        settings.environment == "production"
-        or bool(os.getenv("K_SERVICE"))
-        or os.getenv("USE_FIRESTORE", "false").lower() == "true"
-    ):
+    if settings.is_production_runtime or os.getenv("USE_FIRESTORE", "false").lower() == "true":
         return "firestore"
     return "local-json"
 

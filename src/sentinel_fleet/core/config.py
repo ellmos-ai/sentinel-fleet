@@ -44,5 +44,25 @@ class Settings(BaseModel):
     enable_cloud_trace: bool = Field(default_factory=lambda: os.getenv("ENABLE_CLOUD_TRACE", "false").lower() == "true")
     circuit_breaker_max_loops: int = Field(default_factory=lambda: int(os.getenv("MAX_CONSECUTIVE_LOOPS", "5")))
 
+    @property
+    def is_cloud_run(self) -> bool:
+        """True when running on Cloud Run, which injects K_SERVICE into every container.
+
+        Read live rather than captured at import: tests toggle the variable per case, and the
+        call sites (demo limits, cookie policy, storage backend, scheduler gate) must all see
+        the same answer at request time.
+        """
+        return bool(os.getenv("K_SERVICE"))
+
+    @property
+    def is_production_runtime(self) -> bool:
+        """The single production predicate for every call site.
+
+        Demo rate limits, workspace cookie policy and the storage backend all need "are we a
+        production deployment?". Keeping the definition here means a change in how production
+        is detected (a new platform variable, a staging tier) happens in exactly one place.
+        """
+        return self.environment == "production" or self.is_cloud_run
+
 
 settings = Settings()

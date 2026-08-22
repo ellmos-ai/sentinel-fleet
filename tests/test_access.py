@@ -144,14 +144,29 @@ async def test_exposed_demo_share_handle_cannot_be_replayed_as_a_workspace_cooki
 
 
 @pytest.mark.asyncio
-async def test_production_demo_workspace_cookie_is_secure_behind_tls_proxy(monkeypatch):
+@pytest.mark.parametrize(
+    ("environment", "cloud_run_service", "extra_headers"),
+    [
+        # Production behind a TLS terminator that forwards the client-facing scheme.
+        ("production", None, {"x-forwarded-proto": "https"}),
+        # Cloud Run detected via K_SERVICE: TLS is platform-guaranteed, no header needed.
+        ("development", "sentinel-fleet", {}),
+    ],
+)
+async def test_workspace_cookie_is_secure_wherever_tls_is_certain(
+    monkeypatch, environment, cloud_run_service, extra_headers
+):
     monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "environment", environment)
+    if cloud_run_service:
+        monkeypatch.setenv("K_SERVICE", cloud_run_service)
+    else:
+        monkeypatch.delenv("K_SERVICE", raising=False)
 
     async with AsyncClient(
         transport=ASGITransport(app=server.app), base_url="http://internal-cloud-run"
     ) as client:
-        response = await client.get("/api/access/me")
+        response = await client.get("/api/access/me", headers=extra_headers)
 
     set_cookie = response.headers["set-cookie"]
     assert set_cookie.startswith(f"{WORKSPACE_COOKIE}=")
@@ -161,21 +176,26 @@ async def test_production_demo_workspace_cookie_is_secure_behind_tls_proxy(monke
 
 
 @pytest.mark.asyncio
-async def test_cloud_run_workspace_cookie_is_secure_with_default_environment(monkeypatch):
+async def test_plain_http_production_workspace_cookie_stays_usable(monkeypatch):
+    """A production-flagged box without TLS must not mint a Secure cookie.
+
+    Browsers refuse Secure cookies set over plain http; forcing the flag there would silently
+    break workspace pinning and the per-workspace demo limits (every request would mint a
+    fresh workspace and only the global bucket would still apply).
+    """
     monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "environment", "development")
-    monkeypatch.setenv("K_SERVICE", "sentinel-fleet")
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.delenv("K_SERVICE", raising=False)
 
     async with AsyncClient(
-        transport=ASGITransport(app=server.app), base_url="http://internal-cloud-run"
+        transport=ASGITransport(app=server.app), base_url="http://selfhosted"
     ) as client:
         response = await client.get("/api/access/me")
 
     set_cookie = response.headers["set-cookie"]
     assert set_cookie.startswith(f"{WORKSPACE_COOKIE}=")
     assert "HttpOnly" in set_cookie
-    assert "SameSite=lax" in set_cookie
-    assert "Secure" in set_cookie
+    assert "Secure" not in set_cookie
 
 
 @pytest.mark.asyncio

@@ -126,9 +126,7 @@ _DEMO_EXTERNAL_PATHS = frozenset({
 
 
 def _public_demo_limits_active() -> bool:
-    return settings.demo_mode and (
-        settings.environment == "production" or bool(os.getenv("K_SERVICE"))
-    )
+    return settings.demo_mode and settings.is_production_runtime
 
 
 def _demo_usage_kind(request: Request) -> Optional[Literal["write", "external"]]:
@@ -144,16 +142,27 @@ def _demo_usage_kind(request: Request) -> Optional[Literal["write", "external"]]
     return "write" if path.startswith("/api/") else None
 
 
+def _effective_scheme(headers, scheme: str) -> str:
+    """The scheme as the client sees it.
+
+    Cloud Run's front end terminates TLS before the ASGI server, so the internal request URL
+    stays http while the terminator advertises the client-facing scheme in X-Forwarded-Proto.
+    Trust that header first and fall back to the transport scheme. Every scheme-dependent
+    decision (CSRF origin check, cookie Secure flag) goes through this one helper so the next
+    such feature cannot re-grow its own ad-hoc detection.
+    """
+    forwarded = (headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
+    if forwarded in {"http", "https"}:
+        return forwarded
+    return "https" if scheme in {"https", "wss"} else "http"
+
+
 def _same_origin(headers, scheme: str) -> bool:
     origin = (headers.get("origin") or "").rstrip("/")
     host = (headers.get("host") or "").strip()
     if not origin or not host:
         return False
-    http_scheme = "https" if scheme in {"https", "wss"} else "http"
-    forwarded = (headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
-    if forwarded in {"http", "https"}:
-        http_scheme = forwarded
-    return origin == f"{http_scheme}://{host}"
+    return origin == f"{_effective_scheme(headers, scheme)}://{host}"
 
 
 @asynccontextmanager
@@ -274,13 +283,14 @@ async def attach_request_principal(request: Request, call_next):
             WORKSPACE_COOKIE,
             workspace_token,
             httponly=True,
-            # Cloud Run terminates TLS before the ASGI server, so the internal request URL may
-            # still be http. Production workspace cookies must remain HTTPS-only regardless of
-            # proxy-header reconstruction.
+            # Cloud Run always serves clients over TLS, so the Secure guarantee stays hard
+            # there. Everywhere else the flag follows the scheme the client actually uses:
+            # forcing Secure on a production-flagged plain-HTTP topology would make browsers
+            # drop the cookie and silently disable workspace pinning and the per-workspace
+            # demo limits (only the global bucket would remain).
             secure=(
-                settings.environment == "production"
-                or bool(os.getenv("K_SERVICE"))
-                or request.url.scheme == "https"
+                settings.is_cloud_run
+                or _effective_scheme(request.headers, request.url.scheme) == "https"
             ),
             samesite="lax",
             max_age=60 * 60 * 24 * 30,
@@ -2914,7 +2924,7 @@ async def api_fire_routines(request: Request):
     if expected_token:
         if not hmac.compare_digest(request.headers.get("X-Fire-Token", ""), expected_token):
             raise HTTPException(status_code=401, detail="Missing or invalid X-Fire-Token header")
-    elif os.getenv("K_SERVICE"):
+    elif settings.is_cloud_run:
         raise HTTPException(
             status_code=503,
             detail="ROUTINES_FIRE_TOKEN is required on Cloud Run; scheduler trigger disabled.",
