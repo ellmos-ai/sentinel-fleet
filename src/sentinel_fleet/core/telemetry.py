@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 # Ring buffer bound: the dashboard only ever reads the tail, an unbounded list leaks.
 MAX_RETAINED_SPANS = 500
 
+# How many durable writes an organization may accumulate before its persisted tail is pruned
+# again. Pruning streams the organization's whole collection, so doing it on every write cost
+# hundreds of Firestore reads per tool call; the durable tail may overshoot
+# MAX_RETAINED_SPANS by at most this interval between prunes.
+PRUNE_INTERVAL_WRITES = 25
+
 # SentinelFleet currently serves one organization. Keeping the identifier explicit in every
 # span prevents "organization" from accidentally meaning "every tenant" when another
 # organization is added later.
@@ -161,6 +167,8 @@ class TelemetryService:
 
     def __init__(self, store: Optional[BaseStore[SpanRecord]] = None):
         self._store = store
+        # Writes per organization since that organization's durable tail was last pruned.
+        self._prune_pending: Dict[str, int] = {}
         self.spans: Deque[SpanRecord] = deque(maxlen=MAX_RETAINED_SPANS)
         if self._store is not None:
             restored = sorted(self._store.list_all(), key=lambda span: span.start_time)
@@ -288,7 +296,18 @@ class TelemetryService:
     def _persist(self, span: SpanRecord) -> None:
         if self._store is not None:
             self._store.put(span.span_id, span)
-            self._prune_persisted_organization(span.organization_id)
+            # Pruning lists the whole collection, and _persist fires from start_span, end_span
+            # AND add_event - against Firestore that was hundreds of document reads per tool
+            # call. Prune on the first write per organization (to adopt whatever an earlier
+            # instance left behind), then only every PRUNE_INTERVAL_WRITES writes: the durable
+            # tail may briefly overshoot MAX_RETAINED_SPANS by that interval, in exchange for
+            # ~1/25th of the read volume.
+            pending = self._prune_pending.get(span.organization_id)
+            if pending is None or pending + 1 >= PRUNE_INTERVAL_WRITES:
+                self._prune_persisted_organization(span.organization_id)
+                self._prune_pending[span.organization_id] = 0
+            else:
+                self._prune_pending[span.organization_id] = pending + 1
 
     def _prune_persisted_organization(self, organization_id: str) -> None:
         """Keep a durable per-tenant tail instead of an unbounded global collection.

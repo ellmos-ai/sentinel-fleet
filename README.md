@@ -183,7 +183,7 @@ is not drawn by hand: every node is a module under `src/sentinel_fleet` and ever
 import statement parsed out of it with `ast` on each request, laid out so an importer sits left of
 everything it imports. Hover a module to isolate what it wires into. The diagram cannot drift from
 the code, and the test suite checks every edge back against the importing module's source. The
-current source and public deployment both render **51 modules and 156 internal imports**, and
+current source and public deployment both render **51 modules and 157 internal imports**, and
 the suite pins these numbers against the derived circuit.
 
 ---
@@ -209,7 +209,7 @@ Open **`http://localhost:8080`** for the operator console, the chat and race tab
 python -m pytest tests/ -v
 ```
 
-Release baseline: **556 passed** on 2026-08-22. One upstream Starlette/httpx deprecation
+Release baseline: **559 passed** on 2026-08-22. One upstream Starlette/httpx deprecation
 warning remains visible; it does not fail the suite. Run the command above for the current
 count — it is the source of truth whenever this paragraph and the suite drift apart.
 

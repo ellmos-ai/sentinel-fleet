@@ -26,6 +26,11 @@ from sentinel_fleet.core.storage import BaseStore, get_store
 # only sees the tail, same trade-off that module already accepted.
 MAX_RETAINED_LINES = 1000
 
+# How many closed, subscriber-free RunLogs the bus keeps in memory for instant replay. Every
+# task ever run used to leave its RunLog in the bus for the life of the process - the same
+# unbounded growth the telemetry ring buffer bounds explicitly.
+MAX_SETTLED_RUNS = 256
+
 # Sentinel pushed into every subscriber queue when a run closes. Never a `(seq, str)` tuple, so
 # it can never collide with a real log entry and is always checked with `is`, not equality.
 RUN_CLOSED = object()
@@ -148,9 +153,26 @@ class RunLogBus:
         if self._store is not None:
             self._store.put(record.run_id, record)
 
+    def _evict_settled(self) -> None:
+        """Drop the oldest closed, subscriber-free runs beyond ``MAX_SETTLED_RUNS``.
+
+        Open runs and runs with a live subscriber always stay. With a store the bounded replay
+        is durable and ``_get_or_create`` reloads it on the next subscribe; without one, replay
+        for runs older than the newest ``MAX_SETTLED_RUNS`` is gone - the same trade-off the
+        in-memory span buffer already makes.
+        """
+        settled = [
+            run_id
+            for run_id, run in self._runs.items()
+            if run.closed and not run._subscribers
+        ]
+        for run_id in settled[: max(0, len(settled) - MAX_SETTLED_RUNS)]:
+            del self._runs[run_id]
+
     def _get_or_create(self, run_id: str) -> RunLog:
         run = self._runs.get(run_id)
         if run is None:
+            self._evict_settled()
             persisted = self._store.get(run_id) if self._store is not None else None
             run = RunLog(run_id=run_id, persisted=persisted, persist=self._persist)
             self._runs[run_id] = run

@@ -99,6 +99,7 @@ from sentinel_fleet.core.run_log import RUN_CLOSED, run_log_bus
 from sentinel_fleet.core.telemetry import telemetry
 from sentinel_fleet.domains.omniledger.models import InvoiceDocument, InvoiceStatus
 from sentinel_fleet.domains.omniledger.extractor import extractor
+from sentinel_fleet.domains.omniledger.local_text import extract_text_layer
 from sentinel_fleet.domains.omniledger.compliance import compliance_auditor
 from sentinel_fleet.domains.omniledger.dispute_loop import dispute_communicator
 from sentinel_fleet.domains.omniledger.letter import (
@@ -483,7 +484,12 @@ async def execute_via_gateway(
         agent=agent,
         tool_name=tool_name,
         tool_args=tool_args,
-        tool_func=tool_func
+        tool_func=tool_func,
+        # Without the requesting principal the gateway can only quarantine globally; with it,
+        # a scope violation locks the offending demo workspace instead of every visitor at
+        # once. The middleware binds the principal to the request context, so every caller of
+        # this wrapper is covered without threading the argument through seven call sites.
+        principal=current_request_principal(),
     )
 
 
@@ -3465,6 +3471,15 @@ async def api_process_invoice(
     # 2. Model Armor: inspect the real uploaded content; the canned attack is only a fallback
     scan_text: Optional[str] = upload_text
     scenario = "uploaded-document"
+    if scan_text is None and upload_bytes is not None:
+        # A binary upload carries text too: a PDF's text layer reaches the model exactly like a
+        # .txt body does, so it must pass the same gate - otherwise renaming the attack file
+        # from .txt to .pdf would walk it straight past Model Armor. extract_text_layer never
+        # raises; image-only files come back empty and stay the vision path's declared
+        # boundary (OCR is deliberately not bundled).
+        layered = extract_text_layer(filename, upload_bytes)
+        if layered.has_text_layer:
+            scan_text = layered.text
     if not scan_text and preset_type == "injection_attack":
         scan_text = DEMO_INJECTION_TEXT
         scenario = "predefined-demo-attack"
@@ -3537,15 +3552,26 @@ async def run_omniledger_workflow(
         })
 
     invoice = extraction.output
-    processed_invoices.put_scoped(
-        invoice,
-        principal,
-        encryption_scheme=(
-            "google-managed-encryption-at-rest"
-            if requested_backend() == "firestore"
-            else "development-unencrypted-filesystem"
-        ),
+    encryption_scheme = (
+        "google-managed-encryption-at-rest"
+        if requested_backend() == "firestore"
+        else "development-unencrypted-filesystem"
     )
+    for attempt in range(3):
+        try:
+            processed_invoices.put_scoped(invoice, principal, encryption_scheme=encryption_scheme)
+            break
+        except PermissionError:
+            # The extractor mints 32-bit ids (os.urandom(4)); a collision with a document some
+            # OTHER workspace already owns surfaces as PermissionError. This document is brand
+            # new, so a fresh id resolves the collision - without this the request died as an
+            # unhandled 500 with the task stuck IN_PROGRESS.
+            if attempt == 2:
+                task_master.update_task_state(
+                    task.task_id, TaskState.FAILED, error="document id collision"
+                )
+                raise
+            invoice.id = f"INV-{os.urandom(4).hex().upper()}"
 
     # 4. Compliance audit — executed by the compliance agent
     audit = await execute_via_gateway(

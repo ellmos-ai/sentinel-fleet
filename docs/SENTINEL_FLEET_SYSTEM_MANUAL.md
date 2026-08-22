@@ -178,7 +178,7 @@ The entire codebase is validated by a rigorous Pytest test suite covering unit l
 ```bash
 python -m pytest tests -v
 ```
-### Test Results: 556 passed (full suite, verified 2026-08-22)
+### Test Results: 559 passed (full suite, verified 2026-08-22)
 
 The suite covers the gateway (scoping, quarantine, HITL), model armor, the
 OmniLedger workflow, chat and race (including live-path failure modes), task
@@ -189,7 +189,7 @@ suite. Run it yourself to reproduce the stated count.
 
 The same generated architecture circuit is live at
 [`/blueprint`](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app/blueprint); the current source and
-public deployment both expose 51 modules and 156 internal imports.
+public deployment both expose 51 modules and 157 internal imports.
 
 ---
 
@@ -309,3 +309,10 @@ path as an alternative to the Gemini chat backend. Public-demo administration re
 non-demo administration is available only through a verified IAP principal with the relevant
 capability. Chat sessions are private/shareable/exportable but do not yet have a self-service
 delete, retention or legal-hold lifecycle.
+
+Two further declared boundaries from the 2026-08-22 security review: gateway scope violations
+raise and are logged/traced, but only the invoice workflow path additionally quarantines the
+offending demo workspace — a fleet-wide automatic quarantine policy is a design decision left
+open on purpose. And the very first parallel requests of a cookie-less browser session may mint
+competing workspace tokens; the browser settles on one, and the loser's (empty) workspace simply
+expires with the demo data.

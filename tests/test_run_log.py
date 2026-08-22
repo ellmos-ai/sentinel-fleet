@@ -187,3 +187,36 @@ def test_a_new_bus_replays_a_run_from_the_durable_store(tmp_path):
     assert lines[0].endswith("step survived")
     assert last_seq == 1
     assert closed is True
+
+
+def test_bus_evicts_oldest_settled_runs_but_keeps_open_and_subscribed_ones():
+    """Every task ever run used to leave its RunLog in the bus forever.
+
+    Closed, subscriber-free runs beyond MAX_SETTLED_RUNS are dropped (their bounded replay is
+    the store's job); open runs and runs with a live subscriber must survive any eviction.
+    """
+    import asyncio
+
+    from sentinel_fleet.core.run_log import MAX_SETTLED_RUNS, RunLogBus
+
+    bus = RunLogBus()
+
+    async def scenario():
+        bus.emit("run-open", "still working")
+        queue = bus.subscribe("run-subscribed")
+        bus.close("run-subscribed")
+
+        overflow = MAX_SETTLED_RUNS + 40
+        for i in range(overflow):
+            run_id = f"run-{i}"
+            bus.emit(run_id, "done")
+            bus.close(run_id)
+        bus.emit("run-trigger", "forces eviction on create")
+
+        assert len(bus._runs) <= MAX_SETTLED_RUNS + 3, "settled runs must be bounded"
+        assert "run-open" in bus._runs, "an open run must never be evicted"
+        assert "run-subscribed" in bus._runs, "a subscribed run must never be evicted"
+        assert "run-0" not in bus._runs, "the oldest settled run should be gone"
+        bus.unsubscribe("run-subscribed", queue)
+
+    asyncio.run(scenario())

@@ -1273,7 +1273,10 @@
                 <svg class="icon"><use href="#i-lock"/></svg> Permissions
               </button>
               {% if p.versions|length > 1 %}
-              <button class="btn btn-sm btn-reject" {% if admin_mutations_enabled %}onclick="deletePromptVersion({{ p.id|tojson }}, 'pcopy-{{ loop.index }}')"{% else %}disabled title="Authenticated administration is not configured"{% endif %}>
+              {# Single-quoted like the deletePrompt button below: tojson escapes <>&' but not
+                 the double quotes of the JSON string itself, which would end a double-quoted
+                 attribute early. #}
+              <button class="btn btn-sm btn-reject" {% if admin_mutations_enabled %}onclick='deletePromptVersion({{ p.id|tojson }}, "pcopy-{{ loop.index }}")'{% else %}disabled title="Authenticated administration is not configured"{% endif %}>
                 Delete version
               </button>
               {% endif %}

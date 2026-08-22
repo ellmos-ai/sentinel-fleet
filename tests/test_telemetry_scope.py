@@ -8,7 +8,12 @@ from sentinel_fleet.core.access import (
     reset_request_principal,
 )
 from sentinel_fleet.core.storage import LocalJsonStore
-from sentinel_fleet.core.telemetry import MAX_RETAINED_SPANS, SpanRecord, TelemetryService
+from sentinel_fleet.core.telemetry import (
+    MAX_RETAINED_SPANS,
+    PRUNE_INTERVAL_WRITES,
+    SpanRecord,
+    TelemetryService,
+)
 from sentinel_fleet.domains.omniledger.extractor import MultimodalExtractor
 from sentinel_fleet.domains.omniledger.local_text import LocalTextResult
 
@@ -188,10 +193,12 @@ def test_durable_retention_is_bounded_per_organization_without_hiding_quiet_tena
         "quiet-visible"
     ]
     busy_rows = service.get_recent_spans(MAX_RETAINED_SPANS + 10, principal=busy)
-    assert len(busy_rows) == MAX_RETAINED_SPANS
+    # The durable prune is throttled (it streams the whole collection, so it no longer runs on
+    # every write): between prunes the tail may overshoot by at most one prune interval.
+    assert MAX_RETAINED_SPANS <= len(busy_rows) <= MAX_RETAINED_SPANS + PRUNE_INTERVAL_WRITES
     retained_names = {row.name for row in busy_rows}
     assert "busy-502" in retained_names
     # Windows wall-clock timestamps have millisecond-sized ties, so the exact three rows evicted
     # from the oldest tied group are intentionally unspecified.
     assert len({f"busy-{index}" for index in range(10)} - retained_names) >= 1
-    assert store.count() == MAX_RETAINED_SPANS + 1
+    assert store.count() <= MAX_RETAINED_SPANS + PRUNE_INTERVAL_WRITES + 1

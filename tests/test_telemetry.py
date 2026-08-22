@@ -66,3 +66,47 @@ def test_dashboard_spans_survive_a_service_restart(tmp_path):
     assert restored[0].events[0]["name"] == "evidence"
     assert restored[0].end_time is not None
     assert second.get_persisted_span_total() == 1
+
+
+def test_durable_prune_is_throttled_but_still_bounds_the_tail(tmp_path, monkeypatch):
+    """Pruning used to stream the whole collection on EVERY persisted write.
+
+    _persist fires from start_span, end_span and add_event, so against Firestore that was
+    hundreds of document reads per tool call. The prune now runs on the first write per
+    organization and then only every PRUNE_INTERVAL_WRITES writes; between prunes the durable
+    tail may overshoot MAX_RETAINED_SPANS by at most that interval.
+    """
+    from sentinel_fleet.core import telemetry as telemetry_module
+    from sentinel_fleet.core.storage import LocalJsonStore
+    from sentinel_fleet.core.telemetry import PRUNE_INTERVAL_WRITES, SpanRecord
+
+    class CountingStore(LocalJsonStore):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.list_all_calls = 0
+
+        def list_all(self):
+            self.list_all_calls += 1
+            return super().list_all()
+
+    monkeypatch.setattr(telemetry_module, "MAX_RETAINED_SPANS", 5)
+    store = CountingStore(
+        "telemetry_spans", SpanRecord, persistence_path=str(tmp_path / "spans.json")
+    )
+    service = TelemetryService(store=store)
+    store.list_all_calls = 0  # restore-on-init is not the behavior under test
+
+    persists = 0
+    for i in range(30):
+        span = service.start_span(f"tool_call:throttle_{i}", "agent:test")
+        service.end_span(span)
+        persists += 2
+
+    expected_prunes = 1 + (persists - 1) // PRUNE_INTERVAL_WRITES
+    assert store.list_all_calls <= expected_prunes + 1, (
+        f"{store.list_all_calls} collection streams for {persists} writes - "
+        "the prune is not throttled"
+    )
+    assert store.count() <= 5 + PRUNE_INTERVAL_WRITES, (
+        "the durable tail must stay bounded by MAX_RETAINED_SPANS plus one prune interval"
+    )
