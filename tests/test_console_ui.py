@@ -683,7 +683,6 @@ async def test_the_fleet_tab_leads_with_the_throwaway_run():
     assert fleet.index('id="fleet-queue"') < fleet.index('id="fleet-tasks"') < fleet.index('id="fleet-directory"'), \
         "one-off queue first, reusable tasks under it, agents last"
 
-    queue_head = fleet.split('id="fleet-queue"')[1].split("</div>")[2]
     assert "Queue a one-off task" in fleet.split('id="fleet-queue"')[1].split('id="fleet-tasks"')[0], \
         "the one-off button belongs beside the rows it produces"
 

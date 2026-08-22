@@ -146,9 +146,9 @@ feed one `explain_binding()` decision function. Its R1–R7 verdict is used by t
 for the target user or an administrator, and `deny` refuses. `process` remains visible as an
 optional extension point, not as a required runtime component. Task Templates define and run
 multi-step work without it. An organization only needs to install a Process Registry when it
-wants a durable business-process layer spanning multiple templates or runs. That registry plugs
+wants one durable business-process object to span multiple templates or runs. That registry plugs
 in here with stable process IDs, version and status, owner/organization/department scope, links
-to templates and runs, binding validation, runtime enforcement and audit evidence. Until then,
+to templates and runs, policy-binding validation, runtime enforcement and audit evidence. Until then,
 the API rejects process bindings rather than pretending to enforce them.
 
 In `DEMO_MODE=true`, `?user=` and legacy `?viewer=` are ignored for display, reads and writes;
@@ -183,7 +183,8 @@ is not drawn by hand: every node is a module under `src/sentinel_fleet` and ever
 import statement parsed out of it with `ast` on each request, laid out so an importer sits left of
 everything it imports. Hover a module to isolate what it wires into. The diagram cannot drift from
 the code, and the test suite checks every edge back against the importing module's source. The
-current source and public deployment both render **51 modules and 158 internal imports**.
+current source and public deployment both render **51 modules and 156 internal imports**, and
+the suite pins these numbers against the derived circuit.
 
 ---
 
@@ -208,8 +209,9 @@ Open **`http://localhost:8080`** for the operator console, the chat and race tab
 python -m pytest tests/ -v
 ```
 
-Release baseline: **553 passed** on 2026-08-21. One upstream Starlette/httpx deprecation
-warning remains visible; it does not fail the suite.
+Release baseline: **556 passed** on 2026-08-22. One upstream Starlette/httpx deprecation
+warning remains visible; it does not fail the suite. Run the command above for the current
+count — it is the source of truth whenever this paragraph and the suite drift apart.
 
 ### 3. Reset the demo data
 

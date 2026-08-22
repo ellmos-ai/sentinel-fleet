@@ -19,7 +19,7 @@ import os
 import re
 from typing import Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sentinel_fleet.core.config import settings
 
 # Suffixes the local path can read at all. Images and scanned PDFs carry pixels, not text; they

@@ -1,7 +1,7 @@
 """Agent identity and role management."""
 
 from enum import Enum
-from typing import List, Set
+from typing import Set
 from pydantic import BaseModel, Field
 
 

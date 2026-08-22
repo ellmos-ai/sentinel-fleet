@@ -1,9 +1,6 @@
 """Roshambo Multi-Agent Swarm Conductor."""
 
-import asyncio
 from typing import Any, Dict, List
-from sentinel_fleet.core.gateway import gateway
-from sentinel_fleet.conductor.lifecycle import lifecycle_manager
 from sentinel_fleet.core.telemetry import telemetry
 
 

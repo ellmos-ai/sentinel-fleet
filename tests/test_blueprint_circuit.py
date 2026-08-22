@@ -187,3 +187,28 @@ async def test_the_blueprint_says_which_view_is_the_architecture():
     describe = app_js.split("const describe = (node)")[1].split("\n  };")[0]
     assert "textContent" in describe and "innerHTML" not in describe, \
         "a module docstring is source text and must not be parsed as markup"
+
+
+def test_documented_module_and_import_counts_match_the_circuit():
+    """README and system manual advertise concrete counts; hold them to the derived truth.
+
+    The blueprint's selling point is that it cannot drift from the code. Prose that quotes
+    absolute numbers CAN drift, so this test re-derives the counts and fails the moment either
+    document goes stale.
+    """
+    import re
+
+    circuit = build_circuit()
+    actual = (circuit["module_count"], circuit["wire_count"])
+
+    repo_root = Path(__file__).resolve().parents[1]
+    claim_pattern = re.compile(r"(\d+) modules and (\d+) internal imports")
+    for doc in ("README.md", "docs/SENTINEL_FLEET_SYSTEM_MANUAL.md"):
+        text = (repo_root / doc).read_text(encoding="utf-8")
+        claims = claim_pattern.findall(text)
+        assert claims, f"{doc} no longer states the module/import counts"
+        for modules, imports in claims:
+            assert (int(modules), int(imports)) == actual, (
+                f"{doc} claims {modules} modules / {imports} internal imports, "
+                f"but build_circuit() derives {actual[0]} / {actual[1]}"
+            )

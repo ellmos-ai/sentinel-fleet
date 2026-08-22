@@ -1,8 +1,8 @@
 """GARDENER RAG: Organic Document & Context Search."""
 
 import re
-from typing import List, Dict, Any
-from pydantic import BaseModel, Field
+from typing import List
+from pydantic import BaseModel
 
 
 class DocumentChunk(BaseModel):

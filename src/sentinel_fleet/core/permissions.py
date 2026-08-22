@@ -1,8 +1,8 @@
 """Permission registry and access evaluator based on lock-permissions-v1."""
 
 from enum import Enum
-from typing import Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import List, Optional
+from pydantic import BaseModel
 
 
 class PermissionAction(str, Enum):

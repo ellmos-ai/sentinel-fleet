@@ -14,7 +14,7 @@ from sentinel_fleet.chat.service import chat_service
 from sentinel_fleet.core.run_log import run_log_bus
 from sentinel_fleet.core.telemetry import telemetry
 from sentinel_fleet.uas import routines
-from sentinel_fleet.uas.task_master import TaskState, task_master
+from sentinel_fleet.uas.task_master import TaskState
 from sentinel_fleet.uas.task_templates import Step, task_template_registry
 
 

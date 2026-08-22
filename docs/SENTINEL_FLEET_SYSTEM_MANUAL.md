@@ -178,7 +178,7 @@ The entire codebase is validated by a rigorous Pytest test suite covering unit l
 ```bash
 python -m pytest tests -v
 ```
-### Test Results: 553 passed (full suite, verified 2026-08-21)
+### Test Results: 556 passed (full suite, verified 2026-08-22)
 
 The suite covers the gateway (scoping, quarantine, HITL), model armor, the
 OmniLedger workflow, chat and race (including live-path failure modes), task
@@ -189,7 +189,7 @@ suite. Run it yourself to reproduce the stated count.
 
 The same generated architecture circuit is live at
 [`/blueprint`](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app/blueprint); the current source and
-public deployment both expose 51 modules and 158 internal imports.
+public deployment both expose 51 modules and 156 internal imports.
 
 ---
 
