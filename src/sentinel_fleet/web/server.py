@@ -3476,9 +3476,19 @@ async def api_process_invoice(
         # .txt body does, so it must pass the same gate - otherwise renaming the attack file
         # from .txt to .pdf would walk it straight past Model Armor. extract_text_layer never
         # raises; image-only files come back empty and stay the vision path's declared
-        # boundary (OCR is deliberately not bundled).
-        layered = extract_text_layer(filename, upload_bytes)
-        if layered.has_text_layer:
+        # boundary (OCR is deliberately not bundled). Same threading idiom as the extractor:
+        # pypdf has pathological inputs, and a crafted upload must not stall the event loop -
+        # on timeout we proceed as "no text layer", which stays fail-closed towards the model
+        # because the extractor's own screen runs under the same timeout and keeps
+        # UNSCREENED documents on the local path.
+        try:
+            layered = await asyncio.wait_for(
+                asyncio.to_thread(extract_text_layer, filename, upload_bytes),
+                timeout=8.0,
+            )
+        except asyncio.TimeoutError:
+            layered = None
+        if layered is not None and layered.has_text_layer:
             scan_text = layered.text
     if not scan_text and preset_type == "injection_attack":
         scan_text = DEMO_INJECTION_TEXT
