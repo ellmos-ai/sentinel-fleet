@@ -158,9 +158,15 @@ async def test_binding_targets_and_scope_metadata_are_validated_server_side(clie
     })).json()["policy"]
     endpoint = f"/api/policies/{created['policy_id']}/bindings"
 
-    assert (await client.post(endpoint, data={
+    process_rejection = await client.post(endpoint, data={
         "target_kind": "process", "target_id": "process:missing", "scope_level": "user",
-    })).status_code == 422
+    })
+    assert process_rejection.status_code == 422
+    # The extension-point policy is stated in prose in several places (README, manual, UI);
+    # this pins the API's own wording so it cannot silently diverge from them.
+    assert process_rejection.json()["detail"] == (
+        "Process is an optional extension point; no Process Registry is installed."
+    )
     assert (await client.post(endpoint, data={
         "target_kind": "agent", "target_id": "agent:missing", "scope_level": "user",
     })).status_code == 404

@@ -21,6 +21,13 @@ _reports/
 _media_build/
 _analysis/
 
+# Marketing/media assets the running app never serves. docs/media holds the local demo-video
+# masters (hundreds of MB, gitignored) - and because this .gcloudignore exists, gcloud does NOT
+# fall back to .gitignore, so without these lines every `gcloud run deploy --source .` would
+# upload them and bake them into the image.
+docs/media/
+youtube-play-thumb.png
+
 __pycache__/
 *.py[cod]
 .pytest_cache/
