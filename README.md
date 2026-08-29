@@ -12,11 +12,11 @@
 > Built for the **Google Cloud All Things Agentic Hackathon** (Track 3: The Fortified Enterprise Fleet & Track 1: The Taskmaster).
 
 **Try it now:** [Live Cloud Run demo](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app) ·
-[3:20 guided demo video](https://youtu.be/Ab5kHsHo2fQ) ·
+[3:35 guided demo video](https://youtu.be/84CV5cdGFUk) ·
 [Devpost project](https://devpost.com/software/sentinelfleet-o3v56y) ·
 [live architecture blueprint](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app/blueprint)
 
-[![Watch the 3:20 SentinelFleet guided demo](youtube-play-thumb.png)](https://youtu.be/Ab5kHsHo2fQ)
+[![Watch the 3:35 SentinelFleet guided demo](youtube-play-thumb.png)](https://youtu.be/84CV5cdGFUk)
 
 ---
 
@@ -264,7 +264,7 @@ Scheduler job carries an explicit `{}`. A Dockerfile that copies only `pyproject
 `pip install .` — sources first. Newest-first lists sliced with `[-N:]` silently show the oldest
 rows; we hit it twice in sibling functions and now test order, not presence.
 
-**Use cases the 3:20 video does not show.** Chat and correction-letter export to Markdown, HTML
+**Use cases the 3:35 video does not show.** Chat and correction-letter export to Markdown, HTML
 and PDF with per-turn provenance; bounded research steps (named fetches through the pinned web
 reader) inside a chain; the Governance board with the 5-target × 4-scope binding matrix and
 its ticket-forwarding ledger; the DSGVO contact hub with S1–S4 handling and tombstone erasure;
