@@ -34,6 +34,14 @@ It solves the two largest challenges of enterprise agent adoption:
 
 ## 🏛️ The 4 Pillars Architecture
 
+![SentinelFleet architecture and Google Cloud deployment](docs/architecture-overview.png)
+
+*One glance: the operator's browser talks to a single **Cloud Run** service; inside it every request
+crosses the zero-trust gateway before it reaches the five pillars; **Gemini 3.5 Flash** (Google GenAI
+SDK), **Firestore**, **Cloud Scheduler**, **Secret Manager**, **Cloud Storage** and **Cloud Trace** are the
+Google Cloud services around it. The live [`/blueprint`](https://sentinel-fleet-kcdkv76yqq-ey.a.run.app/blueprint)
+view complements this hand-drawn overview with the code-derived module circuit.*
+
 SentinelFleet is architected across four modular pillars:
 
 ```
@@ -49,6 +57,35 @@ SentinelFleet is architected across four modular pillars:
 │ • OpenTelemetry Spans    │ • Firestore Persistence  │ • Circuit Blueprint Map │ • DSGVO Contacts │
 └──────────────────────────┴──────────────────────────┴─────────────────────────┴──────────────────┘
 ```
+
+---
+
+## 🗂️ Repository layout
+
+```
+src/sentinel_fleet/
+  core/        gateway.py (zero-trust tool gateway) · permissions.py · policies.py · policy_catalog.py
+               model_armor.py · privacy_screen.py · privacy_contacts.py · identity.py · users.py · access.py
+               storage.py (Firestore, local JSON in development) · artifacts.py (Cloud Storage results)
+               telemetry.py (OpenTelemetry → Cloud Trace) · chain_runner.py · demo_guard.py
+               web_reader.py · research.py · skills.py · prompts.py · config.py
+  chat/        service.py · backends.py (Gemini via google-genai) · models.py · export.py
+  conductor/   router.py (adaptive model routing) · swarm.py · lifecycle.py
+  memory/      bank.py · gardener_rag.py · hooker.py
+  uas/         task_master.py · task_templates.py · routines.py (Cloud Scheduler target) · ticket_master.py (HITL)
+  domains/omniledger/   extractor.py · compliance.py · reconciliation.py · dispute_loop.py · letter.py
+  web/         server.py (FastAPI app + API) · governance.py · blueprint_graph.py · templates/ · static/
+skills/        32 bundled enterprise skills (component-v1 SKILL.md), grouped by pillar:
+               control · memory · uas · domain · assist · dev · web · utilities · infrastructure
+tests/         47 pytest modules — gateway permissions, model armor, races, routines, governance,
+               blueprint circuit, console UI, i18n, demo guard, document persistence, …
+docs/          SENTINEL_FLEET_SYSTEM_MANUAL.md · architecture-overview.png · architecture.png (circuit snapshot)
+               ai-act-note.md · media/
+app.py · Dockerfile · pyproject.toml · requirements.lock · stack.v2.json (stack manifest) · assets/ · mobile_icons/
+```
+
+Start reading at `web/server.py` (every route), then `core/gateway.py` (every tool call) and
+`uas/routines.py` (every scheduled run) — those three files are where the claims above are enforced.
 
 ---
 
@@ -185,6 +222,54 @@ everything it imports. Hover a module to isolate what it wires into. The diagram
 the code, and the test suite checks every edge back against the importing module's source. The
 current source and public deployment both render **51 modules and 157 internal imports**, and
 the suite pins these numbers against the derived circuit.
+
+---
+
+## 🏆 What we are proud of — insights, and use cases not in the video
+
+**Governance sits on the path, not beside it.** Chat turns, document extraction, task templates
+and model races all take one route: `model_armor.inspect_prompt` → `gateway.execute_tool_call`
+under a registered agent identity with its least-privilege tool scope, PII sanitisation and a
+fail-closed permission gate. There is no second, unguarded way to reach a model, and the suite
+pins that unknown tools are denied.
+
+**The architecture diagram cannot lie.** `/blueprint` parses the real import graph with `ast` on
+every request, and the tests check every drawn edge back against the importing module — an
+invented edge fails the build. The overview image above is the hand-drawn map; the circuit is
+the ground truth.
+
+**Honesty as a feature.** Without `GEMINI_API_KEY` the console answers with the request it
+actually assembled, labelled `demo`; the race judge refuses to score demo lanes rather than
+invent a quality number.
+
+**Race latencies measure models, not locks.** Each race lane runs under its own agent identity
+(`agent:race-lane-1..4`); shared identities would serialise behind the gateway's per-agent lock
+and the stopwatch would measure the queue.
+
+**Recurring agent work without a second object model.** A routine is a detachable binding on an
+ordinary task template; type and status are derived on every read, never stored. Cloud
+Scheduler wakes the scale-to-zero service through one idempotent `/api/routines/fire`, which
+applies each binding's `skip`/`catch_up` policy to whatever was missed while scaled down.
+
+**Public demo that one visitor cannot break.** Model-Armor quarantine is scoped to the
+originating browser workspace in the public build; rolling per-workspace and service-wide
+ceilings bound writes, model and web workflows, and cannot be bypassed by rotating the cookie.
+
+**Privacy by construction.** Upload bytes are request-scoped; only GREEN/YELLOW-screened
+documents reach Gemini; deletions leave non-content tombstones; a legal hold blocks erasure;
+every redirect hop of the web reader is revalidated and pinned against DNS rebinding.
+
+**Insights that cost us time.** Cloud Run's front end answers 411 to body-less POSTs, so the
+Scheduler job carries an explicit `{}`. A Dockerfile that copies only `pyproject.toml` cannot
+`pip install .` — sources first. Newest-first lists sliced with `[-N:]` silently show the oldest
+rows; we hit it twice in sibling functions and now test order, not presence.
+
+**Use cases the 3:20 video does not show.** Chat and correction-letter export to Markdown, HTML
+and PDF with per-turn provenance; bounded research steps (named fetches through the pinned web
+reader) inside a chain; the Governance board with the 5-target × 4-scope binding matrix and
+its ticket-forwarding ledger; the DSGVO contact hub with S1–S4 handling and tombstone erasure;
+and bundled skill definitions for audio transcription, calendar scheduling, bilingual sync and
+IMAP intake that the fleet can select into a prompt today.
 
 ---
 
