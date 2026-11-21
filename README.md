@@ -1,3 +1,9 @@
+# Archived public demo (25 October 2026)
+
+The hackathon is over. The public demo is being retired to a static archive with fictional examples and local simulations. Live agents, model calls and external actions are not part of the archive. See [archive/README.md](archive/README.md) for the deploy contract. Provider-side retirement is verified separately in T-20261025-940796888; source changes alone do not prove a deployed shutdown. The historical application source below is retained for reproducibility and must not be redeployed as a routine update.
+
+## Historical project documentation
+
 <img src="assets/banner.svg" width="100%" alt="SentinelFleet — Fortified Enterprise Agent Platform">
 
 # SentinelFleet — Fortified Enterprise Agent Platform & OmniLedger Taskmaster

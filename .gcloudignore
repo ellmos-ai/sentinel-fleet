@@ -44,3 +44,6 @@ credentials*.json
 
 .vscode/
 .idea/
+
+# Private lifecycle metadata must never enter the upload.
+LOCK*.txt
